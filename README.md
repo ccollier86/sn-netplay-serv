@@ -14,9 +14,17 @@ Implemented:
 - `GET /v1/rooms/{invite_code}/status`
 - `GET /v1/ws?inviteCode=AB23-CD&role=host`
 - `GET /v1/ws?inviteCode=AB23-CD&role=guest`
+- `GET /internal/metrics`
+- `GET /internal/rooms`
 - HTTP-backed license-authority client
 - server-side netplay entitlement authorization through the metadata service
 - fakeable `LicenseAuthority` trait
+- configurable per-action rate limits
+- authenticated internal admin endpoints
+- active-room observability snapshots
+- production JSON logging option
+- Docker/Coolify deployment artifacts
+- GHCR build/push scripts
 - in-memory room registry
 - room WebSocket upgrade path
 - host socket attachment to Player 1
@@ -39,7 +47,7 @@ Not implemented yet:
 
 - ping/latency tracking
 - resync protocol
-- production deployment config
+- multi-instance shared room backend
 
 ## Required Environment
 
@@ -47,11 +55,38 @@ Not implemented yet:
 SB_NETPLAY_BIND_ADDR=127.0.0.1:8077
 SB_NETPLAY_DESKTOP_AUTHORIZE_URL=https://assets.shadowboy.app/internal/desktop/netplay/authorize
 SB_NETPLAY_LICENSE_INTERNAL_SECRET=<server-to-server-secret>
+SB_NETPLAY_ADMIN_TOKEN=<long-random-operator-token>
+SB_NETPLAY_LOG_FORMAT=json
+SB_NETPLAY_TRUST_PROXY_HEADERS=true
+SB_NETPLAY_RATE_CREATE_ROOM_PER_MINUTE=12
+SB_NETPLAY_RATE_WS_JOIN_PER_MINUTE=30
+SB_NETPLAY_RATE_ROOM_STATUS_PER_MINUTE=120
 ```
 
 `SB_NETPLAY_BIND_ADDR` is optional and defaults to `127.0.0.1:8077`.
 `SB_NETPLAY_LICENSE_VERIFY_URL` is still accepted as a legacy fallback for the
 authorization URL.
+
+For Coolify, set `SB_NETPLAY_BIND_ADDR=0.0.0.0:8077` and let Coolify own the
+public reverse proxy and TLS certificate. Deploy with
+`docker-compose.coolify.yml`, using an image from GHCR. See `deploy/coolify.md`
+and `deploy/ghcr.md`.
+
+## Remote Operations
+
+The server does not need a database or object storage for the MVP. It is a
+stateless relay with in-memory rooms. Run a single instance until we add sticky
+room routing or shared state.
+
+Remote debugging endpoints:
+
+```bash
+curl -fsS https://netplay.shadowboy.app/health
+curl -fsS -H "Authorization: Bearer $SB_NETPLAY_ADMIN_TOKEN" \
+  https://netplay.shadowboy.app/internal/metrics
+curl -fsS -H "Authorization: Bearer $SB_NETPLAY_ADMIN_TOKEN" \
+  https://netplay.shadowboy.app/internal/rooms
+```
 
 ## Desktop Authorization
 

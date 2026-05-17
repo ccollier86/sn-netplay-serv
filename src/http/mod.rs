@@ -4,10 +4,13 @@
 //! to stable responses. They do not contain room rules or license verification
 //! logic.
 
+mod admin_auth;
+mod client_identity;
 mod desktop_auth_headers;
 mod errors;
 mod routes;
 mod services;
 
+pub use admin_auth::AdminAuthorizer;
 pub use routes::build_router;
 pub use services::AppServices;

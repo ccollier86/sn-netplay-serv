@@ -1,0 +1,21 @@
+[Unit]
+Description=ShadowBoy Netplay Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shadowboy
+Group=shadowboy
+EnvironmentFile=/etc/shadowboy/netplay.env
+ExecStart=/usr/local/bin/sb-netplay-serv
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/shadowboy
+
+[Install]
+WantedBy=multi-user.target

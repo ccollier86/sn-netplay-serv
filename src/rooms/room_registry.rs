@@ -10,7 +10,7 @@ use crate::protocol::{
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, NetplayRoom, PlayerIndex, RoomError, RoomEvent,
-    RoomView,
+    RoomRegistrySnapshot, RoomView,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -104,6 +104,9 @@ pub trait RoomRegistry: Send + Sync {
 
     /// Returns a serializable room view for an invite code.
     async fn room_view(&self, invite_code: InviteCode) -> Result<RoomView, RoomError>;
+
+    /// Returns a point-in-time snapshot of active rooms.
+    async fn snapshot(&self) -> RoomRegistrySnapshot;
 }
 
 /// Thread-safe in-memory room registry.
@@ -405,6 +408,19 @@ impl RoomRegistry for InMemoryRoomRegistry {
             .ok_or(RoomError::NotFound)?;
 
         Ok(stored_room.room.view())
+    }
+
+    async fn snapshot(&self) -> RoomRegistrySnapshot {
+        let rooms = self.invite_codes.read().await;
+        let views = rooms
+            .values()
+            .map(|stored_room| stored_room.room.view())
+            .collect::<Vec<_>>();
+
+        RoomRegistrySnapshot {
+            active_room_count: views.len(),
+            rooms: views,
+        }
     }
 }
 

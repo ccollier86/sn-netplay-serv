@@ -1,0 +1,31 @@
+# documentation: https://github.com/ccollier86/sb-desktop
+# slogan: Invite-code netplay relay for ShadowBoy Desktop.
+# tags: rust,axum,websocket,netplay,shadowboy
+# port: 8077
+
+services:
+  netplay:
+    image: ${SB_NETPLAY_IMAGE:-ghcr.io/ccollier86/sb-netplay-serv:latest}
+    restart: unless-stopped
+    environment:
+      - SERVICE_URL_NETPLAY
+      - SERVICE_FQDN_NETPLAY
+      - SERVICE_URL_NETPLAY_8077
+      - SB_NETPLAY_BIND_ADDR=0.0.0.0:8077
+      - SB_NETPLAY_DESKTOP_AUTHORIZE_URL=${SB_NETPLAY_DESKTOP_AUTHORIZE_URL:?set-in-coolify}
+      - SB_NETPLAY_LICENSE_INTERNAL_SECRET=${SB_NETPLAY_LICENSE_INTERNAL_SECRET:?set-in-coolify}
+      - SB_NETPLAY_ADMIN_TOKEN=${SB_NETPLAY_ADMIN_TOKEN:?set-in-coolify}
+      - SB_NETPLAY_LOG_FORMAT=${SB_NETPLAY_LOG_FORMAT:-json}
+      - SB_NETPLAY_TRUST_PROXY_HEADERS=${SB_NETPLAY_TRUST_PROXY_HEADERS:-true}
+      - SB_NETPLAY_RATE_CREATE_ROOM_PER_MINUTE=${SB_NETPLAY_RATE_CREATE_ROOM_PER_MINUTE:-12}
+      - SB_NETPLAY_RATE_WS_JOIN_PER_MINUTE=${SB_NETPLAY_RATE_WS_JOIN_PER_MINUTE:-30}
+      - SB_NETPLAY_RATE_ROOM_STATUS_PER_MINUTE=${SB_NETPLAY_RATE_ROOM_STATUS_PER_MINUTE:-120}
+      - RUST_LOG=${RUST_LOG:-sb_netplay_serv=info,tower_http=info}
+    expose:
+      - "8077"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8077/health >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s

@@ -12,6 +12,7 @@ mod room;
 mod room_event;
 mod room_expiration_task;
 mod room_registry;
+mod room_registry_snapshot;
 
 pub use errors::RoomError;
 pub use ids::{ConnectionId, PlayerIndex, RoomId};
@@ -21,3 +22,4 @@ pub use room::{NetplayRoom, RoomStatus, RoomView};
 pub use room_event::RoomEvent;
 pub use room_expiration_task::spawn_room_expiration_task;
 pub use room_registry::{InMemoryRoomRegistry, RoomEventReceiver, RoomJoin, RoomRegistry};
+pub use room_registry_snapshot::RoomRegistrySnapshot;

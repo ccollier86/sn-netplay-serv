@@ -51,6 +51,7 @@ pub async fn handle_websocket_session(
             return;
         }
     };
+    services.metrics.record_websocket_joined();
     let (mut sender, mut receiver) = socket.split();
 
     if send_server_message(

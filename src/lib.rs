@@ -8,6 +8,8 @@ pub mod auth;
 pub mod config;
 pub mod http;
 pub mod limits;
+pub mod observability;
 pub mod protocol;
+pub mod rate_limit;
 pub mod rooms;
 pub mod transport;
