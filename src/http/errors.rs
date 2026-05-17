@@ -4,6 +4,7 @@
 //! exposing raw tokens, secrets, or internal transport details.
 
 use crate::auth::AuthError;
+use crate::protocol::{ProtocolVersionError, SessionDescriptorError};
 use crate::rate_limit::RateLimitExceeded;
 use crate::rooms::RoomError;
 use axum::Json;
@@ -20,6 +21,13 @@ pub enum HttpError {
     Room(RoomError),
     /// Request exceeded a configured rate limit.
     RateLimited(RateLimitExceeded),
+    /// Desktop supplied malformed or unsupported request data.
+    InvalidRequest {
+        /// Stable error code.
+        code: &'static str,
+        /// Safe user-facing message.
+        message: &'static str,
+    },
     /// Internal admin endpoints were not enabled.
     AdminDisabled,
     /// Internal admin endpoint bearer token was missing or wrong.
@@ -41,6 +49,24 @@ impl From<RoomError> for HttpError {
 impl From<RateLimitExceeded> for HttpError {
     fn from(value: RateLimitExceeded) -> Self {
         Self::RateLimited(value)
+    }
+}
+
+impl From<ProtocolVersionError> for HttpError {
+    fn from(_value: ProtocolVersionError) -> Self {
+        Self::InvalidRequest {
+            code: "unsupportedProtocolVersion",
+            message: "This Desktop netplay protocol version is not supported.",
+        }
+    }
+}
+
+impl From<SessionDescriptorError> for HttpError {
+    fn from(_value: SessionDescriptorError) -> Self {
+        Self::InvalidRequest {
+            code: "invalidSessionDescriptor",
+            message: "Netplay session details are invalid.",
+        }
     }
 }
 
@@ -93,6 +119,7 @@ impl IntoResponse for HttpError {
                     "Too many requests. Please wait and try again.",
                 )
             }
+            Self::InvalidRequest { code, message } => (StatusCode::BAD_REQUEST, code, message),
             Self::AdminDisabled => (
                 StatusCode::NOT_FOUND,
                 "notFound",

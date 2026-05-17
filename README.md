@@ -10,10 +10,10 @@ and never streams gameplay video.
 Implemented:
 
 - `GET /health`
-- `POST /v1/rooms`
+- `POST /v1/rooms` with protocol version and game/core descriptor
 - `GET /v1/rooms/{invite_code}/status`
-- `GET /v1/ws?inviteCode=AB23-CD&role=host`
-- `GET /v1/ws?inviteCode=AB23-CD&role=guest`
+- `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=1`
+- `GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=1`
 - `GET /internal/metrics`
 - `GET /internal/rooms`
 - HTTP-backed license-authority client
@@ -26,6 +26,8 @@ Implemented:
 - Docker/Coolify deployment artifacts
 - GHCR build/push scripts
 - in-memory room registry
+- invite preview descriptors for local ROM/core matching
+- request-body hashing for protected create-room signatures
 - room WebSocket upgrade path
 - host socket attachment to Player 1
 - guest socket join as Player 2
@@ -77,6 +79,10 @@ and `deploy/ghcr.md`.
 The server does not need a database or object storage for the MVP. It is a
 stateless relay with in-memory rooms. Run a single instance until we add sticky
 room routing or shared state.
+
+The server also does not sync ROM files. It stores and returns game/core
+descriptors so Desktop can find a matching local ROM by hash or guide the user
+to import their own copy.
 
 Remote debugging endpoints:
 

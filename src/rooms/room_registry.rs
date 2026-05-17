@@ -5,8 +5,8 @@
 
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, InputFrameLimits, SnapshotChunk, SnapshotLimits,
-    SnapshotManifest,
+    CompatibilityFingerprint, InputFrame, InputFrameLimits, NetplaySessionDescriptor,
+    SnapshotChunk, SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, NetplayRoom, PlayerIndex, RoomError, RoomEvent,
@@ -27,6 +27,7 @@ pub trait RoomRegistry: Send + Sync {
         &self,
         host: VerifiedLicense,
         host_connection: ConnectionId,
+        session: NetplaySessionDescriptor,
     ) -> Result<RoomView, RoomError>;
 
     /// Adds a verified guest to an existing room.
@@ -207,9 +208,10 @@ impl RoomRegistry for InMemoryRoomRegistry {
         &self,
         host: VerifiedLicense,
         host_connection: ConnectionId,
+        session: NetplaySessionDescriptor,
     ) -> Result<RoomView, RoomError> {
         let invite_code = self.invite_code_generator.generate();
-        let room = NetplayRoom::new(host, host_connection, invite_code.clone());
+        let room = NetplayRoom::new(host, host_connection, invite_code.clone(), session);
         let view = room.view();
 
         self.invite_codes

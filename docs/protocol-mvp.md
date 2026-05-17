@@ -33,6 +33,36 @@ requests.
 The relay asks the metadata service to authorize feature `netplay`. The metadata
 service remains the authority for premium or active-trial entitlement.
 
+Body:
+
+```json
+{
+  "desktopProtocolVersion": 1,
+  "session": {
+    "hostAppVersion": "0.3.0",
+    "game": {
+      "systemId": "gamecube",
+      "title": "Star Fox Adventures",
+      "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "contentKey": "gamecube-star-fox-adventures-usa",
+      "region": "USA",
+      "revision": "Rev 1",
+      "discId": "GFSE01"
+    },
+    "core": {
+      "coreId": "dolphin",
+      "coreName": "Dolphin",
+      "coreVersion": "5.0-netplay",
+      "coreOptionsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  }
+}
+```
+
+Descriptor fields must not contain absolute paths or local filenames. The ROM
+hash is used only to match a local copy on the invited Desktop client. The relay
+does not transfer ROM files.
+
 Response:
 
 ```json
@@ -40,6 +70,28 @@ Response:
   "room": {
     "roomId": "<uuid>",
     "inviteCode": "AB23-CD",
+    "protocol": {
+      "protocolVersion": 1,
+      "minSupportedProtocolVersion": 1
+    },
+    "session": {
+      "hostAppVersion": "0.3.0",
+      "game": {
+        "systemId": "gamecube",
+        "title": "Star Fox Adventures",
+        "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "contentKey": "gamecube-star-fox-adventures-usa",
+        "region": "USA",
+        "revision": "Rev 1",
+        "discId": "GFSE01"
+      },
+      "core": {
+        "coreId": "dolphin",
+        "coreName": "Dolphin",
+        "coreVersion": "5.0-netplay",
+        "coreOptionsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
     "maxPlayers": 2,
     "status": "waitingForGuest",
     "players": [
@@ -66,9 +118,12 @@ Response:
 
 Returns the current room view for a user-entered invite code.
 
+Desktop should call this before opening a WebSocket so the guest can see the
+game title/system/core and verify that a local ROM has the exact `romSha256`.
+
 ## WebSocket
 
-### `GET /v1/ws?inviteCode=AB23-CD&role=host`
+### `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=1`
 
 Attaches the room creator's Desktop client to Player 1.
 
@@ -82,7 +137,7 @@ X-Req-Nonce: <unique nonce>
 X-Req-Sig: <base64 signature>
 ```
 
-### `GET /v1/ws?inviteCode=AB23-CD&role=guest`
+### `GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=1`
 
 Adds the guest Desktop client to Player 2.
 
@@ -97,6 +152,21 @@ First successful socket message:
   "room": {
     "roomId": "<uuid>",
     "inviteCode": "AB23-CD",
+    "protocol": {
+      "protocolVersion": 1,
+      "minSupportedProtocolVersion": 1
+    },
+    "session": {
+      "game": {
+        "systemId": "gamecube",
+        "title": "Star Fox Adventures",
+        "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "contentKey": "gamecube-star-fox-adventures-usa"
+      },
+      "core": {
+        "coreId": "dolphin"
+      }
+    },
     "maxPlayers": 2,
     "status": "checkingCompatibility",
     "players": []
@@ -112,6 +182,21 @@ Whenever room state changes, subscribed sockets receive:
   "room": {
     "roomId": "<uuid>",
     "inviteCode": "AB23-CD",
+    "protocol": {
+      "protocolVersion": 1,
+      "minSupportedProtocolVersion": 1
+    },
+    "session": {
+      "game": {
+        "systemId": "gamecube",
+        "title": "Star Fox Adventures",
+        "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "contentKey": "gamecube-star-fox-adventures-usa"
+      },
+      "core": {
+        "coreId": "dolphin"
+      }
+    },
     "maxPlayers": 2,
     "status": "checkingCompatibility",
     "players": []

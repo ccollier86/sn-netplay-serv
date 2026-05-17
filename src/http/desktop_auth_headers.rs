@@ -15,6 +15,7 @@ pub fn desktop_auth_proof(
     headers: &HeaderMap,
     method: &str,
     path_and_query: &str,
+    body: &[u8],
 ) -> Result<DesktopAuthProof, HttpError> {
     let header = headers
         .get(axum::http::header::AUTHORIZATION)
@@ -34,7 +35,7 @@ pub fn desktop_auth_proof(
         DesktopProtectedRequestProof {
             method: method.to_string(),
             path_and_query: path_and_query.to_string(),
-            body_sha256_hex: format!("{:x}", Sha256::digest([])),
+            body_sha256_hex: format!("{:x}", Sha256::digest(body)),
             nonce: optional_header(headers, "x-req-nonce"),
             signature: optional_header(headers, "x-req-sig"),
             timestamp: optional_header(headers, "x-req-ts"),

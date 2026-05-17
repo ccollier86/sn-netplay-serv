@@ -16,13 +16,15 @@ tests added as each system is built.
 1. Host opens a game and clicks `Play Together`.
 2. Desktop sends its protected-client access token, install id, and signed
    request proof to the netplay server.
-3. Netplay server creates a short invite code.
-4. Guest enters the invite code in ShadowBoy Desktop.
-5. Server validates the guest license the same way.
-6. Desktop clients exchange compatibility fingerprints.
-7. Host sends a save-state snapshot to the guest through the relay.
-8. Both clients start from the same frame.
-9. Server relays frame-numbered input messages until the session ends.
+3. Desktop includes protocol version plus a sanitized game/core descriptor.
+4. Netplay server creates a short invite code.
+5. Guest enters the invite code in ShadowBoy Desktop.
+6. Desktop previews the room descriptor and matches a local ROM by hash.
+7. Server validates the guest license the same way.
+8. Desktop clients exchange compatibility fingerprints.
+9. Host sends a save-state snapshot to the guest through the relay.
+10. Both clients start from the same frame.
+11. Server relays frame-numbered input messages until the session ends.
 
 ## Rust Stack
 
@@ -64,11 +66,16 @@ src/
 GET  /health
 POST /v1/rooms
 GET  /v1/rooms/:inviteCode/status
-GET  /v1/ws?inviteCode=XXXX
+GET  /v1/ws?inviteCode=XXXX&protocolVersion=1
 ```
 
 `POST /v1/rooms` requires a valid ShadowBoy desktop token and returns an invite
-code. The WebSocket join also requires authorization.
+code. The request body contains the Desktop protocol version and game/core
+descriptor used for invite preview and local ROM matching. The WebSocket join
+also requires authorization.
+
+The relay must never transfer ROM files. It only stores hashes and stable ids so
+Desktop can tell the guest whether they already have the correct local content.
 
 ## License Validation
 

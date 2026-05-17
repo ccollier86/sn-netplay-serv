@@ -6,8 +6,8 @@
 use super::{NetplayRoom, RoomStatus};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, InputFrameLimits, SnapshotChunk, SnapshotLimits,
-    SnapshotManifest,
+    CompatibilityFingerprint, InputFrame, InputFrameLimits, NetplaySessionDescriptor,
+    SnapshotChunk, SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, PlayerStatus, RoomError};
 
@@ -231,7 +231,24 @@ fn room(host_connection: ConnectionId) -> NetplayRoom {
         license("host"),
         host_connection,
         InviteCode::parse("AB23-CD").expect("invite code"),
+        descriptor(),
     )
+}
+
+fn descriptor() -> NetplaySessionDescriptor {
+    serde_json::from_value(serde_json::json!({
+        "hostAppVersion": "0.3.0",
+        "game": {
+            "systemId": "gamecube",
+            "title": "Star Fox Adventures",
+            "romSha256": "a".repeat(64),
+            "contentKey": "gamecube-star-fox-adventures-usa"
+        },
+        "core": {
+            "coreId": "dolphin"
+        }
+    }))
+    .expect("descriptor")
 }
 
 fn input(player_index: PlayerIndex, frame: u64) -> InputFrame {

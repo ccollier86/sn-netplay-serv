@@ -5,7 +5,9 @@
 
 use super::{InMemoryRoomRegistry, RoomRegistry};
 use crate::auth::VerifiedLicense;
-use crate::protocol::{CompatibilityFingerprint, InputFrame, SnapshotChunk};
+use crate::protocol::{
+    CompatibilityFingerprint, InputFrame, NetplaySessionDescriptor, SnapshotChunk,
+};
 use crate::rooms::{ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, RoomError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,7 +24,7 @@ impl InviteCodeGenerator for StaticInviteCodeGenerator {
 async fn created_room_can_be_found_by_invite_code() {
     let registry = registry();
     let view = registry
-        .create_room(license("host"), ConnectionId::new())
+        .create_room(license("host"), ConnectionId::new(), descriptor())
         .await
         .expect("room");
 
@@ -38,7 +40,7 @@ async fn created_room_can_be_found_by_invite_code() {
 async fn first_guest_receives_player_two() {
     let registry = registry();
     let view = registry
-        .create_room(license("host"), ConnectionId::new())
+        .create_room(license("host"), ConnectionId::new(), descriptor())
         .await
         .expect("room");
 
@@ -58,7 +60,7 @@ async fn first_guest_receives_player_two() {
 async fn connect_guest_returns_joined_room_view() {
     let registry = registry();
     let view = registry
-        .create_room(license("host"), ConnectionId::new())
+        .create_room(license("host"), ConnectionId::new(), descriptor())
         .await
         .expect("room");
 
@@ -79,7 +81,7 @@ async fn connect_guest_returns_joined_room_view() {
 async fn join_broadcasts_room_state_event() {
     let registry = registry();
     let view = registry
-        .create_room(license("host"), ConnectionId::new())
+        .create_room(license("host"), ConnectionId::new(), descriptor())
         .await
         .expect("room");
     let invite = InviteCode::parse(view.invite_code).expect("invite");
@@ -102,7 +104,7 @@ async fn join_broadcasts_room_state_event() {
 async fn third_player_is_rejected() {
     let registry = registry();
     let view = registry
-        .create_room(license("host"), ConnectionId::new())
+        .create_room(license("host"), ConnectionId::new(), descriptor())
         .await
         .expect("room");
     let invite = InviteCode::parse(view.invite_code).expect("invite");
@@ -122,7 +124,7 @@ async fn third_player_is_rejected() {
 async fn waiting_rooms_expire_after_join_timeout() {
     let registry = registry();
     registry
-        .create_room(license("host"), ConnectionId::new())
+        .create_room(license("host"), ConnectionId::new(), descriptor())
         .await
         .expect("room");
 
@@ -140,7 +142,7 @@ async fn waiting_rooms_expire_after_join_timeout() {
 async fn joined_rooms_do_not_expire_as_waiting_rooms() {
     let registry = registry();
     let view = registry
-        .create_room(license("host"), ConnectionId::new())
+        .create_room(license("host"), ConnectionId::new(), descriptor())
         .await
         .expect("room");
 
@@ -255,7 +257,7 @@ async fn compatible_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, C
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let view = registry
-        .create_room(license("host"), host_connection)
+        .create_room(license("host"), host_connection, descriptor())
         .await
         .expect("room");
     let invite = InviteCode::parse(view.invite_code).expect("invite");
@@ -278,6 +280,22 @@ async fn compatible_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, C
 
 fn license(subject_id: &str) -> VerifiedLicense {
     VerifiedLicense::new(subject_id, "premium", vec!["netplay".to_string()])
+}
+
+fn descriptor() -> NetplaySessionDescriptor {
+    serde_json::from_value(serde_json::json!({
+        "hostAppVersion": "0.3.0",
+        "game": {
+            "systemId": "gamecube",
+            "title": "Star Fox Adventures",
+            "romSha256": "a".repeat(64),
+            "contentKey": "gamecube-star-fox-adventures-usa"
+        },
+        "core": {
+            "coreId": "dolphin"
+        }
+    }))
+    .expect("descriptor")
 }
 
 fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {

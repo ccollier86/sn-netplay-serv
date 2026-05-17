@@ -7,11 +7,12 @@
 use crate::auth::VerifiedLicense;
 use crate::limits::MVP_ROOM_CAPACITY;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, InputFrameLimits, SnapshotChunk, SnapshotLimits,
-    SnapshotManifest,
+    CompatibilityFingerprint, InputFrame, InputFrameLimits, NetplayProtocolView,
+    NetplaySessionDescriptor, SnapshotChunk, SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, PlayerIndex, PlayerRole, PlayerSlot, PlayerStatus, RoomError, RoomId,
+    ConnectionId, InviteCode, PlayerIndex, PlayerRole, PlayerSlot, PlayerSlotView, PlayerStatus,
+    RoomError, RoomId, RoomView,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -39,6 +40,7 @@ pub enum RoomStatus {
 pub struct NetplayRoom {
     room_id: RoomId,
     invite_code: InviteCode,
+    session: NetplaySessionDescriptor,
     max_players: u8,
     players: Vec<PlayerSlot>,
     status: RoomStatus,
@@ -54,6 +56,7 @@ impl NetplayRoom {
         host: VerifiedLicense,
         host_connection: ConnectionId,
         invite_code: InviteCode,
+        session: NetplaySessionDescriptor,
     ) -> Self {
         let max_players = MVP_ROOM_CAPACITY;
         let mut players = Vec::with_capacity(usize::from(max_players));
@@ -67,6 +70,7 @@ impl NetplayRoom {
         Self {
             room_id: RoomId::new(),
             invite_code,
+            session,
             max_players,
             players,
             status: RoomStatus::WaitingForGuest,
@@ -314,6 +318,8 @@ impl NetplayRoom {
         RoomView {
             room_id: self.room_id,
             invite_code: self.invite_code.display(),
+            protocol: NetplayProtocolView::default(),
+            session: self.session.clone(),
             max_players: self.max_players,
             status: self.status,
             players: self
@@ -397,38 +403,6 @@ impl NetplayRoom {
             self.room_frame = min_frame;
         }
     }
-}
-
-/// Serializable room state view.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoomView {
-    /// Stable room id.
-    pub room_id: RoomId,
-    /// User-facing invite code.
-    pub invite_code: String,
-    /// Configured room capacity.
-    pub max_players: u8,
-    /// Current room lifecycle status.
-    pub status: RoomStatus,
-    /// Player slots in display order.
-    pub players: Vec<PlayerSlotView>,
-}
-
-/// Serializable player slot view.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlayerSlotView {
-    /// Zero-based protocol player index.
-    pub player_index: u8,
-    /// One-based player number for UI display.
-    pub display_number: u8,
-    /// Server-assigned role.
-    pub role: PlayerRole,
-    /// User-facing slot status.
-    pub status: PlayerStatus,
-    /// Whether a verified player currently occupies the slot.
-    pub occupied: bool,
 }
 
 #[cfg(test)]
