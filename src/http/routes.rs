@@ -7,6 +7,9 @@ use crate::http::client_identity::request_rate_limit_key;
 use crate::http::desktop_auth_headers::desktop_auth_proof;
 use crate::http::errors::HttpError;
 use crate::http::services::AppServices;
+use crate::limits::{
+    MAX_CREATE_ROOM_BODY_BYTES, MAX_WEBSOCKET_FRAME_BYTES, MAX_WEBSOCKET_MESSAGE_BYTES,
+};
 use crate::observability::MetricsSnapshot;
 use crate::protocol::{NetplaySessionDescriptor, validate_client_protocol_version};
 use crate::rate_limit::RateLimitAction;
@@ -14,6 +17,7 @@ use crate::rooms::RoomRegistrySnapshot;
 use crate::rooms::{ConnectionId, InviteCode, RoomView};
 use crate::transport::{WebSocketJoinRequest, WebSocketJoinRole, handle_websocket_session};
 use axum::body::Bytes;
+use axum::extract::DefaultBodyLimit;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Uri};
@@ -35,6 +39,7 @@ pub fn build_router(services: AppServices) -> Router {
         .route("/v1/ws", get(websocket_room))
         .route("/internal/metrics", get(internal_metrics))
         .route("/internal/rooms", get(internal_rooms))
+        .layer(DefaultBodyLimit::max(MAX_CREATE_ROOM_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .with_state(services)
 }
@@ -129,10 +134,10 @@ pub async fn websocket_room(
         license,
     };
 
-    Ok(
-        websocket
-            .on_upgrade(move |socket| handle_websocket_session(socket, services, join_request)),
-    )
+    Ok(websocket
+        .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
+        .max_frame_size(MAX_WEBSOCKET_FRAME_BYTES)
+        .on_upgrade(move |socket| handle_websocket_session(socket, services, join_request)))
 }
 
 fn parse_create_room_request(body: &[u8]) -> Result<CreateRoomRequest, HttpError> {

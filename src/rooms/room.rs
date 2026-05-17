@@ -12,7 +12,7 @@ use crate::protocol::{
 };
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, PlayerRole, PlayerSlot, PlayerSlotView, PlayerStatus,
-    RoomError, RoomId, RoomView,
+    RoomError, RoomId, RoomView, SnapshotTransferState,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -47,6 +47,7 @@ pub struct NetplayRoom {
     compatibility: HashMap<PlayerIndex, CompatibilityFingerprint>,
     ready_players: HashSet<PlayerIndex>,
     last_input_frames: HashMap<PlayerIndex, u64>,
+    snapshot_transfer: Option<SnapshotTransferState>,
     room_frame: u64,
 }
 
@@ -77,6 +78,7 @@ impl NetplayRoom {
             compatibility: HashMap::new(),
             ready_players: HashSet::new(),
             last_input_frames: HashMap::new(),
+            snapshot_transfer: None,
             room_frame: 0,
         }
     }
@@ -106,17 +108,23 @@ impl NetplayRoom {
             return Err(RoomError::RoomClosed);
         }
 
-        let slot = self
-            .players
-            .iter_mut()
-            .find(|candidate| candidate.is_empty())
-            .ok_or(RoomError::RoomFull)?;
-
-        slot.occupy_guest(&license, connection_id);
+        let player_index = {
+            let slot = self
+                .players
+                .iter_mut()
+                .find(|candidate| candidate.is_empty())
+                .ok_or(RoomError::RoomFull)?;
+            slot.occupy_guest(&license, connection_id);
+            slot.player_index
+        };
+        self.reset_sync_state();
         self.status = RoomStatus::CheckingCompatibility;
-        self.ready_players.clear();
+        self.players
+            .iter_mut()
+            .filter(|slot| !slot.is_empty())
+            .for_each(|slot| slot.status = PlayerStatus::Connected);
 
-        Ok(slot.player_index)
+        Ok(player_index)
     }
 
     /// Attaches a socket connection to the reserved host slot.
@@ -171,6 +179,7 @@ impl NetplayRoom {
         self.compatibility.remove(&player_index);
         self.ready_players.remove(&player_index);
         self.last_input_frames.remove(&player_index);
+        self.snapshot_transfer = None;
 
         if is_host {
             self.status = RoomStatus::Closed;
@@ -186,7 +195,7 @@ impl NetplayRoom {
     pub fn set_compatibility_for_connection(
         &mut self,
         connection_id: ConnectionId,
-        fingerprint: CompatibilityFingerprint,
+        mut fingerprint: CompatibilityFingerprint,
     ) -> Result<(), RoomError> {
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
@@ -196,6 +205,16 @@ impl NetplayRoom {
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
 
+        if !self.fingerprint_matches_session(&fingerprint) {
+            self.compatibility.remove(&player_index);
+            self.ready_players.remove(&player_index);
+            self.snapshot_transfer = None;
+            self.status = RoomStatus::CheckingCompatibility;
+            self.set_player_status(player_index, PlayerStatus::CompatibilityFailed);
+            return Err(RoomError::CompatibilityMismatch);
+        }
+
+        fingerprint.content_hash = fingerprint.content_hash.to_ascii_lowercase();
         self.compatibility.insert(player_index, fingerprint);
         self.ready_players.remove(&player_index);
         self.set_player_status(player_index, PlayerStatus::CheckingCompatibility);
@@ -252,29 +271,34 @@ impl NetplayRoom {
     }
 
     /// Validates host snapshot chunk relay.
-    pub fn validate_snapshot_chunk(
-        &self,
+    pub fn accept_snapshot_chunk(
+        &mut self,
         connection_id: ConnectionId,
         chunk: &SnapshotChunk,
         limits: SnapshotLimits,
     ) -> Result<(), RoomError> {
         self.validate_host_snapshot_sender(connection_id)?;
-        chunk
-            .validate(limits)
-            .map_err(|_| RoomError::SnapshotInvalid)
+        self.snapshot_transfer
+            .get_or_insert_with(SnapshotTransferState::new)
+            .accept_chunk(chunk, limits)
     }
 
     /// Validates host snapshot completion metadata.
-    pub fn validate_snapshot_complete(
-        &self,
+    pub fn accept_snapshot_complete(
+        &mut self,
         connection_id: ConnectionId,
         manifest: &SnapshotManifest,
         limits: SnapshotLimits,
     ) -> Result<(), RoomError> {
         self.validate_host_snapshot_sender(connection_id)?;
-        manifest
-            .validate(limits)
-            .map_err(|_| RoomError::SnapshotInvalid)
+        let transfer = self
+            .snapshot_transfer
+            .as_ref()
+            .ok_or(RoomError::SnapshotInvalid)?;
+        transfer.complete(manifest, limits)?;
+        self.snapshot_transfer = None;
+
+        Ok(())
     }
 
     /// Validates and records an input frame from one connection.
@@ -402,6 +426,23 @@ impl NetplayRoom {
         if let Some(min_frame) = self.last_input_frames.values().min().copied() {
             self.room_frame = min_frame;
         }
+    }
+
+    fn reset_sync_state(&mut self) {
+        self.compatibility.clear();
+        self.ready_players.clear();
+        self.last_input_frames.clear();
+        self.snapshot_transfer = None;
+        self.room_frame = 0;
+    }
+
+    fn fingerprint_matches_session(&self, fingerprint: &CompatibilityFingerprint) -> bool {
+        fingerprint.protocol_version == crate::protocol::NETPLAY_PROTOCOL_VERSION
+            && fingerprint.system_id == self.session.game.system_id
+            && fingerprint.core_id == self.session.core.core_id
+            && fingerprint
+                .content_hash
+                .eq_ignore_ascii_case(&self.session.game.rom_sha256)
     }
 }
 

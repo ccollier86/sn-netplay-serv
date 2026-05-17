@@ -14,6 +14,7 @@ mod room_expiration_task;
 mod room_registry;
 mod room_registry_snapshot;
 mod room_view;
+mod snapshot_transfer;
 
 pub use errors::RoomError;
 pub use ids::{ConnectionId, PlayerIndex, RoomId};
@@ -25,3 +26,4 @@ pub use room_expiration_task::spawn_room_expiration_task;
 pub use room_registry::{InMemoryRoomRegistry, RoomEventReceiver, RoomJoin, RoomRegistry};
 pub use room_registry_snapshot::RoomRegistrySnapshot;
 pub use room_view::{PlayerSlotView, RoomView};
+pub(crate) use snapshot_transfer::SnapshotTransferState;

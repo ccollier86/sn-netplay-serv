@@ -7,6 +7,7 @@ use super::build_router;
 use crate::auth::{AuthError, DesktopAuthProof, LicenseAuthority, VerifiedLicense};
 use crate::http::AdminAuthorizer;
 use crate::http::services::AppServices;
+use crate::limits::MAX_CREATE_ROOM_BODY_BYTES;
 use crate::observability::InMemoryMetrics;
 use crate::rate_limit::{InMemoryRateLimiter, RateLimitPolicy};
 use crate::rooms::{InMemoryRoomRegistry, InviteCode, InviteCodeGenerator};
@@ -164,6 +165,24 @@ async fn create_room_rejects_invalid_descriptor() {
         .expect("response");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn create_room_rejects_oversized_body_before_parsing() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/rooms")
+                .header("authorization", "Bearer valid")
+                .header("x-install-id", "install-1")
+                .body(Body::from(vec![b'{'; MAX_CREATE_ROOM_BODY_BYTES + 1]))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
 
 #[tokio::test]

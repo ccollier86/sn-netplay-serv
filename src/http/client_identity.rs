@@ -4,14 +4,12 @@
 //! metadata in route tests where no socket address exists.
 
 use axum::http::HeaderMap;
+use std::net::IpAddr;
 
 /// Builds a stable request key for public rate-limit buckets.
 pub fn request_rate_limit_key(headers: &HeaderMap, trust_proxy_headers: bool) -> String {
-    if trust_proxy_headers && let Some(forwarded_ip) = forwarded_for_ip(headers) {
-        return format!("ip:{forwarded_ip}");
-    }
-    if trust_proxy_headers && let Some(real_ip) = header_value(headers, "x-real-ip") {
-        return format!("ip:{real_ip}");
+    if trust_proxy_headers && let Some(proxy_ip) = trusted_proxy_ip(headers) {
+        return format!("ip:{proxy_ip}");
     }
 
     headers
@@ -23,23 +21,31 @@ pub fn request_rate_limit_key(headers: &HeaderMap, trust_proxy_headers: bool) ->
         .unwrap_or_else(|| "anonymous".to_string())
 }
 
-fn forwarded_for_ip(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
+fn trusted_proxy_ip(headers: &HeaderMap) -> Option<IpAddr> {
+    parsed_header_ip(headers, "cf-connecting-ip")
+        .or_else(|| parsed_header_ip(headers, "x-real-ip"))
+        .or_else(|| forwarded_for_last_valid_ip(headers))
 }
 
-fn header_value(headers: &HeaderMap, name: &'static str) -> Option<String> {
+fn parsed_header_ip(headers: &HeaderMap, name: &'static str) -> Option<IpAddr> {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
+        .and_then(|value| value.parse::<IpAddr>().ok())
+}
+
+fn forwarded_for_last_valid_ip(headers: &HeaderMap) -> Option<IpAddr> {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value
+                .split(',')
+                .rev()
+                .map(str::trim)
+                .find_map(|candidate| candidate.parse::<IpAddr>().ok())
+        })
 }
 
 #[cfg(test)]
@@ -60,9 +66,34 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             "x-forwarded-for",
-            HeaderValue::from_static("203.0.113.1, 10.0.0.1"),
+            HeaderValue::from_static("198.51.100.9, 203.0.113.1"),
         );
 
         assert_eq!(request_rate_limit_key(&headers, true), "ip:203.0.113.1");
+    }
+
+    #[test]
+    fn proxy_headers_prefer_cloudflare_connecting_ip() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "cf-connecting-ip",
+            HeaderValue::from_static("198.51.100.44"),
+        );
+        headers.insert("x-real-ip", HeaderValue::from_static("198.51.100.45"));
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("198.51.100.46, 203.0.113.1"),
+        );
+
+        assert_eq!(request_rate_limit_key(&headers, true), "ip:198.51.100.44");
+    }
+
+    #[test]
+    fn invalid_proxy_headers_fall_back_to_install_id() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", HeaderValue::from_static("bad, also-bad"));
+        headers.insert("x-install-id", HeaderValue::from_static("install-1"));
+
+        assert_eq!(request_rate_limit_key(&headers, true), "install:install-1");
     }
 }

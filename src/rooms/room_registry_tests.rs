@@ -6,9 +6,13 @@
 use super::{InMemoryRoomRegistry, RoomRegistry};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, NetplaySessionDescriptor, SnapshotChunk,
+    CompatibilityFingerprint, InputFrame, NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor,
+    SnapshotChunk, SnapshotManifest,
 };
-use crate::rooms::{ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, RoomError};
+use crate::rooms::{
+    ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, RoomError, RoomEvent,
+};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -166,6 +170,57 @@ async fn joined_rooms_do_not_expire_as_waiting_rooms() {
 }
 
 #[tokio::test]
+async fn host_disconnect_removes_closed_room() {
+    let registry = registry();
+    let host_connection = ConnectionId::new();
+    let view = registry
+        .create_room(license("host"), host_connection, descriptor())
+        .await
+        .expect("room");
+    let invite = InviteCode::parse(view.invite_code).expect("invite");
+
+    registry
+        .disconnect(invite.clone(), host_connection)
+        .await
+        .expect("disconnect");
+
+    assert!(matches!(
+        registry.room_view(invite).await,
+        Err(RoomError::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn compatibility_mismatch_broadcasts_room_state() {
+    let registry = registry();
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let view = registry
+        .create_room(license("host"), host_connection, descriptor())
+        .await
+        .expect("room");
+    let invite = InviteCode::parse(view.invite_code).expect("invite");
+
+    registry
+        .connect_guest(invite.clone(), license("guest"), guest_connection)
+        .await
+        .expect("guest");
+    registry
+        .set_compatibility(invite.clone(), host_connection, fingerprint("rom"))
+        .await
+        .expect("host fingerprint");
+    let mut events = registry.subscribe(invite.clone()).await.expect("events");
+
+    let result = registry
+        .set_compatibility(invite, guest_connection, fingerprint("rom-b"))
+        .await;
+    let event = events.recv().await.expect("event");
+
+    assert!(matches!(result, Err(RoomError::CompatibilityMismatch)));
+    assert!(matches!(event, RoomEvent::RoomStateChanged(_)));
+}
+
+#[tokio::test]
 async fn ready_from_both_players_broadcasts_session_start() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     let mut events = registry.subscribe(invite.clone()).await.expect("events");
@@ -215,6 +270,63 @@ async fn host_snapshot_chunk_is_broadcast() {
         event,
         crate::rooms::RoomEvent::SnapshotChunk { .. }
     ));
+}
+
+#[tokio::test]
+async fn snapshot_complete_requires_matching_chunks() {
+    let (registry, invite, host_connection, _guest_connection) = compatible_room().await;
+
+    registry
+        .relay_snapshot_chunk(
+            invite.clone(),
+            host_connection,
+            SnapshotChunk {
+                index: 0,
+                bytes: vec![1, 2, 3],
+            },
+        )
+        .await
+        .expect("snapshot chunk");
+
+    let result = registry
+        .relay_snapshot_complete(
+            invite,
+            host_connection,
+            SnapshotManifest {
+                total_bytes: 3,
+                sha256: "0".repeat(64),
+            },
+        )
+        .await;
+
+    assert!(matches!(result, Err(RoomError::SnapshotInvalid)));
+}
+
+#[tokio::test]
+async fn host_snapshot_complete_is_broadcast_after_valid_chunks() {
+    let (registry, invite, host_connection, _guest_connection) = compatible_room().await;
+
+    registry
+        .relay_snapshot_chunk(
+            invite.clone(),
+            host_connection,
+            SnapshotChunk {
+                index: 0,
+                bytes: vec![1, 2, 3],
+            },
+        )
+        .await
+        .expect("snapshot chunk");
+    let mut events = registry.subscribe(invite.clone()).await.expect("events");
+
+    registry
+        .relay_snapshot_complete(invite, host_connection, snapshot_manifest(&[1, 2, 3]))
+        .await
+        .expect("snapshot complete");
+
+    let event = events.recv().await.expect("event");
+
+    assert!(matches!(event, RoomEvent::SnapshotComplete { .. }));
 }
 
 #[tokio::test]
@@ -301,14 +413,29 @@ fn descriptor() -> NetplaySessionDescriptor {
 fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {
     CompatibilityFingerprint {
         desktop_version: "0.2.10".to_string(),
-        protocol_version: 1,
-        system_id: "n64".to_string(),
-        core_id: "mupen64plus-next".to_string(),
+        protocol_version: NETPLAY_PROTOCOL_VERSION,
+        system_id: "gamecube".to_string(),
+        core_id: "dolphin".to_string(),
         core_build: "core-build".to_string(),
-        content_hash: content_hash.to_string(),
+        content_hash: content_hash_for_fixture(content_hash),
         settings_hash: "settings".to_string(),
         cheats_hash: "cheats".to_string(),
         system_data_hash: None,
         save_data_mode: "netplay".to_string(),
+    }
+}
+
+fn content_hash_for_fixture(name: &str) -> String {
+    match name {
+        "rom" | "rom-a" => "a".repeat(64),
+        "rom-b" => "b".repeat(64),
+        value => value.to_string(),
+    }
+}
+
+fn snapshot_manifest(bytes: &[u8]) -> SnapshotManifest {
+    SnapshotManifest {
+        total_bytes: bytes.len() as u64,
+        sha256: format!("{:x}", Sha256::digest(bytes)),
     }
 }

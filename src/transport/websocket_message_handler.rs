@@ -4,6 +4,7 @@
 //! gameplay protocol decisions separate from the socket event loop.
 
 use crate::http::AppServices;
+use crate::limits::MAX_WEBSOCKET_MESSAGE_BYTES;
 use crate::protocol::{ClientMessage, ServerMessage};
 use crate::rooms::{ConnectionId, InviteCode, RoomError};
 use crate::transport::websocket_outbound::{
@@ -18,6 +19,12 @@ pub async fn handle_client_text(
     connection_id: ConnectionId,
     payload: &str,
 ) -> bool {
+    if payload.len() > MAX_WEBSOCKET_MESSAGE_BYTES {
+        return send_static_error(sender, "messageTooLarge", "Message is too large.")
+            .await
+            .is_ok();
+    }
+
     match serde_json::from_str::<ClientMessage>(payload) {
         Ok(message) => handle_client_message(sender, services, invite_code, connection_id, message)
             .await

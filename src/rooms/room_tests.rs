@@ -6,10 +6,11 @@
 use super::{NetplayRoom, RoomStatus};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, InputFrameLimits, NetplaySessionDescriptor,
-    SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    CompatibilityFingerprint, InputFrame, InputFrameLimits, NETPLAY_PROTOCOL_VERSION,
+    NetplaySessionDescriptor, SnapshotChunk, SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, PlayerStatus, RoomError};
+use sha2::{Digest, Sha256};
 
 #[test]
 fn new_room_reserves_player_one_for_host() {
@@ -103,10 +104,40 @@ fn compatibility_mismatch_blocks_ready_state() {
 }
 
 #[test]
+fn fingerprint_must_match_room_descriptor() {
+    let host_connection = ConnectionId::new();
+    let mut room = room(host_connection);
+
+    let result = room.set_compatibility_for_connection(host_connection, fingerprint("rom-b"));
+
+    assert!(matches!(result, Err(RoomError::CompatibilityMismatch)));
+    assert_eq!(
+        room.view().players[0].status,
+        PlayerStatus::CompatibilityFailed
+    );
+}
+
+#[test]
 fn matching_compatibility_enters_syncing_state() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let room = compatible_room(host_connection, guest_connection);
+
+    assert_eq!(room.view().status, RoomStatus::SyncingState);
+}
+
+#[test]
+fn compatibility_hash_case_does_not_create_false_mismatch() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = room(host_connection);
+    room.join_guest(license("guest"), guest_connection)
+        .expect("guest joins");
+
+    room.set_compatibility_for_connection(host_connection, fingerprint(&"A".repeat(64)))
+        .expect("host fingerprint waits");
+    room.set_compatibility_for_connection(guest_connection, fingerprint(&"a".repeat(64)))
+        .expect("guest fingerprint");
 
     assert_eq!(room.view().status, RoomStatus::SyncingState);
 }
@@ -126,9 +157,9 @@ fn ready_from_both_players_starts_gameplay() {
 fn guest_cannot_relay_snapshot_chunks() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
-    let room = compatible_room(host_connection, guest_connection);
+    let mut room = compatible_room(host_connection, guest_connection);
 
-    let result = room.validate_snapshot_chunk(
+    let result = room.accept_snapshot_chunk(
         guest_connection,
         &SnapshotChunk {
             index: 0,
@@ -144,9 +175,44 @@ fn guest_cannot_relay_snapshot_chunks() {
 fn host_can_relay_snapshot_manifest_during_sync() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
-    let room = compatible_room(host_connection, guest_connection);
+    let mut room = compatible_room(host_connection, guest_connection);
 
-    let result = room.validate_snapshot_complete(
+    room.accept_snapshot_chunk(
+        host_connection,
+        &SnapshotChunk {
+            index: 0,
+            bytes: vec![1, 2, 3],
+        },
+        SnapshotLimits::default(),
+    )
+    .expect("chunk");
+
+    let result = room.accept_snapshot_complete(
+        host_connection,
+        &snapshot_manifest(&[1, 2, 3]),
+        SnapshotLimits::default(),
+    );
+
+    assert!(result.is_ok());
+}
+
+#[test]
+fn snapshot_manifest_must_match_relayed_chunks() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = compatible_room(host_connection, guest_connection);
+
+    room.accept_snapshot_chunk(
+        host_connection,
+        &SnapshotChunk {
+            index: 0,
+            bytes: vec![1, 2, 3],
+        },
+        SnapshotLimits::default(),
+    )
+    .expect("chunk");
+
+    let result = room.accept_snapshot_complete(
         host_connection,
         &SnapshotManifest {
             total_bytes: 3,
@@ -155,7 +221,7 @@ fn host_can_relay_snapshot_manifest_during_sync() {
         SnapshotLimits::default(),
     );
 
-    assert!(result.is_ok());
+    assert!(matches!(result, Err(RoomError::SnapshotInvalid)));
 }
 
 #[test]
@@ -266,14 +332,29 @@ fn license(subject_id: &str) -> VerifiedLicense {
 fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {
     CompatibilityFingerprint {
         desktop_version: "0.2.10".to_string(),
-        protocol_version: 1,
-        system_id: "n64".to_string(),
-        core_id: "mupen64plus-next".to_string(),
+        protocol_version: NETPLAY_PROTOCOL_VERSION,
+        system_id: "gamecube".to_string(),
+        core_id: "dolphin".to_string(),
         core_build: "core-build".to_string(),
-        content_hash: content_hash.to_string(),
+        content_hash: content_hash_for_fixture(content_hash),
         settings_hash: "settings".to_string(),
         cheats_hash: "cheats".to_string(),
         system_data_hash: None,
         save_data_mode: "netplay".to_string(),
+    }
+}
+
+fn content_hash_for_fixture(name: &str) -> String {
+    match name {
+        "rom" | "rom-a" => "a".repeat(64),
+        "rom-b" => "b".repeat(64),
+        value => value.to_string(),
+    }
+}
+
+fn snapshot_manifest(bytes: &[u8]) -> SnapshotManifest {
+    SnapshotManifest {
+        total_bytes: bytes.len() as u64,
+        sha256: format!("{:x}", Sha256::digest(bytes)),
     }
 }

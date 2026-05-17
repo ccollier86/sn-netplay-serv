@@ -9,6 +9,10 @@ use crate::auth::{
 use reqwest::Url;
 use serde::Serialize;
 use serde_json::Value;
+use std::time::Duration;
+
+const AUTHORITY_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+const AUTHORITY_REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// License verifier backed by the ShadowBoy metadata/cheat service.
 pub struct HttpLicenseAuthority {
@@ -23,7 +27,11 @@ impl HttpLicenseAuthority {
         verify_url: impl AsRef<str>,
         internal_secret: impl Into<String>,
     ) -> Result<Self, AuthError> {
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .connect_timeout(AUTHORITY_CONNECT_TIMEOUT)
+            .timeout(AUTHORITY_REQUEST_TIMEOUT)
+            .build()
+            .map_err(|_| AuthError::AuthorityRequestFailed)?;
         let verify_url =
             Url::parse(verify_url.as_ref()).map_err(|_| AuthError::InvalidAuthorityUrl)?;
 

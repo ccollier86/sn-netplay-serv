@@ -12,6 +12,15 @@ pub const MVP_ROOM_CAPACITY: u8 = 2;
 /// Maximum number of future frames accepted from a client.
 pub const MAX_FUTURE_FRAME_DISTANCE: u64 = 6;
 
+/// Maximum create-room JSON request size.
+pub const MAX_CREATE_ROOM_BODY_BYTES: usize = 16 * 1024;
+
+/// Maximum accepted WebSocket text message size.
+pub const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
+
+/// Maximum accepted WebSocket frame size.
+pub const MAX_WEBSOCKET_FRAME_BYTES: usize = 2 * 1024 * 1024;
+
 /// Maximum size for one snapshot chunk relayed through the server.
 pub const MAX_SNAPSHOT_CHUNK_BYTES: usize = 256 * 1024;
 

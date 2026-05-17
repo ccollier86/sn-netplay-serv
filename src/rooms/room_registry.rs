@@ -281,13 +281,16 @@ impl RoomRegistry for InMemoryRoomRegistry {
         connection_id: ConnectionId,
     ) -> Result<RoomView, RoomError> {
         let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
+        let normalized = invite_code.normalized().to_string();
+        let stored_room = rooms.get_mut(&normalized).ok_or(RoomError::NotFound)?;
 
-        let _closed = stored_room.room.disconnect(connection_id)?;
+        let closed = stored_room.room.disconnect(connection_id)?;
         let room = stored_room.room.view();
         stored_room.emit_state();
+
+        if closed {
+            rooms.remove(&normalized);
+        }
 
         Ok(room)
     }
@@ -312,13 +315,21 @@ impl RoomRegistry for InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
 
-        stored_room
+        match stored_room
             .room
-            .set_compatibility_for_connection(connection_id, fingerprint)?;
-        let room = stored_room.room.view();
-        stored_room.emit_state();
-
-        Ok(room)
+            .set_compatibility_for_connection(connection_id, fingerprint)
+        {
+            Ok(()) => {
+                let room = stored_room.room.view();
+                stored_room.emit_state();
+                Ok(room)
+            }
+            Err(RoomError::CompatibilityMismatch) => {
+                stored_room.emit_state();
+                Err(RoomError::CompatibilityMismatch)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn mark_ready(
@@ -348,16 +359,14 @@ impl RoomRegistry for InMemoryRoomRegistry {
         connection_id: ConnectionId,
         chunk: SnapshotChunk,
     ) -> Result<(), RoomError> {
-        let rooms = self.invite_codes.read().await;
+        let mut rooms = self.invite_codes.write().await;
         let stored_room = rooms
-            .get(invite_code.normalized())
+            .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
 
-        stored_room.room.validate_snapshot_chunk(
-            connection_id,
-            &chunk,
-            SnapshotLimits::default(),
-        )?;
+        stored_room
+            .room
+            .accept_snapshot_chunk(connection_id, &chunk, SnapshotLimits::default())?;
         stored_room.emit_snapshot_chunk(connection_id, chunk);
 
         Ok(())
@@ -369,12 +378,12 @@ impl RoomRegistry for InMemoryRoomRegistry {
         connection_id: ConnectionId,
         manifest: SnapshotManifest,
     ) -> Result<(), RoomError> {
-        let rooms = self.invite_codes.read().await;
+        let mut rooms = self.invite_codes.write().await;
         let stored_room = rooms
-            .get(invite_code.normalized())
+            .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
 
-        stored_room.room.validate_snapshot_complete(
+        stored_room.room.accept_snapshot_complete(
             connection_id,
             &manifest,
             SnapshotLimits::default(),
