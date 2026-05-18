@@ -8,45 +8,27 @@ use crate::auth::VerifiedLicense;
 use crate::limits::MVP_ROOM_CAPACITY;
 use crate::protocol::{
     CompatibilityFingerprint, InputFrame, InputFrameLimits, NetplayProtocolView,
-    NetplaySessionDescriptor, SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    NetplaySessionDescriptor, NetplaySessionMode, SnapshotChunk, SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, PlayerIndex, PlayerRole, PlayerSlot, PlayerSlotView, PlayerStatus,
-    RoomError, RoomId, RoomView, SnapshotTransferState,
+    ConnectionId, InviteCode, LinkCableRoomState, PlayerIndex, PlayerRole, PlayerSlot,
+    PlayerSlotView, PlayerStatus, RoomError, RoomId, RoomStatus, RoomView, SnapshotTransferState,
 };
-use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-
-/// Lifecycle status for a netplay room.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RoomStatus {
-    /// Host is waiting for a guest to join.
-    WaitingForGuest,
-    /// Clients are comparing compatibility fingerprints.
-    CheckingCompatibility,
-    /// Clients are syncing host state before starting.
-    SyncingState,
-    /// Clients are ready for snapshot sync or start.
-    Ready,
-    /// Gameplay input relay is active.
-    Playing,
-    /// Room is no longer accepting traffic.
-    Closed,
-}
 
 /// Active netplay room.
 #[derive(Clone, Debug)]
 pub struct NetplayRoom {
     room_id: RoomId,
     invite_code: InviteCode,
-    session: NetplaySessionDescriptor,
-    max_players: u8,
-    players: Vec<PlayerSlot>,
-    status: RoomStatus,
+    pub(super) session: NetplaySessionDescriptor,
+    pub(super) max_players: u8,
+    pub(super) players: Vec<PlayerSlot>,
+    pub(super) status: RoomStatus,
     compatibility: HashMap<PlayerIndex, CompatibilityFingerprint>,
-    ready_players: HashSet<PlayerIndex>,
+    pub(super) ready_players: HashSet<PlayerIndex>,
     last_input_frames: HashMap<PlayerIndex, u64>,
+    pub(super) link_cable_state: LinkCableRoomState,
     snapshot_transfer: Option<SnapshotTransferState>,
     room_frame: u64,
 }
@@ -78,6 +60,7 @@ impl NetplayRoom {
             compatibility: HashMap::new(),
             ready_players: HashSet::new(),
             last_input_frames: HashMap::new(),
+            link_cable_state: LinkCableRoomState::default(),
             snapshot_transfer: None,
             room_frame: 0,
         }
@@ -179,6 +162,7 @@ impl NetplayRoom {
         self.compatibility.remove(&player_index);
         self.ready_players.remove(&player_index);
         self.last_input_frames.remove(&player_index);
+        self.link_cable_state.reset();
         self.snapshot_transfer = None;
 
         if is_host {
@@ -197,6 +181,10 @@ impl NetplayRoom {
         connection_id: ConnectionId,
         mut fingerprint: CompatibilityFingerprint,
     ) -> Result<(), RoomError> {
+        if self.session.mode != NetplaySessionMode::ControllerNetplay {
+            return Err(RoomError::CompatibilityMismatch);
+        }
+
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
         }
@@ -308,6 +296,10 @@ impl NetplayRoom {
         input: &InputFrame,
         limits: InputFrameLimits,
     ) -> Result<(), RoomError> {
+        if self.session.mode != NetplaySessionMode::ControllerNetplay {
+            return Err(RoomError::NotPlaying);
+        }
+
         if self.status != RoomStatus::Playing {
             return Err(RoomError::NotPlaying);
         }
@@ -369,7 +361,10 @@ impl NetplayRoom {
                 .all(|player_index| self.compatibility.contains_key(player_index))
     }
 
-    fn player_index_for_connection(&self, connection_id: ConnectionId) -> Option<PlayerIndex> {
+    pub(super) fn player_index_for_connection(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Option<PlayerIndex> {
         self.players
             .iter()
             .find(|slot| slot.connection_id == Some(connection_id))
@@ -384,6 +379,10 @@ impl NetplayRoom {
     }
 
     fn validate_host_snapshot_sender(&self, connection_id: ConnectionId) -> Result<(), RoomError> {
+        if self.session.mode != NetplaySessionMode::ControllerNetplay {
+            return Err(RoomError::RoomNotReady);
+        }
+
         if self.status != RoomStatus::SyncingState && self.status != RoomStatus::Ready {
             return Err(RoomError::RoomNotReady);
         }
@@ -395,7 +394,7 @@ impl NetplayRoom {
         }
     }
 
-    fn connected_player_indices(&self) -> Vec<PlayerIndex> {
+    pub(super) fn connected_player_indices(&self) -> Vec<PlayerIndex> {
         self.players
             .iter()
             .filter(|slot| slot.connection_id.is_some())
@@ -412,7 +411,7 @@ impl NetplayRoom {
                 .all(|player_index| self.ready_players.contains(player_index))
     }
 
-    fn set_player_status(&mut self, player_index: PlayerIndex, status: PlayerStatus) {
+    pub(super) fn set_player_status(&mut self, player_index: PlayerIndex, status: PlayerStatus) {
         if let Some(slot) = self
             .players
             .iter_mut()
@@ -432,6 +431,7 @@ impl NetplayRoom {
         self.compatibility.clear();
         self.ready_players.clear();
         self.last_input_frames.clear();
+        self.link_cable_state.reset();
         self.snapshot_transfer = None;
         self.room_frame = 0;
     }

@@ -7,6 +7,11 @@ single-player library state safe. The desktop app should handle room creation,
 invite-code joining, controller assignment, save-state sync, input relay, and
 netplay-specific resume data without requiring LAN setup or manual networking.
 
+Controller netplay and link-cable mode are separate product modes. Controller
+netplay uses one shared game timeline and requires exact ROM/core/save-state
+compatibility. Link-cable mode uses independent emulator instances and relays
+virtual cable packets for games that expect a physical link cable.
+
 ## Hard State Safety Rule
 
 Netplay must never overwrite normal single-player autosaves, suspend states,
@@ -16,6 +21,8 @@ merge or keep netplay data.
 ## Desktop Surfaces
 
 - Add a `Play Together` action from the game detail view and active game view.
+- For GB/GBC/GBA games, expose a separate `Link Cable` action and avoid routing
+  trades/battles through controller netplay.
 - Host flow:
   - Validate the user's ShadowBoy license.
   - Create a netplay room.
@@ -42,6 +49,22 @@ merge or keep netplay data.
   - connection interrupted
   - resyncing
   - session ended
+
+## Link Cable Mode
+
+- First Desktop release targets two-player GBA link rooms.
+- Host creates a `linkCable` room from a running compatible GBA game.
+- Guest joins from the main app, previews the link room, and selects a local
+  compatible GBA game.
+- Different ROM hashes are allowed for link rooms.
+- Link compatibility is based on `systemFamily`, `linkProtocol`,
+  `runtimeProfile`, and required system-data hash.
+- `runtimeProfile` must be platform-neutral so Android can participate when it
+  proves the same packet/runtime behavior.
+- Link mode should persist normal cartridge saves by default, but create an
+  automatic restore point before the session starts.
+- The runner sends/receives `linkCablePacket` messages only after the room is
+  `playing`.
 
 ## Player Slots
 

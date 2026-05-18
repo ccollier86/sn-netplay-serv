@@ -6,7 +6,7 @@
 use crate::rooms::PlayerIndex;
 
 /// Failure while mutating or querying room state.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum RoomError {
     /// Invite code did not match an active room.
     #[error("room was not found")]
@@ -47,6 +47,12 @@ pub enum RoomError {
     /// Snapshot payload failed relay validation.
     #[error("snapshot payload is invalid")]
     SnapshotInvalid,
+    /// Link-cable packet failed relay validation.
+    #[error("link-cable packet is invalid")]
+    LinkPacketInvalid,
+    /// Link-cable packet sequence did not increase.
+    #[error("link-cable packet is out of order")]
+    OutOfOrderLinkPacket,
     /// Connected players do not have matching compatibility fingerprints.
     #[error("netplay compatibility mismatch")]
     CompatibilityMismatch,

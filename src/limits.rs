@@ -27,6 +27,9 @@ pub const MAX_SNAPSHOT_CHUNK_BYTES: usize = 256 * 1024;
 /// Maximum total snapshot bytes accepted for MVP sync.
 pub const MAX_SNAPSHOT_BYTES: u64 = 64 * 1024 * 1024;
 
+/// Maximum virtual link-cable packet payload relayed through the server.
+pub const MAX_LINK_CABLE_PACKET_BYTES: usize = 4 * 1024;
+
 /// Time a room can wait for a guest before expiring.
 pub const ROOM_JOIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 

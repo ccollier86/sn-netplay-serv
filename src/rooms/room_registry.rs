@@ -3,10 +3,12 @@
 //! The registry owns invite-code lookup and room mutation synchronization. It
 //! does not validate licenses or serialize HTTP responses directly.
 
+use super::stored_room::StoredRoom;
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, InputFrameLimits, NetplaySessionDescriptor,
-    SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    CompatibilityFingerprint, InputFrame, InputFrameLimits, LinkCableCompatibility,
+    LinkCablePacket, LinkCablePacketLimits, NetplaySessionDescriptor, SnapshotChunk,
+    SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, NetplayRoom, PlayerIndex, RoomError, RoomEvent,
@@ -16,8 +18,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, broadcast};
-
-const ROOM_EVENT_CHANNEL_CAPACITY: usize = 32;
 
 /// Room storage behavior needed by transports and routes.
 #[async_trait::async_trait]
@@ -72,6 +72,14 @@ pub trait RoomRegistry: Send + Sync {
         fingerprint: CompatibilityFingerprint,
     ) -> Result<RoomView, RoomError>;
 
+    /// Stores link-cable compatibility details from one connected player.
+    async fn set_link_cable_compatibility(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        compatibility: LinkCableCompatibility,
+    ) -> Result<RoomView, RoomError>;
+
     /// Marks one connected player ready and starts the session when all are ready.
     async fn mark_ready(
         &self,
@@ -101,6 +109,14 @@ pub trait RoomRegistry: Send + Sync {
         invite_code: InviteCode,
         connection_id: ConnectionId,
         input: InputFrame,
+    ) -> Result<(), RoomError>;
+
+    /// Validates and broadcasts one virtual link-cable packet.
+    async fn relay_link_cable_packet(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        packet: LinkCablePacket,
     ) -> Result<(), RoomError>;
 
     /// Returns a serializable room view for an invite code.
@@ -151,56 +167,6 @@ pub struct RoomJoin {
 
 /// Receiver for room domain events.
 pub type RoomEventReceiver = broadcast::Receiver<RoomEvent>;
-
-struct StoredRoom {
-    room: NetplayRoom,
-    events: broadcast::Sender<RoomEvent>,
-    created_at: Instant,
-}
-
-impl StoredRoom {
-    fn new(room: NetplayRoom) -> Self {
-        let (events, _) = broadcast::channel(ROOM_EVENT_CHANNEL_CAPACITY);
-
-        Self {
-            room,
-            events,
-            created_at: Instant::now(),
-        }
-    }
-
-    fn is_expired_waiting(&self, now: Instant, timeout: Duration) -> bool {
-        self.room.status() == crate::rooms::RoomStatus::WaitingForGuest
-            && now.duration_since(self.created_at) >= timeout
-    }
-
-    fn emit_state(&self) {
-        let _ = self
-            .events
-            .send(RoomEvent::RoomStateChanged(self.room.view()));
-    }
-
-    fn emit_start(&self, start_frame: u64) {
-        let _ = self.events.send(RoomEvent::SessionStarted {
-            start_frame,
-            room: self.room.view(),
-        });
-    }
-
-    fn emit_snapshot_chunk(&self, source: ConnectionId, chunk: SnapshotChunk) {
-        let _ = self.events.send(RoomEvent::SnapshotChunk { source, chunk });
-    }
-
-    fn emit_snapshot_complete(&self, source: ConnectionId, manifest: SnapshotManifest) {
-        let _ = self
-            .events
-            .send(RoomEvent::SnapshotComplete { source, manifest });
-    }
-
-    fn emit_input_frame(&self, source: ConnectionId, input: InputFrame) {
-        let _ = self.events.send(RoomEvent::InputFrame { source, input });
-    }
-}
 
 #[async_trait::async_trait]
 impl RoomRegistry for InMemoryRoomRegistry {
@@ -301,7 +267,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
             .get(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
 
-        Ok(stored_room.events.subscribe())
+        Ok(stored_room.subscribe())
     }
 
     async fn set_compatibility(
@@ -351,6 +317,34 @@ impl RoomRegistry for InMemoryRoomRegistry {
         }
 
         Ok(room)
+    }
+
+    async fn set_link_cable_compatibility(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        compatibility: LinkCableCompatibility,
+    ) -> Result<RoomView, RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+
+        match stored_room
+            .room
+            .set_link_cable_compatibility_for_connection(connection_id, compatibility)
+        {
+            Ok(()) => {
+                let room = stored_room.room.view();
+                stored_room.emit_state();
+                Ok(room)
+            }
+            Err(RoomError::CompatibilityMismatch) => {
+                stored_room.emit_state();
+                Err(RoomError::CompatibilityMismatch)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn relay_snapshot_chunk(
@@ -412,6 +406,27 @@ impl RoomRegistry for InMemoryRoomRegistry {
         Ok(())
     }
 
+    async fn relay_link_cable_packet(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        packet: LinkCablePacket,
+    ) -> Result<(), RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+
+        stored_room.room.accept_link_cable_packet(
+            connection_id,
+            &packet,
+            LinkCablePacketLimits::default(),
+        )?;
+        stored_room.emit_link_cable_packet(connection_id, packet);
+
+        Ok(())
+    }
+
     async fn room_view(&self, invite_code: InviteCode) -> Result<RoomView, RoomError> {
         let rooms = self.invite_codes.read().await;
         let stored_room = rooms
@@ -434,6 +449,10 @@ impl RoomRegistry for InMemoryRoomRegistry {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "room_registry_link_tests.rs"]
+mod room_registry_link_tests;
 
 #[cfg(test)]
 #[path = "room_registry_tests.rs"]

@@ -5,21 +5,32 @@
 
 mod client_message;
 mod compatibility;
+mod descriptor_validation;
 mod input_frame;
+mod link_cable_compatibility;
+mod link_cable_descriptor;
+mod link_cable_packet;
 mod netplay_protocol;
 mod server_message;
 mod session_descriptor;
+mod session_descriptor_error;
+mod session_mode;
 mod snapshot;
 
 pub use client_message::ClientMessage;
 pub use compatibility::{CompatibilityFingerprint, CompatibilityMismatch};
 pub use input_frame::{InputFrame, InputFrameLimits};
+pub use link_cable_compatibility::LinkCableCompatibility;
+pub use link_cable_descriptor::{LinkCableDescriptor, LinkCableTransport};
+pub use link_cable_packet::{LinkCablePacket, LinkCablePacketError, LinkCablePacketLimits};
 pub use netplay_protocol::{
     MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION, NETPLAY_PROTOCOL_VERSION, NetplayProtocolView,
     ProtocolVersionError, validate_client_protocol_version,
 };
 pub use server_message::ServerMessage;
 pub use session_descriptor::{
-    NetplayCoreDescriptor, NetplayGameDescriptor, NetplaySessionDescriptor, SessionDescriptorError,
+    NetplayCoreDescriptor, NetplayGameDescriptor, NetplaySessionDescriptor,
 };
+pub use session_descriptor_error::SessionDescriptorError;
+pub use session_mode::NetplaySessionMode;
 pub use snapshot::{SnapshotChunk, SnapshotLimits, SnapshotManifest};

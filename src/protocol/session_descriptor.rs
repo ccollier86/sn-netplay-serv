@@ -1,15 +1,15 @@
-//! Room session descriptor shared before Desktop joins gameplay.
+//! Room session descriptor shared before clients join gameplay.
 //!
 //! The descriptor lets the invited client preview the game and find a matching
-//! local ROM/core. It deliberately stores hashes and stable ids, never ROM data
-//! or local filesystem paths.
+//! local ROM/core or compatible link runtime. It deliberately stores hashes and
+//! stable ids, never ROM data or local filesystem paths.
 
+use crate::protocol::descriptor_validation::{
+    validate_id, validate_optional_id, validate_optional_sha256, validate_optional_short_text,
+    validate_sha256, validate_title,
+};
+use crate::protocol::{LinkCableDescriptor, NetplaySessionMode, SessionDescriptorError};
 use serde::{Deserialize, Serialize};
-
-const ID_MAX_LEN: usize = 96;
-const TITLE_MAX_LEN: usize = 160;
-const SHORT_TEXT_MAX_LEN: usize = 96;
-const SHA256_HEX_LEN: usize = 64;
 
 /// Netplay game/core descriptor supplied by the host when creating a room.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -18,10 +18,16 @@ pub struct NetplaySessionDescriptor {
     /// ShadowBoy Desktop version that created the room.
     #[serde(default)]
     pub host_app_version: Option<String>,
+    /// High-level room behavior selected by the host.
+    #[serde(default)]
+    pub mode: NetplaySessionMode,
     /// Game identity used by the invited Desktop client to find a local ROM.
     pub game: NetplayGameDescriptor,
     /// Emulator core identity used for compatibility gating.
     pub core: NetplayCoreDescriptor,
+    /// Link-cable compatibility details for `linkCable` rooms.
+    #[serde(default)]
+    pub link: Option<LinkCableDescriptor>,
 }
 
 impl NetplaySessionDescriptor {
@@ -29,7 +35,19 @@ impl NetplaySessionDescriptor {
     pub fn validate(&self) -> Result<(), SessionDescriptorError> {
         validate_optional_short_text("hostAppVersion", self.host_app_version.as_deref())?;
         self.game.validate()?;
-        self.core.validate()
+        self.core.validate()?;
+        self.validate_mode()
+    }
+
+    fn validate_mode(&self) -> Result<(), SessionDescriptorError> {
+        match (self.mode, self.link.as_ref()) {
+            (NetplaySessionMode::ControllerNetplay, None) => Ok(()),
+            (NetplaySessionMode::ControllerNetplay, Some(_)) => {
+                Err(SessionDescriptorError { field: "link" })
+            }
+            (NetplaySessionMode::LinkCable, Some(link)) => link.validate(),
+            (NetplaySessionMode::LinkCable, None) => Err(SessionDescriptorError { field: "link" }),
+        }
     }
 }
 
@@ -94,100 +112,87 @@ impl NetplayCoreDescriptor {
     }
 }
 
-/// Descriptor validation failure.
-#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-#[error("invalid netplay session descriptor field {field}")]
-pub struct SessionDescriptorError {
-    /// Invalid field name in camelCase JSON form.
-    pub field: &'static str,
-}
-
-fn validate_id(field: &'static str, value: &str) -> Result<(), SessionDescriptorError> {
-    validate_text(field, value, ID_MAX_LEN)?;
-
-    if value.contains('/')
-        || value.contains('\\')
-        || value.contains("..")
-        || looks_like_windows_drive_path(value)
-    {
-        return Err(SessionDescriptorError { field });
-    }
-
-    Ok(())
-}
-
-fn validate_optional_id(
-    field: &'static str,
-    value: Option<&str>,
-) -> Result<(), SessionDescriptorError> {
-    match value {
-        Some(value) => validate_id(field, value),
-        None => Ok(()),
-    }
-}
-
-fn validate_title(value: &str) -> Result<(), SessionDescriptorError> {
-    validate_text("title", value, TITLE_MAX_LEN)
-}
-
-fn validate_optional_short_text(
-    field: &'static str,
-    value: Option<&str>,
-) -> Result<(), SessionDescriptorError> {
-    match value {
-        Some(value) => validate_text(field, value, SHORT_TEXT_MAX_LEN),
-        None => Ok(()),
-    }
-}
-
-fn validate_text(
-    field: &'static str,
-    value: &str,
-    max_len: usize,
-) -> Result<(), SessionDescriptorError> {
-    if value.trim().is_empty()
-        || value.len() > max_len
-        || value != value.trim()
-        || value.chars().any(char::is_control)
-    {
-        Err(SessionDescriptorError { field })
-    } else {
-        Ok(())
-    }
-}
-
-fn validate_sha256(field: &'static str, value: &str) -> Result<(), SessionDescriptorError> {
-    if value.len() == SHA256_HEX_LEN && value.chars().all(|candidate| candidate.is_ascii_hexdigit())
-    {
-        Ok(())
-    } else {
-        Err(SessionDescriptorError { field })
-    }
-}
-
-fn validate_optional_sha256(
-    field: &'static str,
-    value: Option<&str>,
-) -> Result<(), SessionDescriptorError> {
-    match value {
-        Some(value) => validate_sha256(field, value),
-        None => Ok(()),
-    }
-}
-
-fn looks_like_windows_drive_path(value: &str) -> bool {
-    let bytes = value.as_bytes();
-
-    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
-}
-
 #[cfg(test)]
 mod tests {
     use super::{NetplaySessionDescriptor, SessionDescriptorError};
+    use crate::protocol::NetplaySessionMode;
+    use serde_json::json;
 
     #[test]
-    fn accepts_valid_descriptor() {
+    fn accepts_legacy_controller_descriptor() {
         assert!(descriptor().validate().is_ok());
+    }
+
+    #[test]
+    fn defaults_legacy_descriptor_to_controller_mode() {
+        assert_eq!(descriptor().mode, NetplaySessionMode::ControllerNetplay);
+    }
+
+    #[test]
+    fn accepts_link_cable_descriptor() {
+        let mut value = descriptor_value();
+        value["mode"] = json!("linkCable");
+        value["link"] = json!({
+            "systemFamily": "gba",
+            "linkProtocol": "gba-link-cable-v1",
+            "runtimeProfile": "mgba-link-runtime-v1",
+            "maxPlayers": 2,
+            "transport": "relay"
+        });
+        let descriptor =
+            serde_json::from_value::<NetplaySessionDescriptor>(value).expect("link descriptor");
+
+        assert!(descriptor.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_link_mode_without_link_details() {
+        let mut descriptor = descriptor();
+        descriptor.mode = NetplaySessionMode::LinkCable;
+
+        assert_eq!(
+            descriptor.validate(),
+            Err(SessionDescriptorError { field: "link" })
+        );
+    }
+
+    #[test]
+    fn rejects_link_details_for_controller_mode() {
+        let mut value = descriptor_value();
+        value["link"] = json!({
+            "systemFamily": "gba",
+            "linkProtocol": "gba-link-cable-v1",
+            "runtimeProfile": "mgba-link-runtime-v1",
+            "maxPlayers": 2
+        });
+        let descriptor =
+            serde_json::from_value::<NetplaySessionDescriptor>(value).expect("descriptor");
+
+        assert_eq!(
+            descriptor.validate(),
+            Err(SessionDescriptorError { field: "link" })
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_link_player_count() {
+        let mut value = descriptor_value();
+        value["mode"] = json!("linkCable");
+        value["link"] = json!({
+            "systemFamily": "gba",
+            "linkProtocol": "gba-link-cable-v1",
+            "runtimeProfile": "mgba-link-runtime-v1",
+            "maxPlayers": 4
+        });
+        let descriptor =
+            serde_json::from_value::<NetplaySessionDescriptor>(value).expect("descriptor");
+
+        assert_eq!(
+            descriptor.validate(),
+            Err(SessionDescriptorError {
+                field: "link.maxPlayers"
+            })
+        );
     }
 
     #[test]
@@ -215,7 +220,11 @@ mod tests {
     }
 
     pub fn descriptor() -> NetplaySessionDescriptor {
-        serde_json::from_value(serde_json::json!({
+        serde_json::from_value(descriptor_value()).expect("descriptor")
+    }
+
+    fn descriptor_value() -> serde_json::Value {
+        serde_json::json!({
             "hostAppVersion": "0.3.0",
             "game": {
                 "systemId": "gamecube",
@@ -232,7 +241,6 @@ mod tests {
                 "coreVersion": "5.0-netplay",
                 "coreOptionsSha256": "b".repeat(64)
             }
-        }))
-        .expect("descriptor")
+        })
     }
 }

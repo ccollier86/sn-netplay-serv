@@ -3,7 +3,7 @@
 //! Events let transports broadcast room changes without putting WebSocket
 //! concepts inside the room domain model.
 
-use crate::protocol::{InputFrame, SnapshotChunk, SnapshotManifest};
+use crate::protocol::{InputFrame, LinkCablePacket, SnapshotChunk, SnapshotManifest};
 use crate::rooms::{ConnectionId, RoomView};
 
 /// Event emitted after a room changes.
@@ -19,6 +19,13 @@ pub enum RoomEvent {
         source: ConnectionId,
         /// Validated input frame.
         input: InputFrame,
+    },
+    /// Link-cable packet should be relayed to other subscribers.
+    LinkCablePacket {
+        /// Connection that supplied the packet.
+        source: ConnectionId,
+        /// Validated virtual link-cable packet.
+        packet: LinkCablePacket,
     },
     /// Snapshot chunk should be relayed to subscribers.
     SnapshotChunk {

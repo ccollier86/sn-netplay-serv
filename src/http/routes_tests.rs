@@ -173,6 +173,47 @@ async fn create_room_accepts_android_client_auth() {
 }
 
 #[tokio::test]
+async fn create_room_accepts_link_cable_descriptor() {
+    let mut body = create_room_value();
+    body["session"]["mode"] = json!("linkCable");
+    body["session"]["link"] = json!({
+        "systemFamily": "gba",
+        "linkProtocol": "gba-link-cable-v1",
+        "runtimeProfile": "mgba-link-runtime-v1",
+        "maxPlayers": 2,
+        "transport": "relay"
+    });
+    body["session"]["game"]["systemId"] = json!("gba");
+    body["session"]["core"]["coreId"] = json!("mgba");
+
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/rooms")
+                .header("authorization", "Bearer valid")
+                .header("x-client-kind", "android")
+                .header("x-installation-id", "android-install-1")
+                .body(Body::from(body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let value = serde_json::from_slice::<Value>(&body).expect("json");
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["room"]["session"]["mode"], "linkCable");
+    assert_eq!(
+        value["room"]["session"]["link"]["runtimeProfile"],
+        "mgba-link-runtime-v1"
+    );
+}
+
+#[tokio::test]
 async fn create_room_rejects_unknown_client_kind() {
     let response = app()
         .oneshot(

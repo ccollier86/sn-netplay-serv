@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Client;
@@ -47,11 +49,19 @@ impl SmokeServer {
     }
 
     pub async fn create_room(&self) -> String {
+        self.create_room_from_body(create_room_body()).await
+    }
+
+    pub async fn create_link_room(&self) -> String {
+        self.create_room_from_body(create_link_room_body()).await
+    }
+
+    async fn create_room_from_body(&self, body: Value) -> String {
         let response = Client::new()
             .post(format!("{}/v1/rooms", self.http_base))
             .bearer_auth("host-token")
             .header("x-install-id", "host-install")
-            .json(&create_room_body())
+            .json(&body)
             .send()
             .await
             .expect("create room response");
@@ -149,6 +159,17 @@ impl SmokeClient {
             }
         }
     }
+
+    pub async fn expect_link_packet_from(&mut self, player_index: u8) -> Value {
+        loop {
+            let message = self.next_json().await;
+            if message["type"] == "linkCablePacket"
+                && message["packet"]["playerIndex"] == u64::from(player_index)
+            {
+                return message;
+            }
+        }
+    }
 }
 
 pub fn compatibility_fingerprint() -> Value {
@@ -188,6 +209,35 @@ pub async fn move_pair_to_syncing(host: &mut SmokeClient, guest: &mut SmokeClien
         .send(json!({
             "type": "setCompatibilityFingerprint",
             "fingerprint": compatibility_fingerprint()
+        }))
+        .await;
+
+    let host_state = host.expect_room_status("syncingState").await;
+    let guest_state = guest.expect_room_status("syncingState").await;
+    assert_eq!(host_state["room"]["status"], "syncingState");
+    assert_eq!(guest_state["room"]["status"], "syncingState");
+}
+
+pub fn link_cable_compatibility() -> Value {
+    json!({
+        "protocolVersion": 1,
+        "systemFamily": "gba",
+        "linkProtocol": "gba-link-cable-v1",
+        "runtimeProfile": "mgba-link-runtime-v1",
+        "systemDataHash": null
+    })
+}
+
+pub async fn move_link_pair_to_syncing(host: &mut SmokeClient, guest: &mut SmokeClient) {
+    host.send(json!({
+        "type": "setLinkCableCompatibility",
+        "compatibility": link_cable_compatibility()
+    }))
+    .await;
+    guest
+        .send(json!({
+            "type": "setLinkCableCompatibility",
+            "compatibility": link_cable_compatibility()
         }))
         .await;
 
@@ -263,6 +313,35 @@ fn create_room_body() -> Value {
                 "coreName": "Dolphin",
                 "coreVersion": "5.0-netplay",
                 "coreOptionsSha256": "b".repeat(64)
+            }
+        }
+    })
+}
+
+fn create_link_room_body() -> Value {
+    json!({
+        "desktopProtocolVersion": 1,
+        "session": {
+            "hostAppVersion": "0.2.13",
+            "mode": "linkCable",
+            "game": {
+                "systemId": "gba",
+                "title": "Pokemon Ruby",
+                "romSha256": "a".repeat(64),
+                "contentKey": "gba-ruby"
+            },
+            "core": {
+                "coreId": "mgba",
+                "coreName": "mGBA",
+                "coreVersion": "link-runtime",
+                "coreOptionsSha256": "b".repeat(64)
+            },
+            "link": {
+                "systemFamily": "gba",
+                "linkProtocol": "gba-link-cable-v1",
+                "runtimeProfile": "mgba-link-runtime-v1",
+                "maxPlayers": 2,
+                "transport": "relay"
             }
         }
     })

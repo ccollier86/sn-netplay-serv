@@ -6,8 +6,9 @@
 use super::{NetplayRoom, RoomStatus};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, InputFrameLimits, NETPLAY_PROTOCOL_VERSION,
-    NetplaySessionDescriptor, SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    CompatibilityFingerprint, InputFrame, InputFrameLimits, LinkCableCompatibility,
+    LinkCablePacket, LinkCablePacketLimits, NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor,
+    SnapshotChunk, SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, PlayerStatus, RoomError};
 use sha2::{Digest, Sha256};
@@ -274,10 +275,104 @@ fn future_frame_limit_is_enforced() {
     assert!(matches!(result, Err(RoomError::FutureFrameTooLarge)));
 }
 
+#[test]
+fn link_compatibility_enters_syncing_state() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = link_room(host_connection);
+    room.join_guest(license("guest"), guest_connection)
+        .expect("guest joins");
+
+    room.set_link_cable_compatibility_for_connection(host_connection, link_compatibility(None))
+        .expect("host link compatibility");
+    room.set_link_cable_compatibility_for_connection(guest_connection, link_compatibility(None))
+        .expect("guest link compatibility");
+
+    assert_eq!(room.view().status, RoomStatus::SyncingState);
+}
+
+#[test]
+fn link_compatibility_rejects_mismatched_system_data() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = link_room(host_connection);
+    room.join_guest(license("guest"), guest_connection)
+        .expect("guest joins");
+
+    room.set_link_cable_compatibility_for_connection(
+        host_connection,
+        link_compatibility(Some("bios-a")),
+    )
+    .expect("host link compatibility");
+    let result = room.set_link_cable_compatibility_for_connection(
+        guest_connection,
+        link_compatibility(Some("bios-b")),
+    );
+
+    assert!(matches!(result, Err(RoomError::CompatibilityMismatch)));
+}
+
+#[test]
+fn link_packets_relay_only_after_link_room_is_playing() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = compatible_link_room(host_connection, guest_connection);
+    let packet = link_packet(PlayerIndex::ONE, 1);
+
+    assert!(matches!(
+        room.accept_link_cable_packet(host_connection, &packet, LinkCablePacketLimits::default(),),
+        Err(RoomError::NotPlaying)
+    ));
+
+    room.mark_ready(host_connection).expect("host ready");
+    room.mark_ready(guest_connection).expect("guest ready");
+
+    assert!(
+        room.accept_link_cable_packet(host_connection, &packet, LinkCablePacketLimits::default(),)
+            .is_ok()
+    );
+}
+
+#[test]
+fn link_packet_cannot_spoof_player_slot() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_link_room(host_connection, guest_connection);
+
+    let result = room.accept_link_cable_packet(
+        host_connection,
+        &link_packet(PlayerIndex::TWO, 1),
+        LinkCablePacketLimits::default(),
+    );
+
+    assert!(matches!(result, Err(RoomError::SlotSpoofing(_))));
+}
+
 fn ready_room(host_connection: ConnectionId, guest_connection: ConnectionId) -> NetplayRoom {
     let mut room = compatible_room(host_connection, guest_connection);
     room.mark_ready(host_connection).expect("host ready");
     room.mark_ready(guest_connection).expect("guest ready");
+    room
+}
+
+fn ready_link_room(host_connection: ConnectionId, guest_connection: ConnectionId) -> NetplayRoom {
+    let mut room = compatible_link_room(host_connection, guest_connection);
+    room.mark_ready(host_connection).expect("host ready");
+    room.mark_ready(guest_connection).expect("guest ready");
+    room
+}
+
+fn compatible_link_room(
+    host_connection: ConnectionId,
+    guest_connection: ConnectionId,
+) -> NetplayRoom {
+    let mut room = link_room(host_connection);
+    room.join_guest(license("guest"), guest_connection)
+        .expect("guest joins");
+    room.set_link_cable_compatibility_for_connection(host_connection, link_compatibility(None))
+        .expect("host link compatibility");
+    room.set_link_cable_compatibility_for_connection(guest_connection, link_compatibility(None))
+        .expect("guest link compatibility");
     room
 }
 
@@ -301,6 +396,15 @@ fn room(host_connection: ConnectionId) -> NetplayRoom {
     )
 }
 
+fn link_room(host_connection: ConnectionId) -> NetplayRoom {
+    NetplayRoom::new(
+        license("host"),
+        host_connection,
+        InviteCode::parse("AB23-CD").expect("invite code"),
+        link_descriptor(),
+    )
+}
+
 fn descriptor() -> NetplaySessionDescriptor {
     serde_json::from_value(serde_json::json!({
         "hostAppVersion": "0.3.0",
@@ -315,6 +419,29 @@ fn descriptor() -> NetplaySessionDescriptor {
         }
     }))
     .expect("descriptor")
+}
+
+fn link_descriptor() -> NetplaySessionDescriptor {
+    serde_json::from_value(serde_json::json!({
+        "hostAppVersion": "0.3.0",
+        "mode": "linkCable",
+        "game": {
+            "systemId": "gba",
+            "title": "Pokemon Ruby",
+            "romSha256": "a".repeat(64),
+            "contentKey": "gba-ruby"
+        },
+        "core": {
+            "coreId": "mgba"
+        },
+        "link": {
+            "systemFamily": "gba",
+            "linkProtocol": "gba-link-cable-v1",
+            "runtimeProfile": "mgba-link-runtime-v1",
+            "maxPlayers": 2
+        }
+    }))
+    .expect("link descriptor")
 }
 
 fn input(player_index: PlayerIndex, frame: u64) -> InputFrame {
@@ -341,6 +468,25 @@ fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {
         cheats_hash: "cheats".to_string(),
         system_data_hash: None,
         save_data_mode: "netplay".to_string(),
+    }
+}
+
+fn link_compatibility(system_data_hash: Option<&str>) -> LinkCableCompatibility {
+    LinkCableCompatibility {
+        protocol_version: NETPLAY_PROTOCOL_VERSION,
+        system_family: "gba".to_string(),
+        link_protocol: "gba-link-cable-v1".to_string(),
+        runtime_profile: "mgba-link-runtime-v1".to_string(),
+        system_data_hash: system_data_hash.map(str::to_string),
+    }
+}
+
+fn link_packet(player_index: PlayerIndex, sequence: u64) -> LinkCablePacket {
+    LinkCablePacket {
+        player_index,
+        sequence,
+        emulated_time: sequence * 16,
+        payload: vec![1, 2, 3],
     }
 }
 

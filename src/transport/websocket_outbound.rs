@@ -73,6 +73,12 @@ fn room_error_message(error: RoomError) -> ServerMessage {
         RoomError::SnapshotInvalid => {
             static_error("snapshotInvalid", "Snapshot payload is invalid.")
         }
+        RoomError::LinkPacketInvalid => {
+            static_error("linkPacketInvalid", "Link-cable packet is invalid.")
+        }
+        RoomError::OutOfOrderLinkPacket => {
+            static_error("outOfOrderLinkPacket", "Link-cable packet is out of order.")
+        }
         RoomError::SlotSpoofing(_) => {
             static_error("slotSpoofing", "Input was sent for the wrong player slot.")
         }

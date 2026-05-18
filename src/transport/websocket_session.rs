@@ -153,6 +153,12 @@ async fn handle_room_event(
             ServerMessage::StartSession { start_frame, room }
         }
         Ok(RoomEvent::InputFrame { input, .. }) => ServerMessage::InputFrame { input },
+        Ok(RoomEvent::LinkCablePacket { source, packet }) => {
+            if source == connection_id {
+                return true;
+            }
+            ServerMessage::LinkCablePacket { packet }
+        }
         Ok(RoomEvent::SnapshotChunk { source, chunk }) => {
             if source == connection_id {
                 return true;

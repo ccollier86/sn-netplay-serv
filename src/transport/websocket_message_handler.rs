@@ -55,6 +55,17 @@ async fn handle_client_message(
             )
             .await
         }
+        ClientMessage::SetLinkCableCompatibility { compatibility } => {
+            apply_room_result(
+                sender,
+                services
+                    .rooms
+                    .set_link_cable_compatibility(invite_code.clone(), connection_id, compatibility)
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
         ClientMessage::Ready => {
             apply_room_result(
                 sender,
@@ -92,6 +103,16 @@ async fn handle_client_message(
                 services
                     .rooms
                     .relay_input_frame(invite_code.clone(), connection_id, input)
+                    .await,
+            )
+            .await
+        }
+        ClientMessage::LinkCablePacket { packet } => {
+            apply_room_result(
+                sender,
+                services
+                    .rooms
+                    .relay_link_cable_packet(invite_code.clone(), connection_id, packet)
                     .await,
             )
             .await

@@ -45,6 +45,7 @@ Body:
   "desktopProtocolVersion": 1,
   "session": {
     "hostAppVersion": "0.3.0",
+    "mode": "controllerNetplay",
     "game": {
       "systemId": "gamecube",
       "title": "Star Fox Adventures",
@@ -59,7 +60,8 @@ Body:
       "coreName": "Dolphin",
       "coreVersion": "5.0-netplay",
       "coreOptionsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    }
+    },
+    "link": null
   }
 }
 ```
@@ -67,6 +69,24 @@ Body:
 Descriptor fields must not contain absolute paths or local filenames. The ROM
 hash is used only to match a local copy on the invited Desktop client. The relay
 does not transfer ROM files.
+
+`session.mode` defaults to `controllerNetplay` for older Desktop clients. Link
+cable rooms must send `mode: "linkCable"` and a `link` descriptor:
+
+```json
+{
+  "systemFamily": "gba",
+  "linkProtocol": "gba-link-cable-v1",
+  "runtimeProfile": "mgba-link-runtime-v1",
+  "maxPlayers": 2,
+  "transport": "relay"
+}
+```
+
+The link descriptor is intentionally platform-neutral. Desktop and Android can
+join the same room only when they can send the exact same `runtimeProfile` and
+link protocol. Link rooms do not require guest ROM hashes to match the host
+ROM hash.
 
 Response:
 
@@ -81,6 +101,7 @@ Response:
     },
     "session": {
       "hostAppVersion": "0.3.0",
+      "mode": "controllerNetplay",
       "game": {
         "systemId": "gamecube",
         "title": "Star Fox Adventures",
@@ -95,7 +116,8 @@ Response:
         "coreName": "Dolphin",
         "coreVersion": "5.0-netplay",
         "coreOptionsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-      }
+      },
+      "link": null
     },
     "maxPlayers": 2,
     "status": "waitingForGuest",
@@ -123,8 +145,10 @@ Response:
 
 Returns the current room view for a user-entered invite code.
 
-Desktop should call this before opening a WebSocket so the guest can see the
-game title/system/core and verify that a local ROM has the exact `romSha256`.
+Clients should call this before opening a WebSocket so the guest can see the
+game title/system/core and verify local compatibility. Controller-netplay rooms
+require an exact `romSha256` match. Link-cable rooms require a compatible local
+runtime profile and may use different ROM hashes.
 
 ## WebSocket
 
@@ -224,7 +248,7 @@ and replies:
 
 ## Compatibility Fingerprint
 
-Desktop sends these fields before the session can start:
+Controller-netplay clients send these fields before the session can start:
 
 ```json
 {
@@ -247,6 +271,29 @@ Desktop sends these fields before the session can start:
 Sessions must not start if connected players have different fingerprints.
 
 When both players match, the room enters `syncingState`.
+
+## Link Cable Compatibility
+
+Link-cable clients send a separate compatibility payload:
+
+```json
+{
+  "type": "setLinkCableCompatibility",
+  "compatibility": {
+    "protocolVersion": 1,
+    "systemFamily": "gba",
+    "linkProtocol": "gba-link-cable-v1",
+    "runtimeProfile": "mgba-link-runtime-v1",
+    "systemDataHash": null
+  }
+}
+```
+
+The server compares protocol version, system family, link protocol, runtime
+profile, and system-data hash. It does not compare ROM hashes for link-cable
+rooms because trades and battles often use different game versions. When both
+players are compatible, the room enters `syncingState`; each client can then
+send `ready`.
 
 ## Snapshot Relay
 
@@ -319,6 +366,33 @@ Validation rules:
 - Input is only accepted while the room is `playing`.
 
 Accepted input frames are broadcast as authoritative `inputFrame` messages.
+
+## Link Cable Packet
+
+Link-cable packets are only accepted for `linkCable` rooms after both clients
+have sent `ready` and the room is `playing`.
+
+```json
+{
+  "type": "linkCablePacket",
+  "packet": {
+    "playerIndex": 0,
+    "sequence": 123,
+    "emulatedTime": 582991,
+    "payload": [1, 2, 3]
+  }
+}
+```
+
+Validation rules:
+
+- The connection may only send packets for its server-assigned `playerIndex`.
+- `sequence` must increase per player.
+- `payload` must be non-empty and under `MAX_LINK_CABLE_PACKET_BYTES`.
+- Packet bytes are opaque to the relay and are not persisted.
+
+Accepted packets are broadcast as `linkCablePacket` messages to the other
+connected player, not echoed to the sender.
 
 ## Snapshot Validation
 

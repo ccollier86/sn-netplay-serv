@@ -3,7 +3,7 @@
 //! These messages are stable room updates or protocol errors Desktop can render
 //! directly. They do not contain secrets or raw auth details.
 
-use crate::protocol::{InputFrame, SnapshotChunk, SnapshotManifest};
+use crate::protocol::{InputFrame, LinkCablePacket, SnapshotChunk, SnapshotManifest};
 use crate::rooms::RoomView;
 use serde::Serialize;
 
@@ -40,6 +40,11 @@ pub enum ServerMessage {
     InputFrame {
         /// Authoritative input frame.
         input: InputFrame,
+    },
+    /// Link-cable packet relayed from another player.
+    LinkCablePacket {
+        /// Opaque virtual cable packet.
+        packet: LinkCablePacket,
     },
     /// Snapshot chunk relayed from the host.
     SnapshotChunk {

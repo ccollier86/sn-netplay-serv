@@ -22,9 +22,13 @@ tests added as each system is built.
 6. Desktop previews the room descriptor and matches a local ROM by hash.
 7. Server validates the guest license the same way.
 8. Desktop clients exchange compatibility fingerprints.
-9. Host sends a save-state snapshot to the guest through the relay.
-10. Both clients start from the same frame.
-11. Server relays frame-numbered input messages until the session ends.
+9. For controller netplay, host sends a save-state snapshot to the guest through
+   the relay.
+10. For link-cable mode, clients exchange link compatibility and then relay
+   virtual cable packets after both are ready.
+11. Both clients start from the same server-assigned player slots.
+12. Server relays frame-numbered input messages or link-cable packets until the
+   session ends.
 
 ## Rust Stack
 
@@ -54,6 +58,9 @@ src/
     server_message.rs
     compatibility.rs
     input_frame.rs
+    link_cable_compatibility.rs
+    link_cable_descriptor.rs
+    link_cable_packet.rs
     snapshot.rs
   transport/
     websocket_session.rs
@@ -77,6 +84,14 @@ WebSocket join also requires authorization.
 The relay must never transfer ROM files. It only stores hashes and stable ids so
 ShadowBoy can tell the guest whether they already have the correct local
 content.
+
+Rooms have an explicit `mode`:
+
+- `controllerNetplay` keeps the current same-ROM, save-state-sync, lockstep
+  input flow.
+- `linkCable` is for independent emulator instances connected by a virtual link
+  cable. It uses a platform-neutral `link` descriptor and does not require ROM
+  hashes to match.
 
 ## License Validation
 
@@ -138,6 +153,18 @@ about 10 seconds. Never log tokens.
 - Short invite code, for example `8K4X-2Q`.
 - Room expires if no guest joins within 10 minutes.
 - Room closes when host leaves.
+
+## Link Cable Rules
+
+- First release supports two-player GBA link rooms.
+- The server still never receives ROMs and never runs emulators.
+- Host is cable Player 1; guest is cable Player 2.
+- `runtimeProfile` describes compatible client runtimes, not operating systems.
+- Desktop and Android can join only when `linkProtocol`, `runtimeProfile`, and
+  required system-data hashes match.
+- Link packets are opaque bytes to the relay.
+- Link packet sequence must increase per player.
+- Link packets are relayed to the other player and not echoed to the sender.
 - No long-term persistence needed for MVP.
 
 ## Player Slots And Status

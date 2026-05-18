@@ -3,7 +3,10 @@
 //! These message types are transport payloads only. Domain validation still
 //! happens in room modules before input or state is accepted.
 
-use crate::protocol::{CompatibilityFingerprint, InputFrame, SnapshotChunk, SnapshotManifest};
+use crate::protocol::{
+    CompatibilityFingerprint, InputFrame, LinkCableCompatibility, LinkCablePacket, SnapshotChunk,
+    SnapshotManifest,
+};
 use serde::Deserialize;
 
 /// Message sent by a Desktop client over a room WebSocket.
@@ -16,6 +19,11 @@ pub enum ClientMessage {
     SetCompatibilityFingerprint {
         /// Netplay-relevant compatibility details.
         fingerprint: CompatibilityFingerprint,
+    },
+    /// Client link-cable compatibility for the selected runtime.
+    SetLinkCableCompatibility {
+        /// Link-cable runtime compatibility details.
+        compatibility: LinkCableCompatibility,
     },
     /// Client is ready to start or continue the sync phase.
     Ready,
@@ -33,5 +41,10 @@ pub enum ClientMessage {
     InputFrame {
         /// Normalized input payload.
         input: InputFrame,
+    },
+    /// Opaque virtual link-cable packet from the local runtime.
+    LinkCablePacket {
+        /// Link packet to relay.
+        packet: LinkCablePacket,
     },
 }
