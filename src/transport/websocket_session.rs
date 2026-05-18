@@ -152,6 +152,21 @@ async fn handle_room_event(
         Ok(RoomEvent::SessionStarted { start_frame, room }) => {
             ServerMessage::StartSession { start_frame, room }
         }
+        Ok(RoomEvent::SessionPauseScheduled { pause, room }) => {
+            ServerMessage::SessionPauseScheduled { pause, room }
+        }
+        Ok(RoomEvent::SessionPauseUpdated { pause, room }) => {
+            ServerMessage::SessionPauseUpdated { pause, room }
+        }
+        Ok(RoomEvent::SessionResumeScheduled {
+            sequence,
+            resume_at_frame,
+            room,
+        }) => ServerMessage::SessionResumeScheduled {
+            sequence,
+            resume_at_frame,
+            room,
+        },
         Ok(RoomEvent::InputFrame { input, .. }) => ServerMessage::InputFrame { input },
         Ok(RoomEvent::LinkCablePacket { source, packet }) => {
             if source == connection_id {

@@ -35,6 +35,8 @@ pub enum PlayerStatus {
     Ready,
     /// Player is in active gameplay.
     Playing,
+    /// Player is paused by coordinated netplay pause.
+    Paused,
     /// Player disconnected.
     Disconnected,
 }

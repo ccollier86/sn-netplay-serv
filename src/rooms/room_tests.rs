@@ -8,9 +8,12 @@ use crate::auth::VerifiedLicense;
 use crate::protocol::{
     CompatibilityFingerprint, InputFrame, InputFrameLimits, LinkCableCompatibility,
     LinkCablePacket, LinkCablePacketLimits, NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor,
-    SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    SessionPauseReason, SessionPauseState, SnapshotChunk, SnapshotLimits, SnapshotManifest,
 };
-use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, PlayerStatus, RoomError};
+use crate::rooms::{
+    ConnectionId, InputFrameAcceptance, InviteCode, PlayerIndex, PlayerStatus, RoomError,
+    SessionResumeOutcome,
+};
 use sha2::{Digest, Sha256};
 
 #[test]
@@ -371,6 +374,99 @@ fn link_packet_cannot_spoof_player_slot() {
     );
 
     assert!(matches!(result, Err(RoomError::SlotSpoofing(_))));
+}
+
+#[test]
+fn coordinated_pause_requires_all_players_before_paused() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+
+    let pause = room
+        .request_session_pause(host_connection, SessionPauseReason::Menu, 10)
+        .expect("pause scheduled");
+    assert_eq!(pause.sequence, 1);
+    assert_eq!(pause.pause_at_frame, 18);
+    assert_eq!(
+        room.view().pause.expect("pause view").state,
+        SessionPauseState::Pausing
+    );
+
+    room.mark_session_pause_reached(host_connection, pause.sequence, 18)
+        .expect("host paused");
+    assert_eq!(room.status(), RoomStatus::Playing);
+
+    let paused = room
+        .mark_session_pause_reached(guest_connection, pause.sequence, 18)
+        .expect("guest paused");
+    assert_eq!(paused.paused_at_frame, Some(18));
+    assert_eq!(room.status(), RoomStatus::Paused);
+    assert_eq!(room.view().players[0].status, PlayerStatus::Paused);
+}
+
+#[test]
+fn coordinated_pause_allows_in_flight_delayed_input_without_error() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+
+    let pause = room
+        .request_session_pause(host_connection, SessionPauseReason::Menu, 10)
+        .expect("pause scheduled");
+
+    assert_eq!(
+        room.accept_input_frame(
+            host_connection,
+            &input(PlayerIndex::ONE, pause.pause_at_frame + 3),
+            InputFrameLimits {
+                max_future_frame_distance: 32,
+            },
+        )
+        .expect("in-flight input accepted"),
+        InputFrameAcceptance::Relay
+    );
+    assert_eq!(
+        room.accept_input_frame(
+            guest_connection,
+            &input(PlayerIndex::TWO, pause.pause_at_frame + 4),
+            InputFrameLimits {
+                max_future_frame_distance: 32,
+            },
+        )
+        .expect("post-window input ignored"),
+        InputFrameAcceptance::Ignore
+    );
+}
+
+#[test]
+fn coordinated_resume_waits_for_all_pause_holders_to_release() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+
+    let pause = room
+        .request_session_pause(host_connection, SessionPauseReason::Menu, 10)
+        .expect("pause scheduled");
+    room.request_session_pause(guest_connection, SessionPauseReason::Menu, 10)
+        .expect("guest holds pause");
+    room.mark_session_pause_reached(host_connection, pause.sequence, 18)
+        .expect("host paused");
+    room.mark_session_pause_reached(guest_connection, pause.sequence, 18)
+        .expect("guest paused");
+
+    assert!(matches!(
+        room.request_session_resume(host_connection, pause.sequence),
+        Ok(SessionResumeOutcome::StillPaused(_))
+    ));
+    assert_eq!(room.status(), RoomStatus::Paused);
+
+    assert!(matches!(
+        room.request_session_resume(guest_connection, pause.sequence),
+        Ok(SessionResumeOutcome::Resumed {
+            resume_at_frame: 19
+        })
+    ));
+    assert_eq!(room.status(), RoomStatus::Playing);
 }
 
 fn ready_room(host_connection: ConnectionId, guest_connection: ConnectionId) -> NetplayRoom {

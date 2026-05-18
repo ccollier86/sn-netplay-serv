@@ -42,7 +42,7 @@ Body:
 
 ```json
 {
-  "desktopProtocolVersion": 1,
+  "desktopProtocolVersion": 2,
   "session": {
     "hostAppVersion": "0.3.0",
     "mode": "controllerNetplay",
@@ -96,7 +96,7 @@ Response:
     "roomId": "<uuid>",
     "inviteCode": "AB23-CD",
     "protocol": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "minSupportedProtocolVersion": 1
     },
     "session": {
@@ -152,7 +152,7 @@ runtime profile and may use different ROM hashes.
 
 ## WebSocket
 
-### `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=1`
+### `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=2`
 
 Attaches the room creator's Desktop client to Player 1.
 
@@ -167,7 +167,7 @@ X-Req-Nonce: <unique nonce>
 X-Req-Sig: <base64 signature>
 ```
 
-### `GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=1`
+### `GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=2`
 
 Adds the guest Desktop client to Player 2.
 
@@ -183,7 +183,7 @@ First successful socket message:
     "roomId": "<uuid>",
     "inviteCode": "AB23-CD",
     "protocol": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "minSupportedProtocolVersion": 1
     },
     "session": {
@@ -213,7 +213,7 @@ Whenever room state changes, subscribed sockets receive:
     "roomId": "<uuid>",
     "inviteCode": "AB23-CD",
     "protocol": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "minSupportedProtocolVersion": 1
     },
     "session": {
@@ -255,7 +255,7 @@ Controller-netplay clients send these fields before the session can start:
   "type": "setCompatibilityFingerprint",
   "fingerprint": {
     "desktopVersion": "0.2.10",
-    "protocolVersion": 1,
+    "protocolVersion": 2,
     "systemId": "n64",
     "coreId": "mupen64plus-next",
     "coreBuild": "core-build",
@@ -280,7 +280,7 @@ Link-cable clients send a separate compatibility payload:
 {
   "type": "setLinkCableCompatibility",
   "compatibility": {
-    "protocolVersion": 1,
+    "protocolVersion": 2,
     "systemFamily": "gba",
     "linkProtocol": "gba-link-cable-v1",
     "runtimeProfile": "mgba-link-runtime-v1",

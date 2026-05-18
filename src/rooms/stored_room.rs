@@ -4,7 +4,9 @@
 //! beside a room and exposes small emit helpers. It does not parse protocol
 //! messages or apply room-domain rules.
 
-use crate::protocol::{InputFrame, LinkCablePacket, SnapshotChunk, SnapshotManifest};
+use crate::protocol::{
+    InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
+};
 use crate::rooms::{ConnectionId, NetplayRoom, RoomEvent};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
@@ -52,6 +54,31 @@ impl StoredRoom {
     pub(super) fn emit_start(&self, start_frame: u64) {
         let _ = self.events.send(RoomEvent::SessionStarted {
             start_frame,
+            room: self.room.view(),
+        });
+    }
+
+    /// Emits a coordinated pause schedule.
+    pub(super) fn emit_session_pause_scheduled(&self, pause: SessionPauseView) {
+        let _ = self.events.send(RoomEvent::SessionPauseScheduled {
+            pause,
+            room: self.room.view(),
+        });
+    }
+
+    /// Emits a coordinated pause update.
+    pub(super) fn emit_session_pause_updated(&self, pause: SessionPauseView) {
+        let _ = self.events.send(RoomEvent::SessionPauseUpdated {
+            pause,
+            room: self.room.view(),
+        });
+    }
+
+    /// Emits a coordinated resume schedule.
+    pub(super) fn emit_session_resume_scheduled(&self, sequence: u64, resume_at_frame: u64) {
+        let _ = self.events.send(RoomEvent::SessionResumeScheduled {
+            sequence,
+            resume_at_frame,
             room: self.room.view(),
         });
     }

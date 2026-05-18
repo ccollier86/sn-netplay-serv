@@ -117,6 +117,55 @@ async fn handle_client_message(
             )
             .await
         }
+        ClientMessage::RequestSessionPause {
+            request_id: _,
+            reason,
+            local_frame,
+        } => {
+            apply_room_result(
+                sender,
+                services
+                    .rooms
+                    .request_session_pause(invite_code.clone(), connection_id, reason, local_frame)
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
+        ClientMessage::SessionPauseReached {
+            sequence,
+            paused_at_frame,
+        } => {
+            apply_room_result(
+                sender,
+                services
+                    .rooms
+                    .mark_session_pause_reached(
+                        invite_code.clone(),
+                        connection_id,
+                        sequence,
+                        paused_at_frame,
+                    )
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
+        ClientMessage::RequestSessionResume {
+            request_id: _,
+            reason: _,
+            sequence,
+        } => {
+            apply_room_result(
+                sender,
+                services
+                    .rooms
+                    .request_session_resume(invite_code.clone(), connection_id, sequence)
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
     }
 }
 

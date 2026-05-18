@@ -73,7 +73,7 @@ src/
 GET  /health
 POST /v1/rooms
 GET  /v1/rooms/:inviteCode/status
-GET  /v1/ws?inviteCode=XXXX&protocolVersion=1
+GET  /v1/ws?inviteCode=XXXX&protocolVersion=2
 ```
 
 `POST /v1/rooms` requires a valid ShadowBoy protected-client token and returns
@@ -313,7 +313,7 @@ Host and guest must match before gameplay starts.
   "romHash": "sha256",
   "settingsHash": "sha256",
   "saveStateVersion": "string",
-  "desktopProtocolVersion": 1
+  "desktopProtocolVersion": 2
 }
 ```
 

@@ -7,12 +7,12 @@ use super::stored_room::StoredRoom;
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
     CompatibilityFingerprint, InputFrame, InputFrameLimits, LinkCableCompatibility,
-    LinkCablePacket, LinkCablePacketLimits, NetplaySessionDescriptor, SnapshotChunk,
-    SnapshotLimits, SnapshotManifest,
+    LinkCablePacket, LinkCablePacketLimits, NetplaySessionDescriptor, SessionPauseReason,
+    SnapshotChunk, SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, InviteCodeGenerator, NetplayRoom, PlayerIndex, RoomError, RoomEvent,
-    RoomRegistrySnapshot, RoomView,
+    ConnectionId, InputFrameAcceptance, InviteCode, InviteCodeGenerator, NetplayRoom, PlayerIndex,
+    RoomError, RoomEvent, RoomRegistrySnapshot, RoomView, SessionResumeOutcome,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -118,6 +118,32 @@ pub trait RoomRegistry: Send + Sync {
         connection_id: ConnectionId,
         packet: LinkCablePacket,
     ) -> Result<(), RoomError>;
+
+    /// Requests a coordinated room pause.
+    async fn request_session_pause(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        reason: SessionPauseReason,
+        local_frame: u64,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Marks one client paused at the scheduled frame.
+    async fn mark_session_pause_reached(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        sequence: u64,
+        paused_at_frame: u64,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Releases one client's coordinated pause holder.
+    async fn request_session_resume(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        sequence: u64,
+    ) -> Result<RoomView, RoomError>;
 
     /// Returns a serializable room view for an invite code.
     async fn room_view(&self, invite_code: InviteCode) -> Result<RoomView, RoomError>;
@@ -398,10 +424,15 @@ impl RoomRegistry for InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
 
-        stored_room
-            .room
-            .accept_input_frame(connection_id, &input, InputFrameLimits::default())?;
-        stored_room.emit_input_frame(connection_id, input);
+        let acceptance = stored_room.room.accept_input_frame(
+            connection_id,
+            &input,
+            InputFrameLimits::default(),
+        )?;
+
+        if acceptance == InputFrameAcceptance::Relay {
+            stored_room.emit_input_frame(connection_id, input);
+        }
 
         Ok(())
     }
@@ -425,6 +456,82 @@ impl RoomRegistry for InMemoryRoomRegistry {
         stored_room.emit_link_cable_packet(connection_id, packet);
 
         Ok(())
+    }
+
+    async fn request_session_pause(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        reason: SessionPauseReason,
+        local_frame: u64,
+    ) -> Result<RoomView, RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        let already_paused = stored_room.room.view().pause.is_some();
+        let pause = stored_room
+            .room
+            .request_session_pause(connection_id, reason, local_frame)?;
+        let room = stored_room.room.view();
+
+        if already_paused {
+            stored_room.emit_session_pause_updated(pause);
+        } else {
+            stored_room.emit_session_pause_scheduled(pause);
+        }
+
+        Ok(room)
+    }
+
+    async fn mark_session_pause_reached(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        sequence: u64,
+        paused_at_frame: u64,
+    ) -> Result<RoomView, RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        let pause = stored_room.room.mark_session_pause_reached(
+            connection_id,
+            sequence,
+            paused_at_frame,
+        )?;
+        let room = stored_room.room.view();
+
+        stored_room.emit_session_pause_updated(pause);
+
+        Ok(room)
+    }
+
+    async fn request_session_resume(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        sequence: u64,
+    ) -> Result<RoomView, RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        let outcome = stored_room
+            .room
+            .request_session_resume(connection_id, sequence)?;
+        let room = stored_room.room.view();
+
+        match outcome {
+            SessionResumeOutcome::StillPaused(pause) => {
+                stored_room.emit_session_pause_updated(pause);
+            }
+            SessionResumeOutcome::Resumed { resume_at_frame } => {
+                stored_room.emit_session_resume_scheduled(sequence, resume_at_frame);
+            }
+        }
+
+        Ok(room)
     }
 
     async fn room_view(&self, invite_code: InviteCode) -> Result<RoomView, RoomError> {

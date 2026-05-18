@@ -20,6 +20,8 @@ pub enum RoomStatus {
     Ready,
     /// Gameplay input relay is active.
     Playing,
+    /// Gameplay is paused by the coordinated netplay pause contract.
+    Paused,
     /// Room is no longer accepting traffic.
     Closed,
 }

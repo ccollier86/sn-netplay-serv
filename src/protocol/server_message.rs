@@ -3,7 +3,9 @@
 //! These messages are stable room updates or protocol errors Desktop can render
 //! directly. They do not contain secrets or raw auth details.
 
-use crate::protocol::{InputFrame, LinkCablePacket, SnapshotChunk, SnapshotManifest};
+use crate::protocol::{
+    InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
+};
 use crate::rooms::RoomView;
 use serde::Serialize;
 
@@ -55,6 +57,29 @@ pub enum ServerMessage {
     SnapshotComplete {
         /// Snapshot manifest.
         manifest: SnapshotManifest,
+    },
+    /// Session pause was scheduled for a future canonical frame.
+    SessionPauseScheduled {
+        /// Current pause state.
+        pause: SessionPauseView,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Session pause holder or acknowledgement state changed.
+    SessionPauseUpdated {
+        /// Current pause state.
+        pause: SessionPauseView,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Session can resume after every pause holder was released.
+    SessionResumeScheduled {
+        /// Pause sequence being resumed.
+        sequence: u64,
+        /// Frame where clients resume from.
+        resume_at_frame: u64,
+        /// Current room state.
+        room: RoomView,
     },
     /// Stable protocol error safe to show in Desktop.
     Error {

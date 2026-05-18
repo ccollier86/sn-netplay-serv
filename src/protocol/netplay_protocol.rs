@@ -7,7 +7,7 @@
 use serde::Serialize;
 
 /// Current relay protocol version.
-pub const NETPLAY_PROTOCOL_VERSION: u16 = 1;
+pub const NETPLAY_PROTOCOL_VERSION: u16 = 2;
 
 /// Oldest Desktop protocol version this relay accepts.
 pub const MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION: u16 = 1;

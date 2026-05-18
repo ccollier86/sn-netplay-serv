@@ -7,7 +7,7 @@ use super::{InMemoryRoomRegistry, RoomRegistry};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
     CompatibilityFingerprint, InputFrame, NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor,
-    SnapshotChunk, SnapshotManifest,
+    SessionPauseReason, SnapshotChunk, SnapshotManifest,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, RoomError, RoomEvent,
@@ -360,6 +360,44 @@ async fn validated_input_frame_is_broadcast() {
     let event = events.recv().await.expect("event");
 
     assert!(matches!(event, crate::rooms::RoomEvent::InputFrame { .. }));
+}
+
+#[tokio::test]
+async fn repeated_pause_request_updates_existing_pause() {
+    let (registry, invite, host_connection, guest_connection) = compatible_room().await;
+    complete_snapshot(&registry, &invite, host_connection).await;
+    registry
+        .mark_ready(invite.clone(), host_connection)
+        .await
+        .expect("host ready");
+    registry
+        .mark_ready(invite.clone(), guest_connection)
+        .await
+        .expect("guest ready");
+    let mut events = registry.subscribe(invite.clone()).await.expect("events");
+
+    registry
+        .request_session_pause(
+            invite.clone(),
+            host_connection,
+            SessionPauseReason::Menu,
+            10,
+        )
+        .await
+        .expect("host pause");
+    assert!(matches!(
+        events.recv().await.expect("scheduled event"),
+        RoomEvent::SessionPauseScheduled { .. }
+    ));
+
+    registry
+        .request_session_pause(invite, guest_connection, SessionPauseReason::Menu, 10)
+        .await
+        .expect("guest pause");
+    assert!(matches!(
+        events.recv().await.expect("updated event"),
+        RoomEvent::SessionPauseUpdated { .. }
+    ));
 }
 
 fn registry() -> InMemoryRoomRegistry {

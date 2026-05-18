@@ -3,7 +3,7 @@
 //! These DTOs stay separate from room mutation logic so adding UI-facing fields
 //! does not bloat the domain state machine.
 
-use crate::protocol::{NetplayProtocolView, NetplaySessionDescriptor};
+use crate::protocol::{NetplayProtocolView, NetplaySessionDescriptor, SessionPauseView};
 use crate::rooms::{PlayerRole, PlayerStatus, RoomId, RoomStatus};
 use serde::Serialize;
 
@@ -21,6 +21,8 @@ pub struct RoomView {
     pub session: NetplaySessionDescriptor,
     /// Configured room capacity.
     pub max_players: u8,
+    /// Active coordinated pause details, if any.
+    pub pause: Option<SessionPauseView>,
     /// Current room lifecycle status.
     pub status: RoomStatus,
     /// Player slots in display order.

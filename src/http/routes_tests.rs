@@ -145,7 +145,7 @@ async fn create_room_returns_invite_descriptor_and_protocol() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(value["room"]["inviteCode"], "AB23-CD");
-    assert_eq!(value["room"]["protocol"]["protocolVersion"], 1);
+    assert_eq!(value["room"]["protocol"]["protocolVersion"], 2);
     assert_eq!(
         value["room"]["session"]["game"]["romSha256"],
         "a".repeat(64)

@@ -90,7 +90,7 @@ pub struct SmokeClient {
 impl SmokeClient {
     pub async fn connect(server: &SmokeServer, role: &str, token: &str, install_id: &str) -> Self {
         let mut request = format!(
-            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion=1",
+            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion=2",
             server.ws_base, INVITE_CODE
         )
         .into_client_request()
@@ -193,7 +193,7 @@ impl SmokeClient {
 pub fn compatibility_fingerprint() -> Value {
     json!({
         "desktopVersion": "0.2.13",
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "systemId": "gamecube",
         "coreId": "dolphin",
         "coreBuild": "5.0-netplay",
@@ -238,7 +238,7 @@ pub async fn move_pair_to_syncing(host: &mut SmokeClient, guest: &mut SmokeClien
 
 pub fn link_cable_compatibility() -> Value {
     json!({
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "systemFamily": "gba",
         "linkProtocol": "gba-link-cable-v1",
         "runtimeProfile": "mgba-link-runtime-v1",

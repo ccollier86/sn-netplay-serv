@@ -15,6 +15,7 @@ mod server_message;
 mod session_descriptor;
 mod session_descriptor_error;
 mod session_mode;
+mod session_pause;
 mod snapshot;
 
 pub use client_message::ClientMessage;
@@ -34,4 +35,7 @@ pub use session_descriptor::{
 };
 pub use session_descriptor_error::SessionDescriptorError;
 pub use session_mode::NetplaySessionMode;
+pub use session_pause::{
+    SessionPauseHolder, SessionPauseReason, SessionPauseState, SessionPauseView,
+};
 pub use snapshot::{SnapshotChunk, SnapshotLimits, SnapshotManifest};

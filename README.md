@@ -12,8 +12,8 @@ Implemented:
 - `GET /health`
 - `POST /v1/rooms` with protocol version and game/core descriptor
 - `GET /v1/rooms/{invite_code}/status`
-- `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=1`
-- `GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=1`
+- `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=2`
+- `GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=2`
 - `GET /internal/metrics`
 - `GET /internal/rooms`
 - HTTP-backed license-authority client

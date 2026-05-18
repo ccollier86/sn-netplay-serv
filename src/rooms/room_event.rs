@@ -3,7 +3,9 @@
 //! Events let transports broadcast room changes without putting WebSocket
 //! concepts inside the room domain model.
 
-use crate::protocol::{InputFrame, LinkCablePacket, SnapshotChunk, SnapshotManifest};
+use crate::protocol::{
+    InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
+};
 use crate::rooms::{ConnectionId, RoomView};
 
 /// Event emitted after a room changes.
@@ -13,6 +15,29 @@ pub enum RoomEvent {
     RoomStateChanged(RoomView),
     /// Room reached the gameplay start state.
     SessionStarted { start_frame: u64, room: RoomView },
+    /// Room scheduled a coordinated pause.
+    SessionPauseScheduled {
+        /// Current pause state.
+        pause: SessionPauseView,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Room pause holder or acknowledgement state changed.
+    SessionPauseUpdated {
+        /// Current pause state.
+        pause: SessionPauseView,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Room can resume after every pause holder was released.
+    SessionResumeScheduled {
+        /// Pause sequence being resumed.
+        sequence: u64,
+        /// Frame clients resume from.
+        resume_at_frame: u64,
+        /// Current room state.
+        room: RoomView,
+    },
     /// Validated input frame should be relayed to subscribers.
     InputFrame {
         /// Connection that supplied the input frame.

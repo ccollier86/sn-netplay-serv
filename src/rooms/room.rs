@@ -7,12 +7,13 @@
 use crate::auth::VerifiedLicense;
 use crate::limits::MVP_ROOM_CAPACITY;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, InputFrameLimits, NetplayProtocolView,
-    NetplaySessionDescriptor, NetplaySessionMode, SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    CompatibilityFingerprint, NetplayProtocolView, NetplaySessionDescriptor, NetplaySessionMode,
+    SnapshotChunk, SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, LinkCableRoomState, PlayerIndex, PlayerRole, PlayerSlot,
-    PlayerSlotView, PlayerStatus, RoomError, RoomId, RoomStatus, RoomView, SnapshotTransferState,
+    PlayerSlotView, PlayerStatus, RoomError, RoomId, RoomStatus, RoomView,
+    SessionPauseStateTracker, SnapshotTransferState,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -27,11 +28,13 @@ pub struct NetplayRoom {
     pub(super) status: RoomStatus,
     compatibility: HashMap<PlayerIndex, CompatibilityFingerprint>,
     pub(super) ready_players: HashSet<PlayerIndex>,
-    last_input_frames: HashMap<PlayerIndex, u64>,
+    pub(super) last_input_frames: HashMap<PlayerIndex, u64>,
     pub(super) link_cable_state: LinkCableRoomState,
     host_snapshot_completed: bool,
+    pub(super) next_pause_sequence: u64,
+    pub(super) pause_state: Option<SessionPauseStateTracker>,
     snapshot_transfer: Option<SnapshotTransferState>,
-    room_frame: u64,
+    pub(super) room_frame: u64,
 }
 
 impl NetplayRoom {
@@ -63,6 +66,8 @@ impl NetplayRoom {
             last_input_frames: HashMap::new(),
             link_cable_state: LinkCableRoomState::default(),
             host_snapshot_completed: false,
+            next_pause_sequence: 1,
+            pause_state: None,
             snapshot_transfer: None,
             room_frame: 0,
         }
@@ -165,6 +170,7 @@ impl NetplayRoom {
         self.ready_players.remove(&player_index);
         self.last_input_frames.remove(&player_index);
         self.link_cable_state.reset();
+        self.pause_state = None;
         self.snapshot_transfer = None;
 
         if is_host {
@@ -301,46 +307,6 @@ impl NetplayRoom {
         Ok(())
     }
 
-    /// Validates and records an input frame from one connection.
-    pub fn accept_input_frame(
-        &mut self,
-        connection_id: ConnectionId,
-        input: &InputFrame,
-        limits: InputFrameLimits,
-    ) -> Result<(), RoomError> {
-        if self.session.mode != NetplaySessionMode::ControllerNetplay {
-            return Err(RoomError::NotPlaying);
-        }
-
-        if self.status != RoomStatus::Playing {
-            return Err(RoomError::NotPlaying);
-        }
-
-        let owned_index = self
-            .player_index_for_connection(connection_id)
-            .ok_or(RoomError::UnknownConnection)?;
-
-        if owned_index != input.player_index {
-            return Err(RoomError::SlotSpoofing(input.player_index));
-        }
-
-        if let Some(last_frame) = self.last_input_frames.get(&input.player_index)
-            && input.frame <= *last_frame
-        {
-            return Err(RoomError::OutOfOrderFrame);
-        }
-
-        if input.frame > self.room_frame + limits.max_future_frame_distance {
-            return Err(RoomError::FutureFrameTooLarge);
-        }
-
-        self.last_input_frames
-            .insert(input.player_index, input.frame);
-        self.recompute_room_frame();
-
-        Ok(())
-    }
-
     /// Creates a serializable view for HTTP and WebSocket responses.
     pub fn view(&self) -> RoomView {
         RoomView {
@@ -349,6 +315,10 @@ impl NetplayRoom {
             protocol: NetplayProtocolView::default(),
             session: self.session.clone(),
             max_players: self.max_players,
+            pause: self
+                .pause_state
+                .as_ref()
+                .map(|pause_state| pause_state.view(self.current_pause_state())),
             status: self.status,
             players: self
                 .players
@@ -433,18 +403,13 @@ impl NetplayRoom {
         }
     }
 
-    fn recompute_room_frame(&mut self) {
-        if let Some(min_frame) = self.last_input_frames.values().min().copied() {
-            self.room_frame = min_frame;
-        }
-    }
-
     fn reset_sync_state(&mut self) {
         self.compatibility.clear();
         self.ready_players.clear();
         self.last_input_frames.clear();
         self.link_cable_state.reset();
         self.host_snapshot_completed = false;
+        self.pause_state = None;
         self.snapshot_transfer = None;
         self.room_frame = 0;
     }
