@@ -45,10 +45,40 @@ impl NetplaySessionDescriptor {
             (NetplaySessionMode::ControllerNetplay, Some(_)) => {
                 Err(SessionDescriptorError { field: "link" })
             }
-            (NetplaySessionMode::LinkCable, Some(link)) => link.validate(),
+            (NetplaySessionMode::LinkCable, Some(link)) => {
+                link.validate()?;
+                self.validate_link_game_system(link)
+            }
             (NetplaySessionMode::LinkCable, None) => Err(SessionDescriptorError { field: "link" }),
         }
     }
+
+    fn validate_link_game_system(
+        &self,
+        link: &LinkCableDescriptor,
+    ) -> Result<(), SessionDescriptorError> {
+        if !is_supported_link_family(&link.system_family) {
+            return Err(SessionDescriptorError {
+                field: "link.systemFamily",
+            });
+        }
+
+        if !link_family_matches_game_system(&link.system_family, &self.game.system_id) {
+            return Err(SessionDescriptorError {
+                field: "game.systemId",
+            });
+        }
+
+        Ok(())
+    }
+}
+
+fn is_supported_link_family(system_family: &str) -> bool {
+    matches!(system_family, "gba")
+}
+
+fn link_family_matches_game_system(system_family: &str, system_id: &str) -> bool {
+    matches!((system_family, system_id), ("gba", "gba"))
 }
 
 /// Game identity for local ROM matching.
@@ -132,6 +162,7 @@ mod tests {
     fn accepts_link_cable_descriptor() {
         let mut value = descriptor_value();
         value["mode"] = json!("linkCable");
+        value["game"]["systemId"] = json!("gba");
         value["link"] = json!({
             "systemFamily": "gba",
             "linkProtocol": "gba-link-cable-v1",
@@ -143,6 +174,50 @@ mod tests {
             serde_json::from_value::<NetplaySessionDescriptor>(value).expect("link descriptor");
 
         assert!(descriptor.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_link_descriptor_for_mismatched_game_system() {
+        let mut value = descriptor_value();
+        value["mode"] = json!("linkCable");
+        value["game"]["systemId"] = json!("gamecube");
+        value["link"] = json!({
+            "systemFamily": "gba",
+            "linkProtocol": "gba-link-cable-v1",
+            "runtimeProfile": "mgba-link-runtime-v1",
+            "maxPlayers": 2
+        });
+        let descriptor =
+            serde_json::from_value::<NetplaySessionDescriptor>(value).expect("descriptor");
+
+        assert_eq!(
+            descriptor.validate(),
+            Err(SessionDescriptorError {
+                field: "game.systemId"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_link_family() {
+        let mut value = descriptor_value();
+        value["mode"] = json!("linkCable");
+        value["game"]["systemId"] = json!("gb");
+        value["link"] = json!({
+            "systemFamily": "gb",
+            "linkProtocol": "gb-link-cable-v1",
+            "runtimeProfile": "sameboy-link-runtime-v1",
+            "maxPlayers": 2
+        });
+        let descriptor =
+            serde_json::from_value::<NetplaySessionDescriptor>(value).expect("descriptor");
+
+        assert_eq!(
+            descriptor.validate(),
+            Err(SessionDescriptorError {
+                field: "link.systemFamily"
+            })
+        );
     }
 
     #[test]
@@ -178,6 +253,7 @@ mod tests {
     fn rejects_unsupported_link_player_count() {
         let mut value = descriptor_value();
         value["mode"] = json!("linkCable");
+        value["game"]["systemId"] = json!("gba");
         value["link"] = json!({
             "systemFamily": "gba",
             "linkProtocol": "gba-link-cable-v1",

@@ -82,6 +82,27 @@ async fn validated_link_packet_is_broadcast() {
     assert!(matches!(event, RoomEvent::LinkCablePacket { .. }));
 }
 
+#[tokio::test]
+async fn link_compatibility_after_start_does_not_roll_back_room() {
+    let (registry, invite, host_connection, guest_connection) = compatible_link_room().await;
+    registry
+        .mark_ready(invite.clone(), host_connection)
+        .await
+        .expect("host ready");
+    registry
+        .mark_ready(invite.clone(), guest_connection)
+        .await
+        .expect("guest ready");
+
+    let result = registry
+        .set_link_cable_compatibility(invite.clone(), host_connection, link_compatibility(None))
+        .await;
+    let view = registry.room_view(invite).await.expect("room view");
+
+    assert!(matches!(result, Err(RoomError::RoomNotReady)));
+    assert_eq!(view.status, RoomStatus::Playing);
+}
+
 async fn compatible_link_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, ConnectionId) {
     let (registry, invite, host_connection, guest_connection) = joined_link_room().await;
 

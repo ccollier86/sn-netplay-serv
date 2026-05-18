@@ -214,6 +214,34 @@ async fn create_room_accepts_link_cable_descriptor() {
 }
 
 #[tokio::test]
+async fn create_room_rejects_link_cable_system_mismatch() {
+    let mut body = create_room_value();
+    body["session"]["mode"] = json!("linkCable");
+    body["session"]["link"] = json!({
+        "systemFamily": "gba",
+        "linkProtocol": "gba-link-cable-v1",
+        "runtimeProfile": "mgba-link-runtime-v1",
+        "maxPlayers": 2,
+        "transport": "relay"
+    });
+
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/rooms")
+                .header("authorization", "Bearer valid")
+                .header("x-install-id", "install-1")
+                .body(Body::from(body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn create_room_rejects_unknown_client_kind() {
     let response = app()
         .oneshot(

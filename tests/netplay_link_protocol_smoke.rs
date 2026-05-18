@@ -26,6 +26,7 @@ async fn two_clients_start_link_room_and_exchange_link_packets() {
         }
     }))
     .await;
+    host.expect_no_link_packet_from(0).await;
     let packet = guest.expect_link_packet_from(0).await;
     assert_eq!(packet["packet"]["payload"], json!([1, 2, 3]));
 
@@ -40,6 +41,7 @@ async fn two_clients_start_link_room_and_exchange_link_packets() {
             }
         }))
         .await;
+    guest.expect_no_link_packet_from(1).await;
     let packet = host.expect_link_packet_from(1).await;
     assert_eq!(packet["packet"]["payload"], json!([4, 5]));
 }

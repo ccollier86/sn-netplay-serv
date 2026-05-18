@@ -170,6 +170,24 @@ impl SmokeClient {
             }
         }
     }
+
+    pub async fn expect_no_link_packet_from(&mut self, player_index: u8) {
+        let result = timeout(Duration::from_millis(200), async {
+            loop {
+                let message = self.next_json().await;
+                if message["type"] == "linkCablePacket"
+                    && message["packet"]["playerIndex"] == u64::from(player_index)
+                {
+                    return message;
+                }
+            }
+        })
+        .await;
+
+        if let Ok(message) = result {
+            panic!("unexpected echoed link packet: {message}");
+        }
+    }
 }
 
 pub fn compatibility_fingerprint() -> Value {

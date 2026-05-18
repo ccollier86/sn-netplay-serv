@@ -21,6 +21,10 @@ impl NetplayRoom {
             return Err(RoomError::RoomClosed);
         }
 
+        if self.status == RoomStatus::Playing {
+            return Err(RoomError::RoomNotReady);
+        }
+
         let player_index = self
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
