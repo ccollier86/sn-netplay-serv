@@ -88,6 +88,7 @@ impl NetplayRoom {
         slot.runtime_state = PlayerRuntimeState::Connected;
         slot.resume_token_hash = Some(resume_token_hash);
         slot.reconnect_deadline = None;
+        slot.reconnect_room_epoch = None;
         slot.last_seen_at = Some(now);
         self.ready_players.remove(&slot.player_index);
 
@@ -113,7 +114,16 @@ impl NetplayRoom {
             .ok_or(RoomError::UnknownConnection)?;
         let player_index = slot.player_index;
         let is_host = slot.role == PlayerRole::Host;
-        let recoverable = matches!(self.status, RoomStatus::Playing | RoomStatus::Paused);
+        let already_recovering = self.status == RoomStatus::Recovering;
+        let recoverable = matches!(
+            self.status,
+            RoomStatus::Playing | RoomStatus::Paused | RoomStatus::Recovering
+        );
+        let reconnect_room_epoch = slot.reconnect_room_epoch.unwrap_or(if already_recovering {
+            self.room_epoch.saturating_sub(1)
+        } else {
+            self.room_epoch
+        });
 
         slot.connection_id = None;
         slot.last_seen_at = Some(now);
@@ -122,7 +132,10 @@ impl NetplayRoom {
         self.last_input_frames.remove(&player_index);
 
         if recoverable {
-            self.mark_slot_reconnecting(player_index, now, reconnect_grace);
+            self.mark_slot_reconnecting(player_index, now, reconnect_grace, reconnect_room_epoch);
+            if !already_recovering {
+                self.enter_recovery_state(reconnect_room_epoch);
+            }
             return Ok(false);
         }
 
@@ -140,6 +153,7 @@ impl NetplayRoom {
         &mut self,
         player_index: PlayerIndex,
         resume_token_hash: &str,
+        room_epoch: u64,
         connection_id: ConnectionId,
         now: Instant,
     ) -> Result<(), RoomError> {
@@ -157,6 +171,11 @@ impl NetplayRoom {
             return Err(RoomError::ResumeTokenInvalid);
         }
 
+        let accepted_epoch = slot.reconnect_room_epoch.unwrap_or(self.room_epoch);
+        if room_epoch != accepted_epoch && room_epoch != self.room_epoch {
+            return Err(RoomError::StaleRoomEpoch);
+        }
+
         if let Some(deadline) = slot.reconnect_deadline
             && now > deadline
         {
@@ -170,6 +189,7 @@ impl NetplayRoom {
         slot.runtime_state = PlayerRuntimeState::Reconnecting;
         slot.last_seen_at = Some(now);
         slot.reconnect_deadline = None;
+        slot.reconnect_room_epoch = None;
         self.reset_sync_for_checking_compatibility();
 
         Ok(())
@@ -239,11 +259,46 @@ impl NetplayRoom {
                 slot.status = PlayerStatus::Reconnecting;
                 slot.runtime_state = PlayerRuntimeState::Reconnecting;
                 slot.reconnect_deadline = Some(now + reconnect_grace);
+                slot.reconnect_room_epoch = Some(self.room_epoch);
             }
         }
 
-        self.enter_recovery_state();
+        self.enter_recovery_state(self.room_epoch);
         true
+    }
+
+    /// Marks heartbeat-stale sockets before they reach recovery timeout.
+    pub fn mark_stale_connections(
+        &mut self,
+        now: Instant,
+        heartbeat_stale: Duration,
+        heartbeat_disconnect: Duration,
+    ) -> bool {
+        if !matches!(self.status, RoomStatus::Playing | RoomStatus::Paused) {
+            return false;
+        }
+
+        let mut changed = false;
+        for slot in self
+            .players
+            .iter_mut()
+            .filter(|slot| slot.connection_id.is_some())
+        {
+            let Some(last_seen) = slot.last_seen_at else {
+                continue;
+            };
+            let heartbeat_age = now.duration_since(last_seen);
+
+            if heartbeat_age >= heartbeat_stale
+                && heartbeat_age < heartbeat_disconnect
+                && slot.runtime_state != PlayerRuntimeState::Stale
+            {
+                slot.runtime_state = PlayerRuntimeState::Stale;
+                changed = true;
+            }
+        }
+
+        changed
     }
 
     /// Returns whether a recovering room has exceeded a player recovery deadline.
@@ -276,6 +331,7 @@ impl NetplayRoom {
             .for_each(|slot| {
                 slot.status = PlayerStatus::Connected;
                 slot.runtime_state = PlayerRuntimeState::Connected;
+                slot.reconnect_room_epoch = None;
             });
     }
 
@@ -284,6 +340,7 @@ impl NetplayRoom {
         player_index: PlayerIndex,
         now: Instant,
         reconnect_grace: Duration,
+        reconnect_room_epoch: u64,
     ) {
         if let Some(slot) = self
             .players
@@ -293,8 +350,8 @@ impl NetplayRoom {
             slot.status = PlayerStatus::Reconnecting;
             slot.runtime_state = PlayerRuntimeState::Reconnecting;
             slot.reconnect_deadline = Some(now + reconnect_grace);
+            slot.reconnect_room_epoch = Some(reconnect_room_epoch);
         }
-        self.enter_recovery_state();
     }
 
     fn clear_disconnected_slot(&mut self, player_index: PlayerIndex, is_host: bool) {
@@ -304,6 +361,7 @@ impl NetplayRoom {
             .find(|slot| slot.player_index == player_index)
         {
             slot.reconnect_deadline = None;
+            slot.reconnect_room_epoch = None;
             slot.runtime_state = PlayerRuntimeState::Disconnected;
             slot.status = if is_host {
                 PlayerStatus::Disconnected
@@ -320,7 +378,7 @@ impl NetplayRoom {
         }
     }
 
-    fn enter_recovery_state(&mut self) {
+    fn enter_recovery_state(&mut self, reconnect_room_epoch: u64) {
         self.status = RoomStatus::Recovering;
         self.reset_sync_state();
         self.bump_room_epoch();
@@ -331,6 +389,8 @@ impl NetplayRoom {
             .for_each(|slot| {
                 slot.status = PlayerStatus::Connected;
                 slot.runtime_state = PlayerRuntimeState::Connected;
+                slot.reconnect_room_epoch
+                    .get_or_insert(reconnect_room_epoch);
             });
     }
 }

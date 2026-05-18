@@ -403,10 +403,15 @@ async fn repeated_pause_request_updates_existing_pause() {
 
 #[tokio::test]
 async fn reconnect_with_valid_resume_token_restores_player_slot() {
-    let (registry, invite, _host_connection, guest_connection, guest_token) =
+    let (registry, invite, _host_connection, guest_connection, _host_token, guest_token) =
         reconnectable_room().await;
+    let known_epoch = registry
+        .room_view(invite.clone())
+        .await
+        .expect("room before disconnect")
+        .room_epoch;
 
-    let recovery = registry
+    registry
         .disconnect(invite.clone(), guest_connection)
         .await
         .expect("guest disconnect");
@@ -414,7 +419,7 @@ async fn reconnect_with_valid_resume_token_restores_player_slot() {
         .reconnect_player(
             invite,
             PlayerIndex::TWO,
-            recovery.room_epoch,
+            known_epoch,
             guest_token,
             ConnectionId::new(),
         )
@@ -432,14 +437,19 @@ async fn reconnect_with_valid_resume_token_restores_player_slot() {
 
 #[tokio::test]
 async fn reconnect_rejects_stale_room_epoch() {
-    let (registry, invite, _host_connection, guest_connection, guest_token) =
+    let (registry, invite, _host_connection, guest_connection, _host_token, guest_token) =
         reconnectable_room().await;
+    let known_epoch = registry
+        .room_view(invite.clone())
+        .await
+        .expect("room before disconnect")
+        .room_epoch;
 
-    let recovery = registry
+    registry
         .disconnect(invite.clone(), guest_connection)
         .await
         .expect("guest disconnect");
-    let stale_epoch = recovery.room_epoch.saturating_sub(1);
+    let stale_epoch = known_epoch.saturating_sub(1);
     let result = registry
         .reconnect_player(
             invite,
@@ -455,7 +465,7 @@ async fn reconnect_rejects_stale_room_epoch() {
 
 #[tokio::test]
 async fn heartbeat_timeout_enters_recovery_then_expires_room() {
-    let (registry, invite, _host_connection, _guest_connection, _guest_token) =
+    let (registry, invite, _host_connection, _guest_connection, _host_token, _guest_token) =
         reconnectable_room().await;
     let stale_at = Instant::now() + Duration::from_secs(31);
 
@@ -481,6 +491,79 @@ async fn heartbeat_timeout_enters_recovery_then_expires_room() {
         registry.room_view(invite).await,
         Err(RoomError::NotFound)
     ));
+}
+
+#[tokio::test]
+async fn heartbeat_stale_updates_runtime_before_recovery_timeout() {
+    let (registry, invite, _host_connection, _guest_connection, _host_token, _guest_token) =
+        reconnectable_room().await;
+
+    let removed = registry
+        .remove_expired_waiting_rooms(
+            Instant::now() + Duration::from_secs(16),
+            Duration::from_secs(600),
+        )
+        .await;
+    let room = registry.room_view(invite).await.expect("room");
+
+    assert_eq!(removed, 0);
+    assert_eq!(room.status, RoomStatus::Playing);
+    assert_eq!(room.players[0].runtime_state, PlayerRuntimeState::Stale);
+    assert_eq!(room.players[1].runtime_state, PlayerRuntimeState::Stale);
+}
+
+#[tokio::test]
+async fn second_disconnect_during_recovery_keeps_both_slots_reconnectable() {
+    let (registry, invite, host_connection, guest_connection, host_token, guest_token) =
+        reconnectable_room().await;
+    let known_epoch = registry
+        .room_view(invite.clone())
+        .await
+        .expect("room before disconnect")
+        .room_epoch;
+
+    registry
+        .disconnect(invite.clone(), guest_connection)
+        .await
+        .expect("guest disconnect");
+    let recovering = registry
+        .disconnect(invite.clone(), host_connection)
+        .await
+        .expect("host disconnect during recovery");
+
+    assert_eq!(recovering.status, RoomStatus::Recovering);
+    assert_eq!(recovering.players[0].status, PlayerStatus::Reconnecting);
+    assert_eq!(recovering.players[1].status, PlayerStatus::Reconnecting);
+
+    let host_reconnect = registry
+        .reconnect_player(
+            invite.clone(),
+            PlayerIndex::ONE,
+            known_epoch,
+            host_token,
+            ConnectionId::new(),
+        )
+        .await
+        .expect("host reconnect");
+    let guest_reconnect = registry
+        .reconnect_player(
+            invite,
+            PlayerIndex::TWO,
+            known_epoch,
+            guest_token,
+            ConnectionId::new(),
+        )
+        .await
+        .expect("guest reconnect");
+
+    assert_eq!(
+        host_reconnect.room.players[0].status,
+        PlayerStatus::Connected
+    );
+    assert_eq!(
+        guest_reconnect.room.players[1].status,
+        PlayerStatus::Connected
+    );
 }
 
 fn registry() -> InMemoryRoomRegistry {
@@ -519,15 +602,21 @@ async fn reconnectable_room() -> (
     ConnectionId,
     ConnectionId,
     String,
+    String,
 ) {
     let registry = registry();
+    let create_connection = ConnectionId::new();
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let view = registry
-        .create_room(license("host"), host_connection, descriptor())
+        .create_room(license("host"), create_connection, descriptor())
         .await
         .expect("room");
     let invite = InviteCode::parse(view.invite_code).expect("invite");
+    let host_join = registry
+        .connect_host(invite.clone(), license("host"), host_connection)
+        .await
+        .expect("host");
     let guest_join = registry
         .connect_guest(invite.clone(), license("guest"), guest_connection)
         .await
@@ -556,6 +645,7 @@ async fn reconnectable_room() -> (
         invite,
         host_connection,
         guest_connection,
+        host_join.resume_token,
         guest_join.resume_token,
     )
 }

@@ -144,16 +144,11 @@ impl InMemoryRoomRegistry {
         let stored_room = rooms
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
-        let current = stored_room.view(self.clock.now());
-
-        if current.room_epoch != room_epoch {
-            return Err(RoomError::StaleRoomEpoch);
-        }
-
         let now = self.clock.now();
         stored_room.room.reconnect_player(
             player_index,
             &hash_resume_token(&resume_token),
+            room_epoch,
             connection_id,
             now,
         )?;
@@ -201,6 +196,15 @@ impl InMemoryRoomRegistry {
         let mut lifecycle_events = Vec::new();
 
         for stored_room in rooms.values_mut() {
+            if stored_room.mark_stale_connections(
+                now,
+                self.recovery_config.heartbeat_stale,
+                self.recovery_config.heartbeat_disconnect,
+            ) {
+                stored_room.emit_state(now, "heartbeatStale", "heartbeat stale");
+                lifecycle_events.extend(stored_room.debug_events(1));
+            }
+
             if stored_room.recover_stale_connections(
                 now,
                 self.recovery_config.heartbeat_disconnect,

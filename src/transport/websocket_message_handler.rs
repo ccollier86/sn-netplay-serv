@@ -259,7 +259,6 @@ async fn handle_client_message(
             sequence,
             paused_at_frame,
         } => {
-            services.metrics.record_resume_requested();
             apply_room_result(
                 sender,
                 validate_epochs(services, invite_code, room_epoch, session_epoch).await,
@@ -287,6 +286,7 @@ async fn handle_client_message(
             reason,
             sequence,
         } => {
+            services.metrics.record_resume_requested();
             apply_room_result(
                 sender,
                 validate_epochs(services, invite_code, room_epoch, session_epoch).await,

@@ -139,6 +139,10 @@ Room responses include `eventSeq`, `roomEpoch`, and `sessionEpoch`:
 changes when active gameplay must resync. Clients must include both values on
 all non-ping WebSocket messages.
 
+Player `runtimeState` values are relay-facing room view state. The relay may
+infer `stale` when a connected player has missed heartbeat acknowledgements but
+has not yet crossed the recovery timeout.
+
 ### `GET /v1/rooms/{invite_code}/status`
 
 Returns the current room view for a user-entered invite code. Guests should call

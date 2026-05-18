@@ -66,6 +66,17 @@ impl StoredRoom {
             .recover_stale_connections(now, heartbeat_disconnect, reconnect_grace)
     }
 
+    /// Marks connected players whose heartbeat is late but still recoverable.
+    pub(super) fn mark_stale_connections(
+        &mut self,
+        now: Instant,
+        heartbeat_stale: Duration,
+        heartbeat_disconnect: Duration,
+    ) -> bool {
+        self.room
+            .mark_stale_connections(now, heartbeat_stale, heartbeat_disconnect)
+    }
+
     /// Subscribes to room events.
     pub(super) fn subscribe(&self) -> broadcast::Receiver<RoomEvent> {
         self.events.subscribe()

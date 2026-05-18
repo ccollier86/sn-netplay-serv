@@ -68,6 +68,8 @@ pub enum PlayerRuntimeState {
     Paused,
     /// Socket dropped and the slot is waiting for reconnect.
     Reconnecting,
+    /// Heartbeat is stale but the socket is not in recovery yet.
+    Stale,
     /// Socket is disconnected without a recoverable session.
     Disconnected,
     /// Reconnect grace expired.
@@ -97,6 +99,8 @@ pub struct PlayerSlot {
     pub last_seen_at: Option<Instant>,
     /// Deadline for reclaiming this slot after transport loss.
     pub reconnect_deadline: Option<Instant>,
+    /// Room epoch this client knew before recovery changed room state.
+    pub reconnect_room_epoch: Option<u64>,
 }
 
 impl PlayerSlot {
@@ -113,6 +117,7 @@ impl PlayerSlot {
             resume_token_hash: None,
             last_seen_at: None,
             reconnect_deadline: None,
+            reconnect_room_epoch: None,
         }
     }
 
@@ -134,6 +139,7 @@ impl PlayerSlot {
             resume_token_hash: Some(resume_token_hash),
             last_seen_at: Some(now),
             reconnect_deadline: None,
+            reconnect_room_epoch: None,
         }
     }
 
@@ -153,6 +159,7 @@ impl PlayerSlot {
         self.resume_token_hash = Some(resume_token_hash);
         self.last_seen_at = Some(now);
         self.reconnect_deadline = None;
+        self.reconnect_room_epoch = None;
     }
 
     /// Returns whether the slot is available.
