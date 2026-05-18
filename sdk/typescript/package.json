@@ -1,0 +1,13 @@
+{
+  "name": "@shadowboy/netplay-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json",
+    "test": "bun test tests/**/*.test.ts"
+  }
+}

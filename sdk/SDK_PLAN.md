@@ -44,4 +44,5 @@ IPC and emulator runtime code stay outside the SDK.
 ## Verification
 
 - Kotlin: `JAVA_HOME=/home/catalyst-2/.local/jdk-21 /home/catalyst-2/projects/gba-emulator/gradlew -p sdk/kotlin test`
-- TypeScript: add a package-local test command when that SDK is created.
+- TypeScript: `bun test sdk/typescript/tests/**/*.test.ts`
+- TypeScript typecheck: `bunx tsc --noEmit -p sdk/typescript/tsconfig.json`
