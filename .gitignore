@@ -6,5 +6,7 @@
 !.env.example
 !*.env.example
 target/
+sdk/kotlin/.gradle/
+sdk/kotlin/build/
 *.log
 .DS_Store
