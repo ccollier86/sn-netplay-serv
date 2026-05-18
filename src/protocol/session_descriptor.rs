@@ -11,6 +11,10 @@ use crate::protocol::descriptor_validation::{
 use crate::protocol::{LinkCableDescriptor, NetplaySessionMode, SessionDescriptorError};
 use serde::{Deserialize, Serialize};
 
+const DEFAULT_CONTROLLER_INPUT_DELAY_FRAMES: u8 = 3;
+const MIN_CONTROLLER_INPUT_DELAY_FRAMES: u8 = 1;
+const MAX_CONTROLLER_INPUT_DELAY_FRAMES: u8 = 8;
+
 /// Netplay game/core descriptor supplied by the host when creating a room.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +29,9 @@ pub struct NetplaySessionDescriptor {
     pub game: NetplayGameDescriptor,
     /// Emulator core identity used for compatibility gating.
     pub core: NetplayCoreDescriptor,
+    /// Controller-netplay runtime settings chosen by the host.
+    #[serde(default)]
+    pub controller: ControllerNetplayDescriptor,
     /// Link-cable compatibility details for `linkCable` rooms.
     #[serde(default)]
     pub link: Option<LinkCableDescriptor>,
@@ -36,6 +43,7 @@ impl NetplaySessionDescriptor {
         validate_optional_short_text("hostAppVersion", self.host_app_version.as_deref())?;
         self.game.validate()?;
         self.core.validate()?;
+        self.controller.validate()?;
         self.validate_mode()
     }
 
@@ -131,6 +139,9 @@ pub struct NetplayCoreDescriptor {
     /// SHA-256 of deterministic core options when Desktop has one.
     #[serde(default)]
     pub core_options_sha256: Option<String>,
+    /// Save-state byte format required for snapshot synchronization.
+    #[serde(default)]
+    pub state_format: Option<String>,
 }
 
 impl NetplayCoreDescriptor {
@@ -138,8 +149,44 @@ impl NetplayCoreDescriptor {
         validate_id("coreId", &self.core_id)?;
         validate_optional_short_text("coreName", self.core_name.as_deref())?;
         validate_optional_short_text("coreVersion", self.core_version.as_deref())?;
-        validate_optional_sha256("coreOptionsSha256", self.core_options_sha256.as_deref())
+        validate_optional_sha256("coreOptionsSha256", self.core_options_sha256.as_deref())?;
+        validate_optional_id("stateFormat", self.state_format.as_deref())
     }
+}
+
+/// Controller-netplay settings that must be shared by all players.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControllerNetplayDescriptor {
+    /// Input delay chosen by the host and echoed to guests.
+    #[serde(default = "default_controller_input_delay_frames")]
+    pub input_delay_frames: u8,
+}
+
+impl Default for ControllerNetplayDescriptor {
+    fn default() -> Self {
+        Self {
+            input_delay_frames: DEFAULT_CONTROLLER_INPUT_DELAY_FRAMES,
+        }
+    }
+}
+
+impl ControllerNetplayDescriptor {
+    fn validate(&self) -> Result<(), SessionDescriptorError> {
+        if (MIN_CONTROLLER_INPUT_DELAY_FRAMES..=MAX_CONTROLLER_INPUT_DELAY_FRAMES)
+            .contains(&self.input_delay_frames)
+        {
+            Ok(())
+        } else {
+            Err(SessionDescriptorError {
+                field: "controller.inputDelayFrames",
+            })
+        }
+    }
+}
+
+fn default_controller_input_delay_frames() -> u8 {
+    DEFAULT_CONTROLLER_INPUT_DELAY_FRAMES
 }
 
 #[cfg(test)]
@@ -156,6 +203,16 @@ mod tests {
     #[test]
     fn defaults_legacy_descriptor_to_controller_mode() {
         assert_eq!(descriptor().mode, NetplaySessionMode::ControllerNetplay);
+    }
+
+    #[test]
+    fn defaults_missing_controller_delay() {
+        let mut value = descriptor_value();
+        value.as_object_mut().expect("object").remove("controller");
+        let descriptor =
+            serde_json::from_value::<NetplaySessionDescriptor>(value).expect("descriptor");
+
+        assert_eq!(descriptor.controller.input_delay_frames, 3);
     }
 
     #[test]
@@ -295,6 +352,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rejects_invalid_controller_input_delay() {
+        let mut value = descriptor_value();
+        value["controller"]["inputDelayFrames"] = json!(0);
+        let descriptor =
+            serde_json::from_value::<NetplaySessionDescriptor>(value).expect("descriptor");
+
+        assert_eq!(
+            descriptor.validate(),
+            Err(SessionDescriptorError {
+                field: "controller.inputDelayFrames"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_path_like_state_format() {
+        let mut value = descriptor_value();
+        value["core"]["stateFormat"] = json!("../state");
+        let descriptor =
+            serde_json::from_value::<NetplaySessionDescriptor>(value).expect("descriptor");
+
+        assert_eq!(
+            descriptor.validate(),
+            Err(SessionDescriptorError {
+                field: "stateFormat"
+            })
+        );
+    }
+
     pub fn descriptor() -> NetplaySessionDescriptor {
         serde_json::from_value(descriptor_value()).expect("descriptor")
     }
@@ -311,11 +398,15 @@ mod tests {
                 "revision": "Rev 1",
                 "discId": "GFSE01"
             },
+            "controller": {
+                "inputDelayFrames": 3
+            },
             "core": {
                 "coreId": "dolphin",
                 "coreName": "Dolphin",
                 "coreVersion": "5.0-netplay",
-                "coreOptionsSha256": "b".repeat(64)
+                "coreOptionsSha256": "b".repeat(64),
+                "stateFormat": "dolphin:gamecube:libretro-serialize-v1"
             }
         })
     }

@@ -223,6 +223,7 @@ async fn compatibility_mismatch_broadcasts_room_state() {
 #[tokio::test]
 async fn ready_from_both_players_broadcasts_session_start() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
+    complete_snapshot(&registry, &invite, host_connection).await;
     let mut events = registry.subscribe(invite.clone()).await.expect("events");
 
     registry
@@ -332,6 +333,7 @@ async fn host_snapshot_complete_is_broadcast_after_valid_chunks() {
 #[tokio::test]
 async fn validated_input_frame_is_broadcast() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
+    complete_snapshot(&registry, &invite, host_connection).await;
     registry
         .mark_ready(invite.clone(), host_connection)
         .await
@@ -390,6 +392,32 @@ async fn compatible_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, C
     (registry, invite, host_connection, guest_connection)
 }
 
+async fn complete_snapshot(
+    registry: &InMemoryRoomRegistry,
+    invite: &InviteCode,
+    host_connection: ConnectionId,
+) {
+    registry
+        .relay_snapshot_chunk(
+            invite.clone(),
+            host_connection,
+            SnapshotChunk {
+                index: 0,
+                bytes: vec![1, 2, 3],
+            },
+        )
+        .await
+        .expect("snapshot chunk");
+    registry
+        .relay_snapshot_complete(
+            invite.clone(),
+            host_connection,
+            snapshot_manifest(&[1, 2, 3]),
+        )
+        .await
+        .expect("snapshot complete");
+}
+
 fn license(subject_id: &str) -> VerifiedLicense {
     VerifiedLicense::new(subject_id, "premium", vec!["netplay".to_string()])
 }
@@ -404,7 +432,11 @@ fn descriptor() -> NetplaySessionDescriptor {
             "contentKey": "gamecube-star-fox-adventures-usa"
         },
         "core": {
-            "coreId": "dolphin"
+            "coreId": "dolphin",
+            "stateFormat": "dolphin:gamecube:libretro-serialize-v1"
+        },
+        "controller": {
+            "inputDelayFrames": 3
         }
     }))
     .expect("descriptor")
@@ -417,6 +449,7 @@ fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {
         system_id: "gamecube".to_string(),
         core_id: "dolphin".to_string(),
         core_build: "core-build".to_string(),
+        state_format: Some("dolphin:gamecube:libretro-serialize-v1".to_string()),
         content_hash: content_hash_for_fixture(content_hash),
         settings_hash: "settings".to_string(),
         cheats_hash: "cheats".to_string(),

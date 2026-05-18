@@ -415,7 +415,11 @@ fn create_room_value() -> Value {
                 "coreId": "dolphin",
                 "coreName": "Dolphin",
                 "coreVersion": "5.0-netplay",
-                "coreOptionsSha256": "b".repeat(64)
+                "coreOptionsSha256": "b".repeat(64),
+                "stateFormat": "dolphin:gamecube:libretro-serialize-v1"
+            },
+            "controller": {
+                "inputDelayFrames": 3
             }
         }
     })

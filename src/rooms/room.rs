@@ -29,6 +29,7 @@ pub struct NetplayRoom {
     pub(super) ready_players: HashSet<PlayerIndex>,
     last_input_frames: HashMap<PlayerIndex, u64>,
     pub(super) link_cable_state: LinkCableRoomState,
+    host_snapshot_completed: bool,
     snapshot_transfer: Option<SnapshotTransferState>,
     room_frame: u64,
 }
@@ -61,6 +62,7 @@ impl NetplayRoom {
             ready_players: HashSet::new(),
             last_input_frames: HashMap::new(),
             link_cable_state: LinkCableRoomState::default(),
+            host_snapshot_completed: false,
             snapshot_transfer: None,
             room_frame: 0,
         }
@@ -237,6 +239,12 @@ impl NetplayRoom {
             return Err(RoomError::RoomNotReady);
         }
 
+        if self.session.mode == NetplaySessionMode::ControllerNetplay
+            && !self.host_snapshot_completed
+        {
+            return Err(RoomError::RoomNotReady);
+        }
+
         let player_index = self
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
@@ -266,6 +274,9 @@ impl NetplayRoom {
         limits: SnapshotLimits,
     ) -> Result<(), RoomError> {
         self.validate_host_snapshot_sender(connection_id)?;
+        if self.host_snapshot_completed {
+            return Err(RoomError::SnapshotInvalid);
+        }
         self.snapshot_transfer
             .get_or_insert_with(SnapshotTransferState::new)
             .accept_chunk(chunk, limits)
@@ -285,6 +296,7 @@ impl NetplayRoom {
             .ok_or(RoomError::SnapshotInvalid)?;
         transfer.complete(manifest, limits)?;
         self.snapshot_transfer = None;
+        self.host_snapshot_completed = true;
 
         Ok(())
     }
@@ -432,6 +444,7 @@ impl NetplayRoom {
         self.ready_players.clear();
         self.last_input_frames.clear();
         self.link_cable_state.reset();
+        self.host_snapshot_completed = false;
         self.snapshot_transfer = None;
         self.room_frame = 0;
     }
@@ -440,9 +453,20 @@ impl NetplayRoom {
         fingerprint.protocol_version == crate::protocol::NETPLAY_PROTOCOL_VERSION
             && fingerprint.system_id == self.session.game.system_id
             && fingerprint.core_id == self.session.core.core_id
+            && self.fingerprint_state_format_matches_session(fingerprint)
             && fingerprint
                 .content_hash
                 .eq_ignore_ascii_case(&self.session.game.rom_sha256)
+    }
+
+    fn fingerprint_state_format_matches_session(
+        &self,
+        fingerprint: &CompatibilityFingerprint,
+    ) -> bool {
+        match self.session.core.state_format.as_deref() {
+            Some(state_format) => fingerprint.state_format.as_deref() == Some(state_format),
+            None => true,
+        }
     }
 }
 

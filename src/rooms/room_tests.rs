@@ -119,6 +119,18 @@ fn fingerprint_must_match_room_descriptor() {
 }
 
 #[test]
+fn fingerprint_state_format_must_match_room_descriptor() {
+    let host_connection = ConnectionId::new();
+    let mut room = room(host_connection);
+    let mut incompatible_fingerprint = fingerprint("rom");
+
+    incompatible_fingerprint.state_format = Some("dolphin:gamecube:other-v1".to_string());
+    let result = room.set_compatibility_for_connection(host_connection, incompatible_fingerprint);
+
+    assert!(matches!(result, Err(RoomError::CompatibilityMismatch)));
+}
+
+#[test]
 fn matching_compatibility_enters_syncing_state() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
@@ -144,10 +156,23 @@ fn compatibility_hash_case_does_not_create_false_mismatch() {
 }
 
 #[test]
+fn controller_ready_requires_completed_host_snapshot() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = compatible_room(host_connection, guest_connection);
+
+    let result = room.mark_ready(host_connection);
+
+    assert!(matches!(result, Err(RoomError::RoomNotReady)));
+    assert_eq!(room.view().status, RoomStatus::SyncingState);
+}
+
+#[test]
 fn ready_from_both_players_starts_gameplay() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = compatible_room(host_connection, guest_connection);
+    complete_snapshot(&mut room, host_connection);
 
     assert!(!room.mark_ready(host_connection).expect("host ready"));
     assert!(room.mark_ready(guest_connection).expect("guest ready"));
@@ -350,6 +375,7 @@ fn link_packet_cannot_spoof_player_slot() {
 
 fn ready_room(host_connection: ConnectionId, guest_connection: ConnectionId) -> NetplayRoom {
     let mut room = compatible_room(host_connection, guest_connection);
+    complete_snapshot(&mut room, host_connection);
     room.mark_ready(host_connection).expect("host ready");
     room.mark_ready(guest_connection).expect("guest ready");
     room
@@ -387,6 +413,24 @@ fn compatible_room(host_connection: ConnectionId, guest_connection: ConnectionId
     room
 }
 
+fn complete_snapshot(room: &mut NetplayRoom, host_connection: ConnectionId) {
+    room.accept_snapshot_chunk(
+        host_connection,
+        &SnapshotChunk {
+            index: 0,
+            bytes: vec![1, 2, 3],
+        },
+        SnapshotLimits::default(),
+    )
+    .expect("snapshot chunk");
+    room.accept_snapshot_complete(
+        host_connection,
+        &snapshot_manifest(&[1, 2, 3]),
+        SnapshotLimits::default(),
+    )
+    .expect("snapshot complete");
+}
+
 fn room(host_connection: ConnectionId) -> NetplayRoom {
     NetplayRoom::new(
         license("host"),
@@ -414,8 +458,12 @@ fn descriptor() -> NetplaySessionDescriptor {
             "romSha256": "a".repeat(64),
             "contentKey": "gamecube-star-fox-adventures-usa"
         },
+        "controller": {
+            "inputDelayFrames": 3
+        },
         "core": {
-            "coreId": "dolphin"
+            "coreId": "dolphin",
+            "stateFormat": "dolphin:gamecube:libretro-serialize-v1"
         }
     }))
     .expect("descriptor")
@@ -463,6 +511,7 @@ fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {
         system_id: "gamecube".to_string(),
         core_id: "dolphin".to_string(),
         core_build: "core-build".to_string(),
+        state_format: Some("dolphin:gamecube:libretro-serialize-v1".to_string()),
         content_hash: content_hash_for_fixture(content_hash),
         settings_hash: "settings".to_string(),
         cheats_hash: "cheats".to_string(),

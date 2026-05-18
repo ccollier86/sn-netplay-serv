@@ -29,7 +29,8 @@ pub use netplay_protocol::{
 };
 pub use server_message::ServerMessage;
 pub use session_descriptor::{
-    NetplayCoreDescriptor, NetplayGameDescriptor, NetplaySessionDescriptor,
+    ControllerNetplayDescriptor, NetplayCoreDescriptor, NetplayGameDescriptor,
+    NetplaySessionDescriptor,
 };
 pub use session_descriptor_error::SessionDescriptorError;
 pub use session_mode::NetplaySessionMode;
