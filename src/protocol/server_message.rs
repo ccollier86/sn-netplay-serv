@@ -9,7 +9,11 @@ use serde::Serialize;
 
 /// Message sent by the relay over a room WebSocket.
 #[derive(Clone, Debug, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ServerMessage {
     /// Initial message after a socket joins a room.
     RoomJoined {
