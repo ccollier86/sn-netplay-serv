@@ -5,8 +5,8 @@
 //! logic.
 
 mod admin_auth;
+mod client_auth_headers;
 mod client_identity;
-mod desktop_auth_headers;
 mod errors;
 mod routes;
 mod services;

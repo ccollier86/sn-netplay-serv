@@ -46,8 +46,8 @@ pub struct PlayerSlot {
     pub player_index: PlayerIndex,
     /// Role assigned by the server.
     pub role: PlayerRole,
-    /// Verified license subject occupying the slot.
-    pub subject_id: Option<String>,
+    /// Verified client identity occupying the slot.
+    pub subject_key: Option<String>,
     /// Active socket connection occupying the slot.
     pub connection_id: Option<ConnectionId>,
     /// Optional name shown in Desktop room UI.
@@ -62,7 +62,7 @@ impl PlayerSlot {
         Self {
             player_index,
             role: PlayerRole::Guest,
-            subject_id: None,
+            subject_key: None,
             connection_id: None,
             display_name: None,
             status: PlayerStatus::Empty,
@@ -74,7 +74,7 @@ impl PlayerSlot {
         Self {
             player_index: PlayerIndex::ONE,
             role: PlayerRole::Host,
-            subject_id: Some(license.subject_id.clone()),
+            subject_key: Some(license.identity_key()),
             connection_id: Some(connection_id),
             display_name: None,
             status: PlayerStatus::Connected,
@@ -84,7 +84,7 @@ impl PlayerSlot {
     /// Marks an empty slot as occupied by a guest.
     pub fn occupy_guest(&mut self, license: &VerifiedLicense, connection_id: ConnectionId) {
         self.role = PlayerRole::Guest;
-        self.subject_id = Some(license.subject_id.clone());
+        self.subject_key = Some(license.identity_key());
         self.connection_id = Some(connection_id);
         self.status = PlayerStatus::Connected;
     }

@@ -3,15 +3,18 @@
 //! These errors avoid embedding raw tokens or secrets so they can be safely
 //! mapped to HTTP and protocol responses.
 
-/// Failure while validating a desktop license token.
+/// Failure while validating a protected-client token.
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
     /// No bearer token was supplied.
-    #[error("missing desktop token")]
+    #[error("missing client token")]
     MissingToken,
     /// No install id was supplied.
-    #[error("missing desktop installation id")]
+    #[error("missing client installation id")]
     MissingInstallationId,
+    /// Client-kind header or authority response used an unsupported value.
+    #[error("unsupported client kind")]
+    UnsupportedClientKind,
     /// License authority rejected the supplied token or feature.
     #[error("license is not authorized for netplay")]
     Unauthorized,

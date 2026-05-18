@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing(config.log);
 
     let license_authority = Arc::new(HttpLicenseAuthority::new(
-        config.desktop_authorize_url.clone(),
+        config.authorize_url.clone(),
         config.license_internal_secret.clone(),
     )?);
     let rooms = Arc::new(InMemoryRoomRegistry::new(Arc::new(UuidInviteCodeGenerator)));

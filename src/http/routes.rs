@@ -3,8 +3,8 @@
 //! Handlers authenticate requests, call service traits, and serialize response
 //! DTOs. WebSocket transport will live in a separate module.
 
+use crate::http::client_auth_headers::client_auth_proof;
 use crate::http::client_identity::request_rate_limit_key;
-use crate::http::desktop_auth_headers::desktop_auth_proof;
 use crate::http::errors::HttpError;
 use crate::http::services::AppServices;
 use crate::limits::{
@@ -61,10 +61,10 @@ pub async fn create_room(
         .path_and_query()
         .map(|value| value.as_str())
         .unwrap_or(uri.path());
-    let auth = desktop_auth_proof(&headers, "POST", path_and_query, &body)?;
+    let auth = client_auth_proof(&headers, "POST", path_and_query, &body)?;
     let license = match services
         .license_authority
-        .verify_desktop_access(auth, NETPLAY_FEATURE)
+        .verify_client_access(auth, NETPLAY_FEATURE)
         .await
     {
         Ok(license) => license,
@@ -98,7 +98,7 @@ pub async fn room_status(
     Ok(Json(RoomStatusResponse { room }))
 }
 
-/// Upgrades an authenticated Desktop client into a room WebSocket.
+/// Upgrades an authenticated ShadowBoy client into a room WebSocket.
 pub async fn websocket_room(
     websocket: WebSocketUpgrade,
     State(services): State<AppServices>,
@@ -111,10 +111,10 @@ pub async fn websocket_room(
         .path_and_query()
         .map(|value| value.as_str())
         .unwrap_or(uri.path());
-    let auth = desktop_auth_proof(&headers, "GET", path_and_query, &[])?;
+    let auth = client_auth_proof(&headers, "GET", path_and_query, &[])?;
     let license = match services
         .license_authority
-        .verify_desktop_access(auth, NETPLAY_FEATURE)
+        .verify_client_access(auth, NETPLAY_FEATURE)
         .await
     {
         Ok(license) => license,

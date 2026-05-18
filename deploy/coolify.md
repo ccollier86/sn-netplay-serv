@@ -27,7 +27,7 @@ SERVICE_URL_NETPLAY=https://netplay.shadowboy.app
 SERVICE_URL_NETPLAY_8077=https://netplay.shadowboy.app
 SB_NETPLAY_IMAGE=ghcr.io/ccollier86/sb-netplay-serv:latest
 SB_NETPLAY_BIND_ADDR=0.0.0.0:8077
-SB_NETPLAY_DESKTOP_AUTHORIZE_URL=https://assets.shadowboy.app/internal/desktop/netplay/authorize
+SB_NETPLAY_AUTHORIZE_URL=https://assets.shadowboy.app/internal/netplay/authorize
 SB_NETPLAY_LICENSE_INTERNAL_SECRET=<server-to-server-secret>
 SB_NETPLAY_ADMIN_TOKEN=<long-random-operator-token>
 ```
@@ -73,7 +73,7 @@ curl -fsS \
 ```
 
 The room snapshot includes invite codes, room statuses, player slots, and
-whether slots are occupied. It does not expose desktop tokens, install secrets,
+whether slots are occupied. It does not expose client tokens, install secrets,
 ROM names, or gameplay payloads.
 
 Coolify container logs should show structured JSON when

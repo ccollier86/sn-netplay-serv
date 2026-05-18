@@ -19,7 +19,8 @@ Creates a room for the verified host.
 Headers:
 
 ```text
-Authorization: Bearer <desktop-token>
+Authorization: Bearer <client-token>
+X-Client-Kind: desktop | android
 X-Install-Id: <installationId>
 X-Req-Ts: <epoch milliseconds>
 X-Req-Nonce: <unique nonce>
@@ -28,10 +29,14 @@ X-Req-Sig: <base64 signature>
 
 Desktop should create the request signature using the same protected-client
 signer it already uses for `/v1/desktop/*` metadata, cheat, billing, and update
-requests.
+requests. Android should set `X-Client-Kind: android` and sign with the Android
+protected-client install key. `X-Client-Kind` defaults to `desktop` for older
+Desktop builds. `X-Installation-Id` is accepted as an install-id alias.
 
-The relay asks the metadata service to authorize feature `netplay`. The metadata
-service remains the authority for premium or active-trial entitlement.
+The relay asks the metadata service to authorize feature `netplay`. Desktop
+requests use `requiredEntitlement: "premiumOrTrial"`; Android requests use
+`requiredEntitlement: "eligibleClient"` and leave feature/premium gating inside
+the app.
 
 Body:
 
@@ -130,7 +135,8 @@ Attaches the room creator's Desktop client to Player 1.
 Required headers match room creation:
 
 ```text
-Authorization: Bearer <desktop-token>
+Authorization: Bearer <client-token>
+X-Client-Kind: desktop | android
 X-Install-Id: <installationId>
 X-Req-Ts: <epoch milliseconds>
 X-Req-Nonce: <unique nonce>

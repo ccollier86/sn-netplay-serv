@@ -14,6 +14,7 @@ pub fn request_rate_limit_key(headers: &HeaderMap, trust_proxy_headers: bool) ->
 
     headers
         .get("x-install-id")
+        .or_else(|| headers.get("x-installation-id"))
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())

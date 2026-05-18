@@ -1,10 +1,10 @@
-//! Parser for metadata-service desktop authorization responses.
+//! Parser for metadata-service protected-client authorization responses.
 //!
 //! The backend may return a direct authorization response or a billing-style
 //! entitlement object. This module normalizes those shapes into one verified
 //! identity without exposing transport details to room code.
 
-use crate::auth::{AuthError, VerifiedLicense};
+use crate::auth::{AuthError, ClientKind, VerifiedLicense};
 use serde_json::Value;
 
 const RECORD_KEYS: &[&str] = &[
@@ -20,6 +20,7 @@ const RECORD_KEYS: &[&str] = &[
 /// Parses a backend response into a verified netplay identity.
 pub fn parse_verified_license(
     value: Value,
+    expected_client_kind: ClientKind,
     installation_id: &str,
     feature: &str,
 ) -> Result<VerifiedLicense, AuthError> {
@@ -31,6 +32,12 @@ pub fn parse_verified_license(
 
     if read_bool(&records, &["valid", "authorized", "allowed"]) == Some(false) {
         return Err(AuthError::Unauthorized);
+    }
+
+    if let Some(client_kind) = read_client_kind(&records)?
+        && client_kind != expected_client_kind
+    {
+        return Err(AuthError::InvalidAuthorityResponse);
     }
 
     let features = collect_features(&records);
@@ -60,6 +67,7 @@ pub fn parse_verified_license(
     )
     .unwrap_or_else(|| installation_id.to_string());
     let verified = VerifiedLicense::with_entitlement(
+        expected_client_kind,
         installation_id,
         subject_id,
         tier,
@@ -139,6 +147,14 @@ fn read_string(records: &[&serde_json::Map<String, Value>], keys: &[&str]) -> Op
         })
 }
 
+fn read_client_kind(
+    records: &[&serde_json::Map<String, Value>],
+) -> Result<Option<ClientKind>, AuthError> {
+    read_string(records, &["clientKind", "client_kind"])
+        .map(|value| ClientKind::parse(&value).map_err(|_| AuthError::InvalidAuthorityResponse))
+        .transpose()
+}
+
 fn read_future_date(records: &[&serde_json::Map<String, Value>], keys: &[&str]) -> bool {
     records
         .iter()
@@ -181,7 +197,7 @@ fn current_epoch_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::parse_verified_license;
-    use crate::auth::AuthError;
+    use crate::auth::{AuthError, ClientKind};
     use serde_json::json;
 
     #[test]
@@ -194,6 +210,7 @@ mod tests {
                     "cheats": true
                 }
             }),
+            ClientKind::Desktop,
             "install-1",
             "netplay",
         )
@@ -213,6 +230,7 @@ mod tests {
                     "netplay": true
                 }
             }),
+            ClientKind::Desktop,
             "install-1",
             "netplay",
         )
@@ -229,12 +247,53 @@ mod tests {
                 "subjectId": "install-1",
                 "tier": "authenticated"
             }),
+            ClientKind::Android,
             "install-1",
             "netplay",
         )
         .expect("verified");
 
         assert_eq!(verified.subject_id, "install-1");
+        assert_eq!(verified.client_kind, ClientKind::Android);
+    }
+
+    #[test]
+    fn accepts_android_eligible_client_response() {
+        let verified = parse_verified_license(
+            json!({
+                "authorized": true,
+                "clientKind": "android",
+                "installationId": "inst_123",
+                "subjectId": "inst_123",
+                "tier": "authenticated",
+                "features": {
+                    "netplay": true
+                }
+            }),
+            ClientKind::Android,
+            "inst_123",
+            "netplay",
+        )
+        .expect("verified");
+
+        assert_eq!(verified.client_kind, ClientKind::Android);
+        assert_eq!(verified.identity_key(), "android:inst_123");
+    }
+
+    #[test]
+    fn rejects_mismatched_client_kind_response() {
+        let result = parse_verified_license(
+            json!({
+                "authorized": true,
+                "clientKind": "desktop",
+                "subjectId": "subject-1"
+            }),
+            ClientKind::Android,
+            "install-1",
+            "netplay",
+        );
+
+        assert!(matches!(result, Err(AuthError::InvalidAuthorityResponse)));
     }
 
     #[test]
@@ -247,6 +306,7 @@ mod tests {
                     "netplay": false
                 }
             }),
+            ClientKind::Desktop,
             "install-1",
             "netplay",
         );
@@ -260,6 +320,7 @@ mod tests {
             json!({
                 "valid": false
             }),
+            ClientKind::Desktop,
             "install-1",
             "netplay",
         );

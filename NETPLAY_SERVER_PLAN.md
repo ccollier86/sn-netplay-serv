@@ -69,13 +69,14 @@ GET  /v1/rooms/:inviteCode/status
 GET  /v1/ws?inviteCode=XXXX&protocolVersion=1
 ```
 
-`POST /v1/rooms` requires a valid ShadowBoy desktop token and returns an invite
-code. The request body contains the Desktop protocol version and game/core
-descriptor used for invite preview and local ROM matching. The WebSocket join
-also requires authorization.
+`POST /v1/rooms` requires a valid ShadowBoy protected-client token and returns
+an invite code. The request body contains the netplay protocol version and
+game/core descriptor used for invite preview and local ROM matching. The
+WebSocket join also requires authorization.
 
 The relay must never transfer ROM files. It only stores hashes and stable ids so
-Desktop can tell the guest whether they already have the correct local content.
+ShadowBoy can tell the guest whether they already have the correct local
+content.
 
 ## License Validation
 
@@ -84,7 +85,7 @@ existing metadata/cheat service using a server-to-server secret and asks that
 trusted service to authorize the Desktop install/session for feature `netplay`.
 
 ```text
-POST /internal/desktop/netplay/authorize
+POST /internal/netplay/authorize
 Authorization: Bearer <netplay-internal-secret>
 ```
 
@@ -92,7 +93,8 @@ Request:
 
 ```json
 {
-  "accessToken": "<desktop-access-token>",
+  "clientKind": "desktop",
+  "accessToken": "<client-access-token>",
   "installationId": "<installation-id>",
   "feature": "netplay",
   "requiredEntitlement": "premiumOrTrial",

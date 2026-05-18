@@ -1,19 +1,21 @@
-//! Desktop protected-auth proof supplied to the relay.
+//! Protected-client auth proof supplied to the relay.
 //!
-//! The relay receives the current Desktop access token and install id, then
-//! asks the trusted metadata service to authorize netplay. Sensitive values are
+//! The relay receives the current client access token and install id, then asks
+//! the trusted metadata service to authorize netplay. Sensitive values are
 //! redacted from debug output.
 
-/// Bearer access token supplied by ShadowBoy Desktop.
-#[derive(Clone, Eq, PartialEq)]
-pub struct DesktopToken(String);
+use crate::auth::{AuthError, ClientKind};
 
-impl DesktopToken {
+/// Bearer access token supplied by a ShadowBoy client.
+#[derive(Clone, Eq, PartialEq)]
+pub struct ProtectedAccessToken(String);
+
+impl ProtectedAccessToken {
     /// Creates a token from a bearer value after trimming surrounding space.
-    pub fn new(value: impl Into<String>) -> Result<Self, crate::auth::AuthError> {
+    pub fn new(value: impl Into<String>) -> Result<Self, AuthError> {
         let value = value.into().trim().to_string();
         if value.is_empty() {
-            Err(crate::auth::AuthError::MissingToken)
+            Err(AuthError::MissingToken)
         } else {
             Ok(Self(value))
         }
@@ -25,22 +27,22 @@ impl DesktopToken {
     }
 }
 
-impl std::fmt::Debug for DesktopToken {
+impl std::fmt::Debug for ProtectedAccessToken {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("DesktopToken(<redacted>)")
+        formatter.write_str("ProtectedAccessToken(<redacted>)")
     }
 }
 
-/// Install id from the Desktop protected-client session.
+/// Install id from a protected-client session.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DesktopInstallationId(String);
+pub struct ProtectedInstallationId(String);
 
-impl DesktopInstallationId {
+impl ProtectedInstallationId {
     /// Creates an install id after trimming surrounding space.
-    pub fn new(value: impl Into<String>) -> Result<Self, crate::auth::AuthError> {
+    pub fn new(value: impl Into<String>) -> Result<Self, AuthError> {
         let value = value.into().trim().to_string();
         if value.is_empty() {
-            Err(crate::auth::AuthError::MissingInstallationId)
+            Err(AuthError::MissingInstallationId)
         } else {
             Ok(Self(value))
         }
@@ -54,10 +56,10 @@ impl DesktopInstallationId {
 
 /// Original protected request details for backend signature verification.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DesktopProtectedRequestProof {
+pub struct ProtectedRequestProof {
     /// HTTP method used for the netplay request.
     pub method: String,
-    /// Path and query signed by Desktop.
+    /// Path and query signed by the client.
     pub path_and_query: String,
     /// SHA-256 hex digest of the exact request body bytes.
     pub body_sha256_hex: String,
@@ -69,25 +71,29 @@ pub struct DesktopProtectedRequestProof {
     pub timestamp: Option<String>,
 }
 
-/// Auth proof forwarded from Desktop to the relay.
+/// Auth proof forwarded from the relay to the metadata service.
 #[derive(Clone, Eq, PartialEq)]
-pub struct DesktopAuthProof {
+pub struct ProtectedClientAuthProof {
+    /// Platform family for the client session.
+    pub client_kind: ClientKind,
     /// Current protected-client access token.
-    pub access_token: DesktopToken,
+    pub access_token: ProtectedAccessToken,
     /// Install id tied to the access token.
-    pub installation_id: DesktopInstallationId,
+    pub installation_id: ProtectedInstallationId,
     /// Signed netplay request details.
-    pub request: DesktopProtectedRequestProof,
+    pub request: ProtectedRequestProof,
 }
 
-impl DesktopAuthProof {
+impl ProtectedClientAuthProof {
     /// Creates a protected-auth proof for the metadata authorization endpoint.
     pub fn new(
-        access_token: DesktopToken,
-        installation_id: DesktopInstallationId,
-        request: DesktopProtectedRequestProof,
+        client_kind: ClientKind,
+        access_token: ProtectedAccessToken,
+        installation_id: ProtectedInstallationId,
+        request: ProtectedRequestProof,
     ) -> Self {
         Self {
+            client_kind,
             access_token,
             installation_id,
             request,
@@ -95,10 +101,11 @@ impl DesktopAuthProof {
     }
 }
 
-impl std::fmt::Debug for DesktopAuthProof {
+impl std::fmt::Debug for ProtectedClientAuthProof {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("DesktopAuthProof")
+            .debug_struct("ProtectedClientAuthProof")
+            .field("client_kind", &self.client_kind)
             .field("access_token", &"<redacted>")
             .field("installation_id", &self.installation_id)
             .field("request", &self.request)
@@ -109,22 +116,25 @@ impl std::fmt::Debug for DesktopAuthProof {
 #[cfg(test)]
 mod tests {
     use super::{
-        DesktopAuthProof, DesktopInstallationId, DesktopProtectedRequestProof, DesktopToken,
+        ProtectedAccessToken, ProtectedClientAuthProof, ProtectedInstallationId,
+        ProtectedRequestProof,
     };
+    use crate::auth::ClientKind;
 
     #[test]
     fn token_debug_output_redacts_secret() {
-        let token = DesktopToken::new("secret-token").expect("token");
+        let token = ProtectedAccessToken::new("secret-token").expect("token");
 
-        assert_eq!(format!("{token:?}"), "DesktopToken(<redacted>)");
+        assert_eq!(format!("{token:?}"), "ProtectedAccessToken(<redacted>)");
     }
 
     #[test]
     fn auth_proof_debug_output_redacts_token() {
-        let proof = DesktopAuthProof::new(
-            DesktopToken::new("secret-token").expect("token"),
-            DesktopInstallationId::new("install-1").expect("install id"),
-            DesktopProtectedRequestProof {
+        let proof = ProtectedClientAuthProof::new(
+            ClientKind::Android,
+            ProtectedAccessToken::new("secret-token").expect("token"),
+            ProtectedInstallationId::new("install-1").expect("install id"),
+            ProtectedRequestProof {
                 method: "POST".to_string(),
                 path_and_query: "/v1/rooms".to_string(),
                 body_sha256_hex: "hash".to_string(),

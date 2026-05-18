@@ -1,11 +1,15 @@
-//! Verified license identity returned by the license authority.
+//! Verified client identity returned by the license authority.
 //!
 //! This module stores only the stable subject data needed by rooms. It does not
-//! retain the raw desktop token.
+//! retain raw client tokens.
 
-/// License subject allowed to use netplay.
+use crate::auth::ClientKind;
+
+/// Client subject allowed to use netplay.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedLicense {
+    /// Platform family tied to the verified protected-client session.
+    pub client_kind: ClientKind,
     /// Install id tied to the verified protected-client session.
     pub installation_id: String,
     /// Stable license, install, or account subject id.
@@ -37,6 +41,7 @@ impl VerifiedLicense {
         let trial_active = normalized_tier == "trial";
 
         Self {
+            client_kind: ClientKind::Desktop,
             installation_id: subject_id.clone(),
             subject_id,
             tier,
@@ -48,6 +53,7 @@ impl VerifiedLicense {
 
     /// Creates a verified identity from backend entitlement details.
     pub fn with_entitlement(
+        client_kind: ClientKind,
         installation_id: impl Into<String>,
         subject_id: impl Into<String>,
         tier: impl Into<String>,
@@ -56,6 +62,7 @@ impl VerifiedLicense {
         trial_active: bool,
     ) -> Self {
         Self {
+            client_kind,
             installation_id: installation_id.into(),
             subject_id: subject_id.into(),
             tier: tier.into(),
@@ -70,5 +77,14 @@ impl VerifiedLicense {
         self.has_premium
             || self.trial_active
             || self.features.iter().any(|candidate| candidate == feature)
+    }
+
+    /// Returns a collision-resistant key for room ownership comparisons.
+    pub fn identity_key(&self) -> String {
+        format!(
+            "{}:{}",
+            self.client_kind.identity_namespace(),
+            self.subject_id
+        )
     }
 }

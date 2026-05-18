@@ -4,7 +4,9 @@
 //! internal admin observability without growing the production route module.
 
 use super::build_router;
-use crate::auth::{AuthError, DesktopAuthProof, LicenseAuthority, VerifiedLicense};
+use crate::auth::{
+    AuthError, ClientKind, LicenseAuthority, ProtectedClientAuthProof, VerifiedLicense,
+};
 use crate::http::AdminAuthorizer;
 use crate::http::services::AppServices;
 use crate::limits::MAX_CREATE_ROOM_BODY_BYTES;
@@ -21,18 +23,22 @@ struct FakeLicenseAuthority;
 
 #[async_trait::async_trait]
 impl LicenseAuthority for FakeLicenseAuthority {
-    async fn verify_desktop_access(
+    async fn verify_client_access(
         &self,
-        auth: DesktopAuthProof,
+        auth: ProtectedClientAuthProof,
         _feature: &'static str,
     ) -> Result<VerifiedLicense, AuthError> {
         if auth.access_token.expose_secret() == "valid" {
             Ok(VerifiedLicense::with_entitlement(
+                auth.client_kind,
                 auth.installation_id.as_str(),
                 "subject",
-                "premium",
+                match auth.client_kind {
+                    ClientKind::Desktop => "premium",
+                    ClientKind::Android => "authenticated",
+                },
                 vec!["netplay".to_string()],
-                true,
+                auth.client_kind == ClientKind::Desktop,
                 false,
             ))
         } else if auth.access_token.expose_secret() == "expired" {
@@ -145,6 +151,44 @@ async fn create_room_returns_invite_descriptor_and_protocol() {
         "a".repeat(64)
     );
     assert_eq!(value["room"]["session"]["core"]["coreId"], "dolphin");
+}
+
+#[tokio::test]
+async fn create_room_accepts_android_client_auth() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/rooms")
+                .header("authorization", "Bearer valid")
+                .header("x-client-kind", "android")
+                .header("x-installation-id", "android-install-1")
+                .body(Body::from(create_room_body()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn create_room_rejects_unknown_client_kind() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/rooms")
+                .header("authorization", "Bearer valid")
+                .header("x-client-kind", "console")
+                .header("x-install-id", "install-1")
+                .body(Body::from(create_room_body()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

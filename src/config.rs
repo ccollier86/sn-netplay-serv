@@ -13,8 +13,8 @@ use crate::rate_limit::RateLimitPolicy;
 pub struct ServerConfig {
     /// TCP address used by the HTTP/WebSocket server.
     pub bind_addr: SocketAddr,
-    /// Full metadata-service URL used for desktop netplay authorization.
-    pub desktop_authorize_url: String,
+    /// Full metadata-service URL used for netplay client authorization.
+    pub authorize_url: String,
     /// Server-to-server secret sent to the license authority.
     pub license_internal_secret: String,
     /// Optional bearer token required by internal observability endpoints.
@@ -37,9 +37,12 @@ impl ServerConfig {
         let bind_addr = env::var("SB_NETPLAY_BIND_ADDR")
             .unwrap_or_else(|_| "127.0.0.1:8077".to_string())
             .parse()?;
-        let desktop_authorize_url = required_env_with_fallback(
-            "SB_NETPLAY_DESKTOP_AUTHORIZE_URL",
-            "SB_NETPLAY_LICENSE_VERIFY_URL",
+        let authorize_url = required_env_with_fallbacks(
+            "SB_NETPLAY_AUTHORIZE_URL",
+            &[
+                "SB_NETPLAY_DESKTOP_AUTHORIZE_URL",
+                "SB_NETPLAY_LICENSE_VERIFY_URL",
+            ],
         )?;
         let license_internal_secret = required_env("SB_NETPLAY_LICENSE_INTERNAL_SECRET")?;
         let admin_token = optional_env("SB_NETPLAY_ADMIN_TOKEN")?;
@@ -58,7 +61,7 @@ impl ServerConfig {
 
         Ok(Self {
             bind_addr,
-            desktop_authorize_url,
+            authorize_url,
             license_internal_secret,
             admin_token,
             trust_proxy_headers,
@@ -142,14 +145,23 @@ fn optional_log_format_env(
     }
 }
 
-fn required_env_with_fallback(
+fn required_env_with_fallbacks(
     primary_name: &'static str,
-    fallback_name: &'static str,
+    fallback_names: &[&'static str],
 ) -> Result<String, ConfigError> {
     match env::var(primary_name) {
         Ok(value) if !value.trim().is_empty() => Ok(value),
         Ok(_) => Err(ConfigError::EmptyEnv(primary_name)),
-        Err(_) => required_env(fallback_name),
+        Err(_) => {
+            for fallback_name in fallback_names {
+                match optional_env(fallback_name)? {
+                    Some(value) => return Ok(value),
+                    None => continue,
+                }
+            }
+
+            Err(ConfigError::MissingEnv(primary_name))
+        }
     }
 }
 

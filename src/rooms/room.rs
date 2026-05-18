@@ -143,9 +143,9 @@ impl NetplayRoom {
             .find(|candidate| candidate.role == PlayerRole::Host)
             .ok_or(RoomError::UnknownConnection)?;
         let subject_matches = slot
-            .subject_id
+            .subject_key
             .as_deref()
-            .is_some_and(|subject_id| subject_id == license.subject_id);
+            .is_some_and(|subject_key| subject_key == license.identity_key());
 
         if !subject_matches {
             return Err(RoomError::HostSubjectMismatch);

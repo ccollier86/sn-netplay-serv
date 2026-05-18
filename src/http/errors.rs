@@ -21,7 +21,7 @@ pub enum HttpError {
     Room(RoomError),
     /// Request exceeded a configured rate limit.
     RateLimited(RateLimitExceeded),
-    /// Desktop supplied malformed or unsupported request data.
+    /// Client supplied malformed or unsupported request data.
     InvalidRequest {
         /// Stable error code.
         code: &'static str,
@@ -56,7 +56,7 @@ impl From<ProtocolVersionError> for HttpError {
     fn from(_value: ProtocolVersionError) -> Self {
         Self::InvalidRequest {
             code: "unsupportedProtocolVersion",
-            message: "This Desktop netplay protocol version is not supported.",
+            message: "This netplay protocol version is not supported.",
         }
     }
 }
@@ -76,8 +76,13 @@ impl IntoResponse for HttpError {
         let (status, code, message) = match self {
             Self::Auth(AuthError::MissingToken | AuthError::MissingInstallationId) => (
                 StatusCode::UNAUTHORIZED,
-                "missingDesktopAuth",
-                "Missing desktop authorization proof.",
+                "missingClientAuth",
+                "Missing client authorization proof.",
+            ),
+            Self::Auth(AuthError::UnsupportedClientKind) => (
+                StatusCode::BAD_REQUEST,
+                "unsupportedClientKind",
+                "This ShadowBoy client platform is not supported for netplay.",
             ),
             Self::Auth(AuthError::Unauthorized) => (
                 StatusCode::FORBIDDEN,
@@ -87,7 +92,7 @@ impl IntoResponse for HttpError {
             Self::Auth(AuthError::EntitlementRequired) => (
                 StatusCode::PAYMENT_REQUIRED,
                 "entitlementRequired",
-                "Premium or active trial access is required for netplay.",
+                "This client is not eligible for netplay.",
             ),
             Self::Auth(_) => (
                 StatusCode::BAD_GATEWAY,

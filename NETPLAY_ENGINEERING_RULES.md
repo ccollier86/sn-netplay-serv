@@ -131,7 +131,7 @@ ConnectionSink
 ## Error Handling
 
 - Use typed errors per boundary.
-- Do not leak auth tokens, desktop tokens, internal secrets, or raw snapshot
+- Do not leak auth tokens, client tokens, internal secrets, or raw snapshot
   bytes in errors or logs.
 - Map internal errors to stable protocol errors at the edge.
 - Include enough context for debugging without exposing private data.

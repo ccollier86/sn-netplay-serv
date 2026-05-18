@@ -1,5 +1,5 @@
 # documentation: https://github.com/ccollier86/sb-desktop
-# slogan: Invite-code netplay relay for ShadowBoy Desktop.
+# slogan: Invite-code netplay relay for ShadowBoy clients.
 # tags: rust,axum,websocket,netplay,shadowboy
 # port: 8077
 
@@ -12,7 +12,8 @@ services:
       - SERVICE_FQDN_NETPLAY
       - SERVICE_URL_NETPLAY_8077
       - SB_NETPLAY_BIND_ADDR=0.0.0.0:8077
-      - SB_NETPLAY_DESKTOP_AUTHORIZE_URL=${SB_NETPLAY_DESKTOP_AUTHORIZE_URL:?set-in-coolify}
+      - SB_NETPLAY_AUTHORIZE_URL=${SB_NETPLAY_AUTHORIZE_URL:-}
+      - SB_NETPLAY_DESKTOP_AUTHORIZE_URL=${SB_NETPLAY_DESKTOP_AUTHORIZE_URL:-}
       - SB_NETPLAY_LICENSE_INTERNAL_SECRET=${SB_NETPLAY_LICENSE_INTERNAL_SECRET:?set-in-coolify}
       - SB_NETPLAY_ADMIN_TOKEN=${SB_NETPLAY_ADMIN_TOKEN:?set-in-coolify}
       - SB_NETPLAY_LOG_FORMAT=${SB_NETPLAY_LOG_FORMAT:-json}

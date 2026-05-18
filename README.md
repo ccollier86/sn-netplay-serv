@@ -55,7 +55,7 @@ Not implemented yet:
 
 ```text
 SB_NETPLAY_BIND_ADDR=127.0.0.1:8077
-SB_NETPLAY_DESKTOP_AUTHORIZE_URL=https://assets.shadowboy.app/internal/desktop/netplay/authorize
+SB_NETPLAY_AUTHORIZE_URL=https://assets.shadowboy.app/internal/netplay/authorize
 SB_NETPLAY_LICENSE_INTERNAL_SECRET=<server-to-server-secret>
 SB_NETPLAY_ADMIN_TOKEN=<long-random-operator-token>
 SB_NETPLAY_LOG_FORMAT=json
@@ -66,8 +66,8 @@ SB_NETPLAY_RATE_ROOM_STATUS_PER_MINUTE=120
 ```
 
 `SB_NETPLAY_BIND_ADDR` is optional and defaults to `127.0.0.1:8077`.
-`SB_NETPLAY_LICENSE_VERIFY_URL` is still accepted as a legacy fallback for the
-authorization URL.
+`SB_NETPLAY_DESKTOP_AUTHORIZE_URL` and `SB_NETPLAY_LICENSE_VERIFY_URL` are still
+accepted as legacy fallbacks for the authorization URL.
 
 For Coolify, set `SB_NETPLAY_BIND_ADDR=0.0.0.0:8077` and let Coolify own the
 public reverse proxy and TLS certificate. Deploy with
@@ -94,31 +94,40 @@ curl -fsS -H "Authorization: Bearer $SB_NETPLAY_ADMIN_TOKEN" \
   https://netplay.shadowboy.app/internal/rooms
 ```
 
-## Desktop Authorization
+## Client Authorization
 
-Room creation requires the same protected-client identity Desktop already uses
-for metadata, cheats, billing, and updates:
+Room creation requires the same protected-client identity ShadowBoy clients
+already use for metadata, cheats, billing, and updates:
 
 ```text
-Authorization: Bearer <desktop access token>
+Authorization: Bearer <client access token>
+X-Client-Kind: desktop | android
 X-Install-Id: <installationId>
 X-Req-Ts: <epoch milliseconds>
 X-Req-Nonce: <unique nonce>
 X-Req-Sig: <base64 signature>
 ```
 
-The relay does not trust Electron's local premium state. It sends the access
-token, install id, requested feature `netplay`, and the signed netplay request
-proof to the metadata service using `SB_NETPLAY_LICENSE_INTERNAL_SECRET`.
+`X-Client-Kind` is optional for existing Desktop clients and defaults to
+`desktop`. Android clients must send `X-Client-Kind: android`. The relay also
+accepts `X-Installation-Id` as an install-id alias for Android.
+
+The relay sends the access token, client kind, install id, requested feature
+`netplay`, and the signed netplay request proof to the metadata service using
+`SB_NETPLAY_LICENSE_INTERNAL_SECRET`.
 
 The metadata service should validate:
 
-- the desktop access token
+- the client access token
 - the install id
 - the protected request signature when signature fields are present
 - nonce/timestamp freshness
 - app/version policy tied to the token
-- premium or active-trial entitlement for `netplay`
+
+Desktop authorization asks for `requiredEntitlement: "premiumOrTrial"`. Android
+authorization asks for `requiredEntitlement: "eligibleClient"` so the Android
+session, install key, signature, nonce, timestamp, and Play Integrity-backed
+bootstrap can be validated without duplicating app-side premium gating.
 
 Accepted response shapes:
 
@@ -126,8 +135,8 @@ Accepted response shapes:
 - feature entitlement, for example `{ "features": { "netplay": true } }`
 - premium/trial account state, for example `{ "accessStatus": "premium" }`
 
-If authorization fails because the install is expired or not premium/trial, the
-relay returns `402 entitlementRequired`.
+If the authorization relay reports that the client is ineligible, the relay
+returns `402 entitlementRequired`.
 
 ## Commands
 
