@@ -11,11 +11,12 @@ use crate::protocol::{
     SnapshotChunk, SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, LinkCableRoomState, PlayerIndex, PlayerRole, PlayerSlot,
-    PlayerSlotView, PlayerStatus, RoomError, RoomId, RoomStatus, RoomView,
-    SessionPauseStateTracker, SnapshotTransferState,
+    ConnectionId, InviteCode, LinkCableRoomState, PlayerIndex, PlayerRole, PlayerRuntimeState,
+    PlayerSlot, PlayerSlotView, PlayerStatus, ResumeTokenHash, RoomError, RoomId, RoomStatus,
+    RoomView, SessionPauseStateTracker, SnapshotTransferState,
 };
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 /// Active netplay room.
 #[derive(Clone, Debug)]
@@ -26,7 +27,9 @@ pub struct NetplayRoom {
     pub(super) max_players: u8,
     pub(super) players: Vec<PlayerSlot>,
     pub(super) status: RoomStatus,
-    compatibility: HashMap<PlayerIndex, CompatibilityFingerprint>,
+    pub(super) room_epoch: u64,
+    pub(super) session_epoch: u64,
+    pub(super) compatibility: HashMap<PlayerIndex, CompatibilityFingerprint>,
     pub(super) ready_players: HashSet<PlayerIndex>,
     pub(super) last_input_frames: HashMap<PlayerIndex, u64>,
     pub(super) link_cable_state: LinkCableRoomState,
@@ -45,9 +48,33 @@ impl NetplayRoom {
         invite_code: InviteCode,
         session: NetplaySessionDescriptor,
     ) -> Self {
+        Self::new_with_resume(
+            host,
+            host_connection,
+            invite_code,
+            session,
+            String::new(),
+            Instant::now(),
+        )
+    }
+
+    /// Creates a room with an explicit host resume-token hash.
+    pub fn new_with_resume(
+        host: VerifiedLicense,
+        host_connection: ConnectionId,
+        invite_code: InviteCode,
+        session: NetplaySessionDescriptor,
+        host_resume_token_hash: ResumeTokenHash,
+        now: Instant,
+    ) -> Self {
         let max_players = MVP_ROOM_CAPACITY;
         let mut players = Vec::with_capacity(usize::from(max_players));
-        players.push(PlayerSlot::host(&host, host_connection));
+        players.push(PlayerSlot::host(
+            &host,
+            host_connection,
+            host_resume_token_hash,
+            now,
+        ));
 
         for raw_index in 1..max_players {
             let index = PlayerIndex::new(raw_index, max_players).expect("valid mvp player index");
@@ -61,6 +88,8 @@ impl NetplayRoom {
             max_players,
             players,
             status: RoomStatus::WaitingForGuest,
+            room_epoch: 1,
+            session_epoch: 1,
             compatibility: HashMap::new(),
             ready_players: HashSet::new(),
             last_input_frames: HashMap::new(),
@@ -86,101 +115,6 @@ impl NetplayRoom {
     /// Returns the current room lifecycle status.
     pub fn status(&self) -> RoomStatus {
         self.status
-    }
-
-    /// Adds a guest to the first empty slot and returns their player index.
-    pub fn join_guest(
-        &mut self,
-        license: VerifiedLicense,
-        connection_id: ConnectionId,
-    ) -> Result<PlayerIndex, RoomError> {
-        if self.status == RoomStatus::Closed {
-            return Err(RoomError::RoomClosed);
-        }
-
-        let player_index = {
-            let slot = self
-                .players
-                .iter_mut()
-                .find(|candidate| candidate.is_empty())
-                .ok_or(RoomError::RoomFull)?;
-            slot.occupy_guest(&license, connection_id);
-            slot.player_index
-        };
-        self.reset_sync_state();
-        self.status = RoomStatus::CheckingCompatibility;
-        self.players
-            .iter_mut()
-            .filter(|slot| !slot.is_empty())
-            .for_each(|slot| slot.status = PlayerStatus::Connected);
-
-        Ok(player_index)
-    }
-
-    /// Attaches a socket connection to the reserved host slot.
-    pub fn attach_host(
-        &mut self,
-        license: VerifiedLicense,
-        connection_id: ConnectionId,
-    ) -> Result<PlayerIndex, RoomError> {
-        if self.status == RoomStatus::Closed {
-            return Err(RoomError::RoomClosed);
-        }
-
-        let slot = self
-            .players
-            .iter_mut()
-            .find(|candidate| candidate.role == PlayerRole::Host)
-            .ok_or(RoomError::UnknownConnection)?;
-        let subject_matches = slot
-            .subject_key
-            .as_deref()
-            .is_some_and(|subject_key| subject_key == license.identity_key());
-
-        if !subject_matches {
-            return Err(RoomError::HostSubjectMismatch);
-        }
-
-        slot.connection_id = Some(connection_id);
-        slot.status = PlayerStatus::Connected;
-        self.ready_players.remove(&slot.player_index);
-
-        Ok(slot.player_index)
-    }
-
-    /// Marks the connection as disconnected and returns whether the room closed.
-    pub fn disconnect(&mut self, connection_id: ConnectionId) -> Result<bool, RoomError> {
-        let slot = self
-            .players
-            .iter_mut()
-            .find(|slot| slot.connection_id == Some(connection_id))
-            .ok_or(RoomError::UnknownConnection)?;
-
-        let player_index = slot.player_index;
-        let is_host = slot.role == PlayerRole::Host;
-
-        slot.connection_id = None;
-        slot.status = if is_host {
-            PlayerStatus::Disconnected
-        } else {
-            PlayerStatus::Empty
-        };
-
-        self.compatibility.remove(&player_index);
-        self.ready_players.remove(&player_index);
-        self.last_input_frames.remove(&player_index);
-        self.link_cable_state.reset();
-        self.pause_state = None;
-        self.snapshot_transfer = None;
-
-        if is_host {
-            self.status = RoomStatus::Closed;
-            return Ok(true);
-        }
-
-        self.status = RoomStatus::WaitingForGuest;
-
-        Ok(false)
     }
 
     /// Stores a compatibility fingerprint for the connected player.
@@ -226,7 +160,10 @@ impl NetplayRoom {
             self.players
                 .iter_mut()
                 .filter(|slot| !slot.is_empty())
-                .for_each(|slot| slot.status = PlayerStatus::CompatibilityFailed);
+                .for_each(|slot| {
+                    slot.status = PlayerStatus::CompatibilityFailed;
+                    slot.runtime_state = PlayerRuntimeState::Connected;
+                });
             return Err(RoomError::CompatibilityMismatch);
         }
 
@@ -234,7 +171,10 @@ impl NetplayRoom {
         self.players
             .iter_mut()
             .filter(|slot| slot.connection_id.is_some())
-            .for_each(|slot| slot.status = PlayerStatus::SyncingState);
+            .for_each(|slot| {
+                slot.status = PlayerStatus::SyncingState;
+                slot.runtime_state = PlayerRuntimeState::Syncing;
+            });
 
         Ok(())
     }
@@ -267,7 +207,10 @@ impl NetplayRoom {
         self.players
             .iter_mut()
             .filter(|slot| slot.connection_id.is_some())
-            .for_each(|slot| slot.status = PlayerStatus::Playing);
+            .for_each(|slot| {
+                slot.status = PlayerStatus::Playing;
+                slot.runtime_state = PlayerRuntimeState::Playing;
+            });
 
         Ok(true)
     }
@@ -309,8 +252,16 @@ impl NetplayRoom {
 
     /// Creates a serializable view for HTTP and WebSocket responses.
     pub fn view(&self) -> RoomView {
+        self.view_for_event(0, Instant::now())
+    }
+
+    /// Creates a serializable view with relay event metadata.
+    pub fn view_for_event(&self, event_seq: u64, now: Instant) -> RoomView {
         RoomView {
             room_id: self.room_id,
+            event_seq,
+            room_epoch: self.room_epoch,
+            session_epoch: self.session_epoch,
             invite_code: self.invite_code.display(),
             protocol: NetplayProtocolView::default(),
             session: self.session.clone(),
@@ -328,7 +279,14 @@ impl NetplayRoom {
                     display_number: slot.player_index.display_number(),
                     role: slot.role,
                     status: slot.status,
+                    runtime_state: slot.runtime_state,
                     occupied: !slot.is_empty(),
+                    last_seen_age_ms: slot
+                        .last_seen_at
+                        .map(|last_seen| now.saturating_duration_since(last_seen).as_millis()),
+                    reconnect_grace_remaining_ms: slot
+                        .reconnect_deadline
+                        .map(|deadline| deadline.saturating_duration_since(now).as_millis()),
                 })
                 .collect(),
         }
@@ -400,10 +358,23 @@ impl NetplayRoom {
             .find(|slot| slot.player_index == player_index)
         {
             slot.status = status;
+            slot.runtime_state = match status {
+                PlayerStatus::Empty => PlayerRuntimeState::Empty,
+                PlayerStatus::Connected => PlayerRuntimeState::Connected,
+                PlayerStatus::CheckingCompatibility => PlayerRuntimeState::CheckingCompatibility,
+                PlayerStatus::CompatibilityFailed => PlayerRuntimeState::Connected,
+                PlayerStatus::SyncingState => PlayerRuntimeState::Syncing,
+                PlayerStatus::Ready => PlayerRuntimeState::Ready,
+                PlayerStatus::Playing => PlayerRuntimeState::Playing,
+                PlayerStatus::Paused => PlayerRuntimeState::Paused,
+                PlayerStatus::Reconnecting => PlayerRuntimeState::Reconnecting,
+                PlayerStatus::RecoveryExpired => PlayerRuntimeState::RecoveryExpired,
+                PlayerStatus::Disconnected => PlayerRuntimeState::Disconnected,
+            };
         }
     }
 
-    fn reset_sync_state(&mut self) {
+    pub(super) fn reset_sync_state(&mut self) {
         self.compatibility.clear();
         self.ready_players.clear();
         self.last_input_frames.clear();
@@ -412,6 +383,14 @@ impl NetplayRoom {
         self.pause_state = None;
         self.snapshot_transfer = None;
         self.room_frame = 0;
+    }
+
+    pub(super) fn bump_room_epoch(&mut self) {
+        self.room_epoch = self.room_epoch.saturating_add(1);
+    }
+
+    pub(super) fn bump_session_epoch(&mut self) {
+        self.session_epoch = self.session_epoch.saturating_add(1);
     }
 
     fn fingerprint_matches_session(&self, fingerprint: &CompatibilityFingerprint) -> bool {

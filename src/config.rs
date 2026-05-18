@@ -7,6 +7,7 @@ use std::env;
 use std::net::{AddrParseError, SocketAddr};
 
 use crate::rate_limit::RateLimitPolicy;
+use crate::rooms::RoomRecoveryConfig;
 
 /// Runtime settings required to start the relay.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23,6 +24,8 @@ pub struct ServerConfig {
     pub trust_proxy_headers: bool,
     /// Per-action request rate limits.
     pub rate_limits: RateLimitPolicy,
+    /// In-memory room recovery and heartbeat timing.
+    pub recovery: RoomRecoveryConfig,
     /// Logging output settings.
     pub log: LogConfig,
 }
@@ -55,6 +58,21 @@ impl ServerConfig {
                 120,
             )?,
         };
+        let recovery = RoomRecoveryConfig {
+            reconnect_grace: optional_duration_seconds_env(
+                "SB_NETPLAY_RECONNECT_GRACE_SECONDS",
+                90,
+            )?,
+            heartbeat_stale: optional_duration_seconds_env(
+                "SB_NETPLAY_HEARTBEAT_STALE_SECONDS",
+                15,
+            )?,
+            heartbeat_disconnect: optional_duration_seconds_env(
+                "SB_NETPLAY_HEARTBEAT_DISCONNECT_SECONDS",
+                30,
+            )?,
+            room_idle: optional_duration_seconds_env("SB_NETPLAY_ROOM_IDLE_SECONDS", 300)?,
+        };
         let log = LogConfig {
             format: optional_log_format_env("SB_NETPLAY_LOG_FORMAT", LogFormat::Compact)?,
         };
@@ -66,6 +84,7 @@ impl ServerConfig {
             admin_token,
             trust_proxy_headers,
             rate_limits,
+            recovery,
             log,
         })
     }
@@ -127,6 +146,21 @@ fn optional_u32_env(name: &'static str, default: u32) -> Result<u32, ConfigError
             .map_err(|_| ConfigError::InvalidUnsigned(name)),
         Ok(_) => Err(ConfigError::EmptyEnv(name)),
         Err(_) => Ok(default),
+    }
+}
+
+fn optional_duration_seconds_env(
+    name: &'static str,
+    default_seconds: u64,
+) -> Result<std::time::Duration, ConfigError> {
+    match env::var(name) {
+        Ok(value) if !value.trim().is_empty() => value
+            .trim()
+            .parse::<u64>()
+            .map(std::time::Duration::from_secs)
+            .map_err(|_| ConfigError::InvalidUnsigned(name)),
+        Ok(_) => Err(ConfigError::EmptyEnv(name)),
+        Err(_) => Ok(std::time::Duration::from_secs(default_seconds)),
     }
 }
 

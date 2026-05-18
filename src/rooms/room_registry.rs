@@ -6,164 +6,73 @@
 use super::stored_room::StoredRoom;
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, InputFrameLimits, LinkCableCompatibility,
-    LinkCablePacket, LinkCablePacketLimits, NetplaySessionDescriptor, SessionPauseReason,
-    SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    ClientRuntimeState, CompatibilityFingerprint, InputFrame, LinkCableCompatibility,
+    LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason, SnapshotChunk, SnapshotManifest,
 };
 use crate::rooms::{
-    ConnectionId, InputFrameAcceptance, InviteCode, InviteCodeGenerator, NetplayRoom, PlayerIndex,
-    RoomError, RoomEvent, RoomRegistrySnapshot, RoomView, SessionResumeOutcome,
+    Clock, ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeTokenGenerator,
+    RoomDebugEvent, RoomDebugEventLog, RoomError, RoomEventReceiver, RoomJoin, RoomRecoveryConfig,
+    RoomRegistry, RoomRegistrySnapshot, RoomView, SystemClock, UuidResumeTokenGenerator,
 };
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::RwLock;
 
-/// Room storage behavior needed by transports and routes.
-#[async_trait::async_trait]
-pub trait RoomRegistry: Send + Sync {
-    /// Creates a new room for a verified host.
-    async fn create_room(
-        &self,
-        host: VerifiedLicense,
-        host_connection: ConnectionId,
-        session: NetplaySessionDescriptor,
-    ) -> Result<RoomView, RoomError>;
-
-    /// Adds a verified guest to an existing room.
-    async fn join_guest(
-        &self,
-        invite_code: InviteCode,
-        guest: VerifiedLicense,
-        connection_id: ConnectionId,
-    ) -> Result<PlayerIndex, RoomError>;
-
-    /// Attaches a host socket to its reserved Player 1 slot.
-    async fn connect_host(
-        &self,
-        invite_code: InviteCode,
-        host: VerifiedLicense,
-        connection_id: ConnectionId,
-    ) -> Result<RoomJoin, RoomError>;
-
-    /// Adds a verified guest socket and returns the joined room state.
-    async fn connect_guest(
-        &self,
-        invite_code: InviteCode,
-        guest: VerifiedLicense,
-        connection_id: ConnectionId,
-    ) -> Result<RoomJoin, RoomError>;
-
-    /// Marks a socket connection as disconnected.
-    async fn disconnect(
-        &self,
-        invite_code: InviteCode,
-        connection_id: ConnectionId,
-    ) -> Result<RoomView, RoomError>;
-
-    /// Subscribes to domain events for one active room.
-    async fn subscribe(&self, invite_code: InviteCode) -> Result<RoomEventReceiver, RoomError>;
-
-    /// Stores a compatibility fingerprint from one connected player.
-    async fn set_compatibility(
-        &self,
-        invite_code: InviteCode,
-        connection_id: ConnectionId,
-        fingerprint: CompatibilityFingerprint,
-    ) -> Result<RoomView, RoomError>;
-
-    /// Stores link-cable compatibility details from one connected player.
-    async fn set_link_cable_compatibility(
-        &self,
-        invite_code: InviteCode,
-        connection_id: ConnectionId,
-        compatibility: LinkCableCompatibility,
-    ) -> Result<RoomView, RoomError>;
-
-    /// Marks one connected player ready and starts the session when all are ready.
-    async fn mark_ready(
-        &self,
-        invite_code: InviteCode,
-        connection_id: ConnectionId,
-    ) -> Result<RoomView, RoomError>;
-
-    /// Validates and broadcasts a host snapshot chunk.
-    async fn relay_snapshot_chunk(
-        &self,
-        invite_code: InviteCode,
-        connection_id: ConnectionId,
-        chunk: SnapshotChunk,
-    ) -> Result<(), RoomError>;
-
-    /// Validates and broadcasts a host snapshot completion manifest.
-    async fn relay_snapshot_complete(
-        &self,
-        invite_code: InviteCode,
-        connection_id: ConnectionId,
-        manifest: SnapshotManifest,
-    ) -> Result<(), RoomError>;
-
-    /// Validates and broadcasts one frame of player input.
-    async fn relay_input_frame(
-        &self,
-        invite_code: InviteCode,
-        connection_id: ConnectionId,
-        input: InputFrame,
-    ) -> Result<(), RoomError>;
-
-    /// Validates and broadcasts one virtual link-cable packet.
-    async fn relay_link_cable_packet(
-        &self,
-        invite_code: InviteCode,
-        connection_id: ConnectionId,
-        packet: LinkCablePacket,
-    ) -> Result<(), RoomError>;
-
-    /// Requests a coordinated room pause.
-    async fn request_session_pause(
-        &self,
-        invite_code: InviteCode,
-        connection_id: ConnectionId,
-        reason: SessionPauseReason,
-        local_frame: u64,
-    ) -> Result<RoomView, RoomError>;
-
-    /// Marks one client paused at the scheduled frame.
-    async fn mark_session_pause_reached(
-        &self,
-        invite_code: InviteCode,
-        connection_id: ConnectionId,
-        sequence: u64,
-        paused_at_frame: u64,
-    ) -> Result<RoomView, RoomError>;
-
-    /// Releases one client's coordinated pause holder.
-    async fn request_session_resume(
-        &self,
-        invite_code: InviteCode,
-        connection_id: ConnectionId,
-        sequence: u64,
-    ) -> Result<RoomView, RoomError>;
-
-    /// Returns a serializable room view for an invite code.
-    async fn room_view(&self, invite_code: InviteCode) -> Result<RoomView, RoomError>;
-
-    /// Returns a point-in-time snapshot of active rooms.
-    async fn snapshot(&self) -> RoomRegistrySnapshot;
-}
+#[path = "room_registry_lifecycle_ops.rs"]
+mod lifecycle_ops;
+#[path = "room_registry_query_ops.rs"]
+mod query_ops;
+#[path = "room_registry_relay_ops.rs"]
+mod relay_ops;
+#[path = "room_registry_sync_ops.rs"]
+mod sync_ops;
 
 /// Thread-safe in-memory room registry.
 pub struct InMemoryRoomRegistry {
     invite_codes: RwLock<HashMap<String, StoredRoom>>,
     invite_code_generator: Arc<dyn InviteCodeGenerator>,
+    resume_token_generator: Arc<dyn ResumeTokenGenerator>,
+    clock: Arc<dyn Clock>,
+    recovery_config: RoomRecoveryConfig,
+    recent_events: Mutex<RoomDebugEventLog>,
 }
 
 impl InMemoryRoomRegistry {
     /// Creates an empty registry with the supplied invite-code generator.
     pub fn new(invite_code_generator: Arc<dyn InviteCodeGenerator>) -> Self {
+        Self::with_dependencies(
+            invite_code_generator,
+            Arc::new(UuidResumeTokenGenerator),
+            Arc::new(SystemClock),
+            RoomRecoveryConfig::default(),
+        )
+    }
+
+    /// Creates an empty registry with injectable lifecycle dependencies.
+    pub fn with_dependencies(
+        invite_code_generator: Arc<dyn InviteCodeGenerator>,
+        resume_token_generator: Arc<dyn ResumeTokenGenerator>,
+        clock: Arc<dyn Clock>,
+        recovery_config: RoomRecoveryConfig,
+    ) -> Self {
         Self {
             invite_codes: RwLock::new(HashMap::new()),
             invite_code_generator,
+            resume_token_generator,
+            clock,
+            recovery_config,
+            recent_events: Mutex::new(RoomDebugEventLog::default()),
+        }
+    }
+
+    pub(super) fn record_recent_events(&self, events: Vec<RoomDebugEvent>) {
+        let Ok(mut recent_events) = self.recent_events.lock() else {
+            return;
+        };
+
+        for event in events {
+            recent_events.push(event);
         }
     }
 
@@ -173,26 +82,27 @@ impl InMemoryRoomRegistry {
         now: Instant,
         join_timeout: Duration,
     ) -> usize {
-        let mut rooms = self.invite_codes.write().await;
-        let before_count = rooms.len();
+        self.sweep_expired_rooms(now, join_timeout).await
+    }
 
-        rooms.retain(|_, stored_room| !stored_room.is_expired_waiting(now, join_timeout));
-
-        before_count.saturating_sub(rooms.len())
+    /// Test-facing pause helper that uses an empty idempotency key.
+    pub async fn request_session_pause(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        reason: SessionPauseReason,
+        local_frame: u64,
+    ) -> Result<RoomView, RoomError> {
+        self.request_session_pause_impl(
+            invite_code,
+            connection_id,
+            String::new(),
+            reason,
+            local_frame,
+        )
+        .await
     }
 }
-
-/// Result returned when a socket joins a room.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RoomJoin {
-    /// Player index assigned to the socket connection.
-    pub player_index: PlayerIndex,
-    /// Room state immediately after the join.
-    pub room: RoomView,
-}
-
-/// Receiver for room domain events.
-pub type RoomEventReceiver = broadcast::Receiver<RoomEvent>;
 
 #[async_trait::async_trait]
 impl RoomRegistry for InMemoryRoomRegistry {
@@ -202,16 +112,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
         host_connection: ConnectionId,
         session: NetplaySessionDescriptor,
     ) -> Result<RoomView, RoomError> {
-        let invite_code = self.invite_code_generator.generate();
-        let room = NetplayRoom::new(host, host_connection, invite_code.clone(), session);
-        let view = room.view();
-
-        self.invite_codes
-            .write()
-            .await
-            .insert(invite_code.normalized().to_string(), StoredRoom::new(room));
-
-        Ok(view)
+        self.create_room_impl(host, host_connection, session).await
     }
 
     async fn join_guest(
@@ -220,15 +121,8 @@ impl RoomRegistry for InMemoryRoomRegistry {
         guest: VerifiedLicense,
         connection_id: ConnectionId,
     ) -> Result<PlayerIndex, RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-        let player_index = stored_room.room.join_guest(guest, connection_id)?;
-
-        stored_room.emit_state();
-
-        Ok(player_index)
+        self.join_guest_impl(invite_code, guest, connection_id)
+            .await
     }
 
     async fn connect_host(
@@ -237,16 +131,8 @@ impl RoomRegistry for InMemoryRoomRegistry {
         host: VerifiedLicense,
         connection_id: ConnectionId,
     ) -> Result<RoomJoin, RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-        let player_index = stored_room.room.attach_host(host, connection_id)?;
-        let room = stored_room.room.view();
-
-        stored_room.emit_state();
-
-        Ok(RoomJoin { player_index, room })
+        self.connect_host_impl(invite_code, host, connection_id)
+            .await
     }
 
     async fn connect_guest(
@@ -255,16 +141,26 @@ impl RoomRegistry for InMemoryRoomRegistry {
         guest: VerifiedLicense,
         connection_id: ConnectionId,
     ) -> Result<RoomJoin, RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-        let player_index = stored_room.room.join_guest(guest, connection_id)?;
-        let room = stored_room.room.view();
+        self.connect_guest_impl(invite_code, guest, connection_id)
+            .await
+    }
 
-        stored_room.emit_state();
-
-        Ok(RoomJoin { player_index, room })
+    async fn reconnect_player(
+        &self,
+        invite_code: InviteCode,
+        player_index: PlayerIndex,
+        room_epoch: u64,
+        resume_token: String,
+        connection_id: ConnectionId,
+    ) -> Result<RoomJoin, RoomError> {
+        self.reconnect_player_impl(
+            invite_code,
+            player_index,
+            room_epoch,
+            resume_token,
+            connection_id,
+        )
+        .await
     }
 
     async fn disconnect(
@@ -272,19 +168,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
         invite_code: InviteCode,
         connection_id: ConnectionId,
     ) -> Result<RoomView, RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let normalized = invite_code.normalized().to_string();
-        let stored_room = rooms.get_mut(&normalized).ok_or(RoomError::NotFound)?;
-
-        let closed = stored_room.room.disconnect(connection_id)?;
-        let room = stored_room.room.view();
-        stored_room.emit_state();
-
-        if closed {
-            rooms.remove(&normalized);
-        }
-
-        Ok(room)
+        self.disconnect_impl(invite_code, connection_id).await
     }
 
     async fn subscribe(&self, invite_code: InviteCode) -> Result<RoomEventReceiver, RoomError> {
@@ -302,26 +186,8 @@ impl RoomRegistry for InMemoryRoomRegistry {
         connection_id: ConnectionId,
         fingerprint: CompatibilityFingerprint,
     ) -> Result<RoomView, RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-
-        match stored_room
-            .room
-            .set_compatibility_for_connection(connection_id, fingerprint)
-        {
-            Ok(()) => {
-                let room = stored_room.room.view();
-                stored_room.emit_state();
-                Ok(room)
-            }
-            Err(RoomError::CompatibilityMismatch) => {
-                stored_room.emit_state();
-                Err(RoomError::CompatibilityMismatch)
-            }
-            Err(error) => Err(error),
-        }
+        self.set_compatibility_impl(invite_code, connection_id, fingerprint)
+            .await
     }
 
     async fn mark_ready(
@@ -329,20 +195,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
         invite_code: InviteCode,
         connection_id: ConnectionId,
     ) -> Result<RoomView, RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-        let started = stored_room.room.mark_ready(connection_id)?;
-        let room = stored_room.room.view();
-
-        if started {
-            stored_room.emit_start(0);
-        } else {
-            stored_room.emit_state();
-        }
-
-        Ok(room)
+        self.mark_ready_impl(invite_code, connection_id).await
     }
 
     async fn set_link_cable_compatibility(
@@ -351,26 +204,8 @@ impl RoomRegistry for InMemoryRoomRegistry {
         connection_id: ConnectionId,
         compatibility: LinkCableCompatibility,
     ) -> Result<RoomView, RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-
-        match stored_room
-            .room
-            .set_link_cable_compatibility_for_connection(connection_id, compatibility)
-        {
-            Ok(()) => {
-                let room = stored_room.room.view();
-                stored_room.emit_state();
-                Ok(room)
-            }
-            Err(RoomError::CompatibilityMismatch) => {
-                stored_room.emit_state();
-                Err(RoomError::CompatibilityMismatch)
-            }
-            Err(error) => Err(error),
-        }
+        self.set_link_cable_compatibility_impl(invite_code, connection_id, compatibility)
+            .await
     }
 
     async fn relay_snapshot_chunk(
@@ -379,17 +214,8 @@ impl RoomRegistry for InMemoryRoomRegistry {
         connection_id: ConnectionId,
         chunk: SnapshotChunk,
     ) -> Result<(), RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-
-        stored_room
-            .room
-            .accept_snapshot_chunk(connection_id, &chunk, SnapshotLimits::default())?;
-        stored_room.emit_snapshot_chunk(connection_id, chunk);
-
-        Ok(())
+        self.relay_snapshot_chunk_impl(invite_code, connection_id, chunk)
+            .await
     }
 
     async fn relay_snapshot_complete(
@@ -398,19 +224,8 @@ impl RoomRegistry for InMemoryRoomRegistry {
         connection_id: ConnectionId,
         manifest: SnapshotManifest,
     ) -> Result<(), RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-
-        stored_room.room.accept_snapshot_complete(
-            connection_id,
-            &manifest,
-            SnapshotLimits::default(),
-        )?;
-        stored_room.emit_snapshot_complete(connection_id, manifest);
-
-        Ok(())
+        self.relay_snapshot_complete_impl(invite_code, connection_id, manifest)
+            .await
     }
 
     async fn relay_input_frame(
@@ -419,22 +234,8 @@ impl RoomRegistry for InMemoryRoomRegistry {
         connection_id: ConnectionId,
         input: InputFrame,
     ) -> Result<(), RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-
-        let acceptance = stored_room.room.accept_input_frame(
-            connection_id,
-            &input,
-            InputFrameLimits::default(),
-        )?;
-
-        if acceptance == InputFrameAcceptance::Relay {
-            stored_room.emit_input_frame(connection_id, input);
-        }
-
-        Ok(())
+        self.relay_input_frame_impl(invite_code, connection_id, input)
+            .await
     }
 
     async fn relay_link_cable_packet(
@@ -443,45 +244,32 @@ impl RoomRegistry for InMemoryRoomRegistry {
         connection_id: ConnectionId,
         packet: LinkCablePacket,
     ) -> Result<(), RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
+        self.relay_link_cable_packet_impl(invite_code, connection_id, packet)
+            .await
+    }
 
-        stored_room.room.accept_link_cable_packet(
-            connection_id,
-            &packet,
-            LinkCablePacketLimits::default(),
-        )?;
-        stored_room.emit_link_cable_packet(connection_id, packet);
-
-        Ok(())
+    async fn record_heartbeat(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        _latest_event_seq: u64,
+        _local_frame: Option<u64>,
+        runtime_state: ClientRuntimeState,
+    ) -> Result<RoomView, RoomError> {
+        self.record_heartbeat_impl(invite_code, connection_id, runtime_state)
+            .await
     }
 
     async fn request_session_pause(
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        request_id: String,
         reason: SessionPauseReason,
         local_frame: u64,
     ) -> Result<RoomView, RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-        let already_paused = stored_room.room.view().pause.is_some();
-        let pause = stored_room
-            .room
-            .request_session_pause(connection_id, reason, local_frame)?;
-        let room = stored_room.room.view();
-
-        if already_paused {
-            stored_room.emit_session_pause_updated(pause);
-        } else {
-            stored_room.emit_session_pause_scheduled(pause);
-        }
-
-        Ok(room)
+        self.request_session_pause_impl(invite_code, connection_id, request_id, reason, local_frame)
+            .await
     }
 
     async fn mark_session_pause_reached(
@@ -491,69 +279,40 @@ impl RoomRegistry for InMemoryRoomRegistry {
         sequence: u64,
         paused_at_frame: u64,
     ) -> Result<RoomView, RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-        let pause = stored_room.room.mark_session_pause_reached(
-            connection_id,
-            sequence,
-            paused_at_frame,
-        )?;
-        let room = stored_room.room.view();
-
-        stored_room.emit_session_pause_updated(pause);
-
-        Ok(room)
+        self.mark_session_pause_reached_impl(invite_code, connection_id, sequence, paused_at_frame)
+            .await
     }
 
     async fn request_session_resume(
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        request_id: String,
+        reason: SessionPauseReason,
         sequence: u64,
     ) -> Result<RoomView, RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
-        let outcome = stored_room
-            .room
-            .request_session_resume(connection_id, sequence)?;
-        let room = stored_room.room.view();
-
-        match outcome {
-            SessionResumeOutcome::StillPaused(pause) => {
-                stored_room.emit_session_pause_updated(pause);
-            }
-            SessionResumeOutcome::Resumed { resume_at_frame } => {
-                stored_room.emit_session_resume_scheduled(sequence, resume_at_frame);
-            }
-        }
-
-        Ok(room)
+        self.request_session_resume_impl(invite_code, connection_id, request_id, reason, sequence)
+            .await
     }
 
     async fn room_view(&self, invite_code: InviteCode) -> Result<RoomView, RoomError> {
-        let rooms = self.invite_codes.read().await;
-        let stored_room = rooms
-            .get(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
+        self.room_view_impl(invite_code).await
+    }
 
-        Ok(stored_room.room.view())
+    async fn room_events(
+        &self,
+        invite_code: InviteCode,
+        limit: usize,
+    ) -> Result<Vec<RoomDebugEvent>, RoomError> {
+        self.room_events_impl(invite_code, limit).await
+    }
+
+    async fn recent_events(&self, limit: usize) -> Vec<RoomDebugEvent> {
+        self.recent_events_impl(limit).await
     }
 
     async fn snapshot(&self) -> RoomRegistrySnapshot {
-        let rooms = self.invite_codes.read().await;
-        let views = rooms
-            .values()
-            .map(|stored_room| stored_room.room.view())
-            .collect::<Vec<_>>();
-
-        RoomRegistrySnapshot {
-            active_room_count: views.len(),
-            rooms: views,
-        }
+        self.snapshot_impl().await
     }
 }
 

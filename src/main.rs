@@ -24,7 +24,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.authorize_url.clone(),
         config.license_internal_secret.clone(),
     )?);
-    let rooms = Arc::new(InMemoryRoomRegistry::new(Arc::new(UuidInviteCodeGenerator)));
+    let rooms = Arc::new(InMemoryRoomRegistry::with_dependencies(
+        Arc::new(UuidInviteCodeGenerator),
+        Arc::new(sb_netplay_serv::rooms::UuidResumeTokenGenerator),
+        Arc::new(sb_netplay_serv::rooms::SystemClock),
+        config.recovery,
+    ));
     let rate_limiter = Arc::new(InMemoryRateLimiter::new(config.rate_limits));
     let metrics = Arc::new(InMemoryMetrics::new());
     let admin_authorizer = AdminAuthorizer::new(config.admin_token.clone());

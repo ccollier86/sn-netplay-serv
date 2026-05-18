@@ -8,7 +8,9 @@ use crate::protocol::{
     LinkCableCompatibility, LinkCableDescriptor, LinkCablePacket, LinkCablePacketLimits,
     NetplaySessionMode,
 };
-use crate::rooms::{ConnectionId, NetplayRoom, PlayerStatus, RoomError, RoomStatus};
+use crate::rooms::{
+    ConnectionId, NetplayRoom, PlayerRuntimeState, PlayerStatus, RoomError, RoomStatus,
+};
 
 impl NetplayRoom {
     /// Stores link-cable compatibility details for a connected player.
@@ -59,7 +61,10 @@ impl NetplayRoom {
             self.players
                 .iter_mut()
                 .filter(|slot| !slot.is_empty())
-                .for_each(|slot| slot.status = PlayerStatus::CompatibilityFailed);
+                .for_each(|slot| {
+                    slot.status = PlayerStatus::CompatibilityFailed;
+                    slot.runtime_state = PlayerRuntimeState::Connected;
+                });
             return Err(RoomError::CompatibilityMismatch);
         }
 
@@ -67,7 +72,10 @@ impl NetplayRoom {
         self.players
             .iter_mut()
             .filter(|slot| slot.connection_id.is_some())
-            .for_each(|slot| slot.status = PlayerStatus::SyncingState);
+            .for_each(|slot| {
+                slot.status = PlayerStatus::SyncingState;
+                slot.runtime_state = PlayerRuntimeState::Syncing;
+            });
 
         Ok(())
     }

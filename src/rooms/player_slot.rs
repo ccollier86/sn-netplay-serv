@@ -4,8 +4,9 @@
 //! expand past two players later without changing its shape.
 
 use crate::auth::VerifiedLicense;
-use crate::rooms::{ConnectionId, PlayerIndex};
+use crate::rooms::{ConnectionId, PlayerIndex, ResumeTokenHash};
 use serde::Serialize;
+use std::time::Instant;
 
 /// Role assigned by the server when a player joins.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -37,8 +38,40 @@ pub enum PlayerStatus {
     Playing,
     /// Player is paused by coordinated netplay pause.
     Paused,
+    /// Player may reconnect to reclaim this slot.
+    Reconnecting,
+    /// Player failed to reconnect before the recovery window expired.
+    RecoveryExpired,
     /// Player disconnected.
     Disconnected,
+}
+
+/// Runtime state reported or inferred for one player slot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlayerRuntimeState {
+    /// No player occupies this slot.
+    Empty,
+    /// Socket is connected but gameplay is not active.
+    Connected,
+    /// Compatibility check is in progress.
+    CheckingCompatibility,
+    /// Snapshot or link setup is in progress.
+    Syncing,
+    /// Client is ready to start.
+    Ready,
+    /// Gameplay is active.
+    Playing,
+    /// A coordinated pause has been scheduled.
+    Pausing,
+    /// Client is paused at a coordinated frame.
+    Paused,
+    /// Socket dropped and the slot is waiting for reconnect.
+    Reconnecting,
+    /// Socket is disconnected without a recoverable session.
+    Disconnected,
+    /// Reconnect grace expired.
+    RecoveryExpired,
 }
 
 /// Slot assigned to one player.
@@ -56,6 +89,14 @@ pub struct PlayerSlot {
     pub display_name: Option<String>,
     /// Current lifecycle status.
     pub status: PlayerStatus,
+    /// Current emulator/runtime status.
+    pub runtime_state: PlayerRuntimeState,
+    /// Hash of the per-player token used to reclaim this slot.
+    pub resume_token_hash: Option<ResumeTokenHash>,
+    /// Last heartbeat time seen by the relay.
+    pub last_seen_at: Option<Instant>,
+    /// Deadline for reclaiming this slot after transport loss.
+    pub reconnect_deadline: Option<Instant>,
 }
 
 impl PlayerSlot {
@@ -68,11 +109,20 @@ impl PlayerSlot {
             connection_id: None,
             display_name: None,
             status: PlayerStatus::Empty,
+            runtime_state: PlayerRuntimeState::Empty,
+            resume_token_hash: None,
+            last_seen_at: None,
+            reconnect_deadline: None,
         }
     }
 
     /// Creates the host slot from a verified license.
-    pub fn host(license: &VerifiedLicense, connection_id: ConnectionId) -> Self {
+    pub fn host(
+        license: &VerifiedLicense,
+        connection_id: ConnectionId,
+        resume_token_hash: ResumeTokenHash,
+        now: Instant,
+    ) -> Self {
         Self {
             player_index: PlayerIndex::ONE,
             role: PlayerRole::Host,
@@ -80,15 +130,29 @@ impl PlayerSlot {
             connection_id: Some(connection_id),
             display_name: None,
             status: PlayerStatus::Connected,
+            runtime_state: PlayerRuntimeState::Connected,
+            resume_token_hash: Some(resume_token_hash),
+            last_seen_at: Some(now),
+            reconnect_deadline: None,
         }
     }
 
     /// Marks an empty slot as occupied by a guest.
-    pub fn occupy_guest(&mut self, license: &VerifiedLicense, connection_id: ConnectionId) {
+    pub fn occupy_guest(
+        &mut self,
+        license: &VerifiedLicense,
+        connection_id: ConnectionId,
+        resume_token_hash: ResumeTokenHash,
+        now: Instant,
+    ) {
         self.role = PlayerRole::Guest;
         self.subject_key = Some(license.identity_key());
         self.connection_id = Some(connection_id);
         self.status = PlayerStatus::Connected;
+        self.runtime_state = PlayerRuntimeState::Connected;
+        self.resume_token_hash = Some(resume_token_hash);
+        self.last_seen_at = Some(now);
+        self.reconnect_deadline = None;
     }
 
     /// Returns whether the slot is available.

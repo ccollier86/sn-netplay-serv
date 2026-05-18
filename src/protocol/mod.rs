@@ -4,6 +4,7 @@
 //! They do not own room storage or transport socket lifetimes.
 
 mod client_message;
+mod client_runtime_state;
 mod compatibility;
 mod descriptor_validation;
 mod input_frame;
@@ -19,6 +20,7 @@ mod session_pause;
 mod snapshot;
 
 pub use client_message::ClientMessage;
+pub use client_runtime_state::ClientRuntimeState;
 pub use compatibility::{CompatibilityFingerprint, CompatibilityMismatch};
 pub use input_frame::{InputFrame, InputFrameLimits};
 pub use link_cable_compatibility::LinkCableCompatibility;

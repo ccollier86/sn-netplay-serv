@@ -15,8 +15,10 @@ pub(crate) struct SessionPauseStateTracker {
     acknowledged_players: HashSet<PlayerIndex>,
     holders: HashMap<PlayerIndex, SessionPauseReason>,
     pause_at_frame: u64,
+    pause_request_ids: HashSet<String>,
     paused_at_frame: Option<u64>,
     reason: SessionPauseReason,
+    resume_request_ids: HashSet<String>,
     requested_by_player_index: PlayerIndex,
     sequence: u64,
 }
@@ -25,26 +27,42 @@ impl SessionPauseStateTracker {
     /// Creates a new pause lifecycle.
     pub(super) fn new(
         sequence: u64,
+        request_id: String,
         reason: SessionPauseReason,
         requested_by_player_index: PlayerIndex,
         pause_at_frame: u64,
     ) -> Self {
         let mut holders = HashMap::new();
         holders.insert(requested_by_player_index, reason);
+        let mut pause_request_ids = HashSet::new();
+        if !request_id.is_empty() {
+            pause_request_ids.insert(request_id);
+        }
 
         Self {
             acknowledged_players: HashSet::new(),
             holders,
             pause_at_frame,
+            pause_request_ids,
             paused_at_frame: None,
             reason,
+            resume_request_ids: HashSet::new(),
             requested_by_player_index,
             sequence,
         }
     }
 
     /// Adds or updates a player pause holder.
-    pub(super) fn hold(&mut self, player_index: PlayerIndex, reason: SessionPauseReason) {
+    pub(super) fn hold(
+        &mut self,
+        player_index: PlayerIndex,
+        request_id: String,
+        reason: SessionPauseReason,
+    ) {
+        if !request_id.is_empty() && !self.pause_request_ids.insert(request_id) {
+            return;
+        }
+
         self.holders.insert(player_index, reason);
     }
 
@@ -58,7 +76,11 @@ impl SessionPauseStateTracker {
     }
 
     /// Releases a player's pause holder.
-    pub(super) fn release(&mut self, player_index: PlayerIndex) {
+    pub(super) fn release(&mut self, player_index: PlayerIndex, request_id: String) {
+        if !request_id.is_empty() && !self.resume_request_ids.insert(request_id) {
+            return;
+        }
+
         self.holders.remove(&player_index);
     }
 

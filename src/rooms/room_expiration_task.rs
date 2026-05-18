@@ -1,7 +1,8 @@
-//! Background cleanup for abandoned in-memory rooms.
+//! Background cleanup for abandoned or unrecovered in-memory rooms.
 //!
-//! This module owns the periodic timer that asks the registry to remove rooms
-//! waiting too long for a guest. It does not inspect socket state directly.
+//! This module owns the periodic timer that asks the registry to remove waiting
+//! rooms and rooms whose recovery windows expired. It does not inspect socket
+//! state directly.
 
 use crate::limits::{ROOM_EXPIRATION_SWEEP_INTERVAL, ROOM_JOIN_TIMEOUT};
 use crate::rooms::InMemoryRoomRegistry;

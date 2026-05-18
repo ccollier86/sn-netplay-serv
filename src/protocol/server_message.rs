@@ -19,13 +19,27 @@ use serde::Serialize;
 pub enum ServerMessage {
     /// Initial message after a socket joins a room.
     RoomJoined {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
         /// Zero-based player index assigned to this connection.
         your_player_index: u8,
+        /// Opaque token this player can use to reclaim the same slot.
+        resume_token: String,
         /// Current room state.
         room: RoomView,
     },
     /// Room state changed after join, disconnect, compatibility, or start.
     RoomStateChanged {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
         /// Current room state.
         room: RoomView,
     },
@@ -33,6 +47,12 @@ pub enum ServerMessage {
     Pong,
     /// Session can begin from the supplied canonical start frame.
     StartSession {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
         /// Canonical frame both clients should start from.
         start_frame: u64,
         /// Current room state.
@@ -60,6 +80,12 @@ pub enum ServerMessage {
     },
     /// Session pause was scheduled for a future canonical frame.
     SessionPauseScheduled {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
         /// Current pause state.
         pause: SessionPauseView,
         /// Current room state.
@@ -67,6 +93,12 @@ pub enum ServerMessage {
     },
     /// Session pause holder or acknowledgement state changed.
     SessionPauseUpdated {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
         /// Current pause state.
         pause: SessionPauseView,
         /// Current room state.
@@ -74,12 +106,73 @@ pub enum ServerMessage {
     },
     /// Session can resume after every pause holder was released.
     SessionResumeScheduled {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
         /// Pause sequence being resumed.
         sequence: u64,
         /// Frame where clients resume from.
         resume_at_frame: u64,
         /// Current room state.
         room: RoomView,
+    },
+    /// Relay requests clients to resend compatibility.
+    CompatibilityRequested {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Relay entered recovery because a player disconnected.
+    RecoveryStarted {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Relay accepted a reconnect for one player slot.
+    PlayerReconnected {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Reclaimed zero-based player index.
+        player_index: u8,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Relay requires a compatibility check and state sync after recovery.
+    RecoveryResyncRequired {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Response to app-level heartbeat.
+    HeartbeatAck {
+        /// Latest server event sequence.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
     },
     /// Stable protocol error safe to show in Desktop.
     Error {

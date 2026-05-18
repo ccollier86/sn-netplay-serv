@@ -13,8 +13,8 @@ use crate::limits::{
 use crate::observability::MetricsSnapshot;
 use crate::protocol::{NetplaySessionDescriptor, validate_client_protocol_version};
 use crate::rate_limit::RateLimitAction;
-use crate::rooms::RoomRegistrySnapshot;
-use crate::rooms::{ConnectionId, InviteCode, RoomView};
+use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, RoomView};
+use crate::rooms::{RoomDebugEvent, RoomRegistrySnapshot};
 use crate::transport::{WebSocketJoinRequest, WebSocketJoinRole, handle_websocket_session};
 use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
@@ -39,6 +39,12 @@ pub fn build_router(services: AppServices) -> Router {
         .route("/v1/ws", get(websocket_room))
         .route("/internal/metrics", get(internal_metrics))
         .route("/internal/rooms", get(internal_rooms))
+        .route("/internal/rooms/{invite_code}", get(internal_room))
+        .route(
+            "/internal/rooms/{invite_code}/events",
+            get(internal_room_events),
+        )
+        .route("/internal/recent-events", get(internal_recent_events))
         .layer(DefaultBodyLimit::max(MAX_CREATE_ROOM_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .with_state(services)
@@ -127,9 +133,13 @@ pub async fn websocket_room(
         code: "missingProtocolVersion",
         message: "Desktop netplay protocol version is required.",
     })?)?;
-    let invite_code = InviteCode::parse(query.invite_code)?;
+    let invite_code = InviteCode::parse(&query.invite_code)?;
+    let reconnect = reconnect_query(&query)?;
     let join_request = WebSocketJoinRequest {
         invite_code,
+        reconnect_player_index: reconnect.as_ref().map(|value| value.player_index),
+        reconnect_room_epoch: reconnect.as_ref().map(|value| value.room_epoch),
+        resume_token: reconnect.map(|value| value.resume_token),
         role: query.role,
         license,
     };
@@ -165,6 +175,48 @@ pub async fn internal_rooms(
     services.admin_authorizer.verify(&headers)?;
 
     Ok(Json(services.rooms.snapshot().await))
+}
+
+/// Returns one active room view for authenticated operators.
+pub async fn internal_room(
+    State(services): State<AppServices>,
+    Path(invite_code): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<RoomStatusResponse>, HttpError> {
+    services.admin_authorizer.verify(&headers)?;
+    let invite_code = InviteCode::parse(invite_code)?;
+    let room = services.rooms.room_view(invite_code).await?;
+
+    Ok(Json(RoomStatusResponse { room }))
+}
+
+/// Returns sanitized event history for one active room.
+pub async fn internal_room_events(
+    State(services): State<AppServices>,
+    Path(invite_code): Path<String>,
+    Query(query): Query<EventLogQuery>,
+    headers: HeaderMap,
+) -> Result<Json<EventLogResponse>, HttpError> {
+    services.admin_authorizer.verify(&headers)?;
+    let invite_code = InviteCode::parse(invite_code)?;
+    let events = services
+        .rooms
+        .room_events(invite_code, query.limit())
+        .await?;
+
+    Ok(Json(EventLogResponse { events }))
+}
+
+/// Returns sanitized event history across active rooms.
+pub async fn internal_recent_events(
+    State(services): State<AppServices>,
+    Query(query): Query<EventLogQuery>,
+    headers: HeaderMap,
+) -> Result<Json<EventLogResponse>, HttpError> {
+    services.admin_authorizer.verify(&headers)?;
+    let events = services.rooms.recent_events(query.limit()).await;
+
+    Ok(Json(EventLogResponse { events }))
 }
 
 fn enforce_rate_limit(
@@ -208,6 +260,54 @@ pub struct RoomStatusResponse {
     pub room: RoomView,
 }
 
+fn reconnect_query(query: &WebSocketRoomQuery) -> Result<Option<ReconnectQuery>, HttpError> {
+    match (
+        query.player_index,
+        query.room_epoch,
+        query.resume_token.as_ref(),
+    ) {
+        (None, None, None) => Ok(None),
+        (Some(player_index), Some(room_epoch), Some(resume_token)) => {
+            let player_index = PlayerIndex::new(player_index, crate::limits::MVP_ROOM_CAPACITY)
+                .ok_or(HttpError::InvalidRequest {
+                    code: "invalidPlayerIndex",
+                    message: "Reconnect playerIndex is invalid.",
+                })?;
+
+            Ok(Some(ReconnectQuery {
+                player_index,
+                room_epoch,
+                resume_token: resume_token.clone(),
+            }))
+        }
+        _ => Err(HttpError::InvalidRequest {
+            code: "invalidReconnectRequest",
+            message: "Reconnect requires playerIndex, roomEpoch, and resumeToken.",
+        }),
+    }
+}
+
+/// Event log response body.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventLogResponse {
+    /// Sanitized room events.
+    pub events: Vec<RoomDebugEvent>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventLogQuery {
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+impl EventLogQuery {
+    fn limit(&self) -> usize {
+        self.limit.unwrap_or(100).clamp(1, 500)
+    }
+}
+
 /// Create-room request body supplied by Desktop.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -226,6 +326,18 @@ pub struct WebSocketRoomQuery {
     role: WebSocketJoinRole,
     #[serde(default)]
     protocol_version: Option<u16>,
+    #[serde(default)]
+    player_index: Option<u8>,
+    #[serde(default)]
+    room_epoch: Option<u64>,
+    #[serde(default)]
+    resume_token: Option<String>,
+}
+
+struct ReconnectQuery {
+    player_index: PlayerIndex,
+    room_epoch: u64,
+    resume_token: String,
 }
 
 #[cfg(test)]

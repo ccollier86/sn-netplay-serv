@@ -12,6 +12,18 @@ pub trait MetricsRecorder: Send + Sync {
     fn record_room_created(&self);
     /// Records a successfully upgraded WebSocket join.
     fn record_websocket_joined(&self);
+    /// Records a successful reconnect.
+    fn record_player_reconnected(&self);
+    /// Records a session start broadcast.
+    fn record_session_started(&self);
+    /// Records a coordinated pause request.
+    fn record_pause_requested(&self);
+    /// Records a coordinated resume request.
+    fn record_resume_requested(&self);
+    /// Records a heartbeat accepted by the relay.
+    fn record_heartbeat(&self);
+    /// Records a stable protocol error.
+    fn record_protocol_error(&self);
     /// Records a rejected request due to rate limiting.
     fn record_rate_limited(&self);
     /// Records a license/auth failure.
@@ -25,6 +37,12 @@ pub trait MetricsRecorder: Send + Sync {
 pub struct InMemoryMetrics {
     rooms_created_total: AtomicU64,
     websocket_joins_total: AtomicU64,
+    player_reconnects_total: AtomicU64,
+    sessions_started_total: AtomicU64,
+    pause_requests_total: AtomicU64,
+    resume_requests_total: AtomicU64,
+    heartbeats_total: AtomicU64,
+    protocol_errors_total: AtomicU64,
     rate_limited_total: AtomicU64,
     auth_rejected_total: AtomicU64,
 }
@@ -45,6 +63,30 @@ impl MetricsRecorder for InMemoryMetrics {
         self.websocket_joins_total.fetch_add(1, Ordering::Relaxed);
     }
 
+    fn record_player_reconnected(&self) {
+        self.player_reconnects_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_session_started(&self) {
+        self.sessions_started_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_pause_requested(&self) {
+        self.pause_requests_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_resume_requested(&self) {
+        self.resume_requests_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_heartbeat(&self) {
+        self.heartbeats_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_protocol_error(&self) {
+        self.protocol_errors_total.fetch_add(1, Ordering::Relaxed);
+    }
+
     fn record_rate_limited(&self) {
         self.rate_limited_total.fetch_add(1, Ordering::Relaxed);
     }
@@ -57,6 +99,12 @@ impl MetricsRecorder for InMemoryMetrics {
         MetricsSnapshot {
             rooms_created_total: self.rooms_created_total.load(Ordering::Relaxed),
             websocket_joins_total: self.websocket_joins_total.load(Ordering::Relaxed),
+            player_reconnects_total: self.player_reconnects_total.load(Ordering::Relaxed),
+            sessions_started_total: self.sessions_started_total.load(Ordering::Relaxed),
+            pause_requests_total: self.pause_requests_total.load(Ordering::Relaxed),
+            resume_requests_total: self.resume_requests_total.load(Ordering::Relaxed),
+            heartbeats_total: self.heartbeats_total.load(Ordering::Relaxed),
+            protocol_errors_total: self.protocol_errors_total.load(Ordering::Relaxed),
             rate_limited_total: self.rate_limited_total.load(Ordering::Relaxed),
             auth_rejected_total: self.auth_rejected_total.load(Ordering::Relaxed),
         }
@@ -71,6 +119,18 @@ pub struct MetricsSnapshot {
     pub rooms_created_total: u64,
     /// Total successful WebSocket joins.
     pub websocket_joins_total: u64,
+    /// Total successful slot reconnects.
+    pub player_reconnects_total: u64,
+    /// Total sessions started.
+    pub sessions_started_total: u64,
+    /// Total coordinated pause requests.
+    pub pause_requests_total: u64,
+    /// Total coordinated resume requests.
+    pub resume_requests_total: u64,
+    /// Total accepted app-level heartbeats.
+    pub heartbeats_total: u64,
+    /// Total stable protocol errors.
+    pub protocol_errors_total: u64,
     /// Total HTTP requests rejected by rate limits.
     pub rate_limited_total: u64,
     /// Total license/auth failures.

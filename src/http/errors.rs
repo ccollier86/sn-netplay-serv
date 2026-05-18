@@ -111,6 +111,26 @@ impl IntoResponse for HttpError {
             Self::Room(RoomError::RoomClosed) => {
                 (StatusCode::GONE, "roomClosed", "Room is closed.")
             }
+            Self::Room(RoomError::StaleRoomEpoch) => (
+                StatusCode::CONFLICT,
+                "staleRoomEpoch",
+                "Room state changed; refresh and retry.",
+            ),
+            Self::Room(RoomError::StaleSessionEpoch) => (
+                StatusCode::CONFLICT,
+                "staleSessionEpoch",
+                "Netplay session changed; refresh and retry.",
+            ),
+            Self::Room(RoomError::ResumeTokenInvalid) => (
+                StatusCode::UNAUTHORIZED,
+                "resumeTokenInvalid",
+                "Reconnect token is invalid.",
+            ),
+            Self::Room(RoomError::RecoveryExpired) => (
+                StatusCode::GONE,
+                "recoveryExpired",
+                "Reconnect recovery window expired.",
+            ),
             Self::Room(_) => (
                 StatusCode::CONFLICT,
                 "roomStateConflict",

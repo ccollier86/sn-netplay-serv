@@ -1,4 +1,13 @@
-# Netplay MVP Protocol
+# Netplay Protocol V3
+
+The relay coordinates invite-code sessions for ShadowBoy clients. It never
+runs emulator cores, never receives ROM data, and never streams gameplay video.
+Clients run the emulators locally and use the relay for room discovery,
+compatibility checks, save-state snapshot relay, input relay, coordinated pause,
+heartbeat, and reconnect recovery.
+
+Protocol v3 is not backward compatible with v2. Clients must send protocol
+version `3` when creating a room and opening a room WebSocket.
 
 ## HTTP
 
@@ -27,39 +36,40 @@ X-Req-Nonce: <unique nonce>
 X-Req-Sig: <base64 signature>
 ```
 
-Desktop should create the request signature using the same protected-client
-signer it already uses for `/v1/desktop/*` metadata, cheat, billing, and update
-requests. Android should set `X-Client-Kind: android` and sign with the Android
-protected-client install key. `X-Client-Kind` defaults to `desktop` for older
-Desktop builds. `X-Installation-Id` is accepted as an install-id alias.
+Desktop signs with the protected-client signer used for metadata, cheat,
+billing, and update requests. Android sends `X-Client-Kind: android` and signs
+with its protected install key. `X-Client-Kind` defaults to `desktop` for older
+Desktop request shapes. `X-Installation-Id` is accepted as an install-id alias.
 
 The relay asks the metadata service to authorize feature `netplay`. Desktop
 requests use `requiredEntitlement: "premiumOrTrial"`; Android requests use
-`requiredEntitlement: "eligibleClient"` and leave feature/premium gating inside
-the app.
+`requiredEntitlement: "eligibleClient"` and leave premium gating inside the app.
 
 Body:
 
 ```json
 {
-  "desktopProtocolVersion": 2,
+  "desktopProtocolVersion": 3,
   "session": {
     "hostAppVersion": "0.3.0",
     "mode": "controllerNetplay",
     "game": {
-      "systemId": "gamecube",
-      "title": "Star Fox Adventures",
+      "systemId": "snes",
+      "title": "Super Mario Kart",
       "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "contentKey": "gamecube-star-fox-adventures-usa",
+      "contentKey": "snes-super-mario-kart-usa",
       "region": "USA",
-      "revision": "Rev 1",
-      "discId": "GFSE01"
+      "revision": "Rev 1"
     },
     "core": {
-      "coreId": "dolphin",
-      "coreName": "Dolphin",
-      "coreVersion": "5.0-netplay",
-      "coreOptionsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      "coreId": "snes9x",
+      "coreName": "Snes9x",
+      "coreVersion": "informational-build",
+      "coreOptionsSha256": null,
+      "stateFormat": "snes9x:snes:s9x-freeze-stream-v1"
+    },
+    "controller": {
+      "inputDelayFrames": 3
     },
     "link": null
   }
@@ -67,11 +77,16 @@ Body:
 ```
 
 Descriptor fields must not contain absolute paths or local filenames. The ROM
-hash is used only to match a local copy on the invited Desktop client. The relay
-does not transfer ROM files.
+hash is used only to match a local copy on the invited client. `coreVersion` and
+`coreBuild` are informational; `stateFormat` is the hard compatibility gate for
+snapshot bytes.
 
-`session.mode` defaults to `controllerNetplay` for older Desktop clients. Link
-cable rooms must send `mode: "linkCable"` and a `link` descriptor:
+Controller rooms require exact `romSha256` and compatible `stateFormat`. Host
+input delay is part of the room descriptor under `controller.inputDelayFrames`
+and must be used by guests instead of local defaults.
+
+Link-cable rooms send `mode: "linkCable"` and a platform-neutral `link`
+descriptor:
 
 ```json
 {
@@ -83,43 +98,26 @@ cable rooms must send `mode: "linkCable"` and a `link` descriptor:
 }
 ```
 
-The link descriptor is intentionally platform-neutral. Desktop and Android can
-join the same room only when they can send the exact same `runtimeProfile` and
-link protocol. Link rooms do not require guest ROM hashes to match the host
-ROM hash.
+Link rooms require matching link runtime profile and optional system-data hash.
+They do not require guest ROM hashes to match the host ROM hash.
 
-Response:
+Room responses include `eventSeq`, `roomEpoch`, and `sessionEpoch`:
 
 ```json
 {
   "room": {
     "roomId": "<uuid>",
+    "eventSeq": 0,
+    "roomEpoch": 1,
+    "sessionEpoch": 1,
     "inviteCode": "AB23-CD",
     "protocol": {
-      "protocolVersion": 2,
-      "minSupportedProtocolVersion": 1
+      "protocolVersion": 3,
+      "minSupportedProtocolVersion": 3
     },
-    "session": {
-      "hostAppVersion": "0.3.0",
-      "mode": "controllerNetplay",
-      "game": {
-        "systemId": "gamecube",
-        "title": "Star Fox Adventures",
-        "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "contentKey": "gamecube-star-fox-adventures-usa",
-        "region": "USA",
-        "revision": "Rev 1",
-        "discId": "GFSE01"
-      },
-      "core": {
-        "coreId": "dolphin",
-        "coreName": "Dolphin",
-        "coreVersion": "5.0-netplay",
-        "coreOptionsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-      },
-      "link": null
-    },
+    "session": {},
     "maxPlayers": 2,
+    "pause": null,
     "status": "waitingForGuest",
     "players": [
       {
@@ -127,160 +125,157 @@ Response:
         "displayNumber": 1,
         "role": "host",
         "status": "connected",
-        "occupied": true
-      },
-      {
-        "playerIndex": 1,
-        "displayNumber": 2,
-        "role": "guest",
-        "status": "empty",
-        "occupied": false
+        "runtimeState": "connected",
+        "occupied": true,
+        "lastSeenAgeMs": 20,
+        "reconnectGraceRemainingMs": null
       }
     ]
   }
 }
 ```
 
+`roomEpoch` changes when membership or recovery state changes. `sessionEpoch`
+changes when active gameplay must resync. Clients must include both values on
+all non-ping WebSocket messages.
+
 ### `GET /v1/rooms/{invite_code}/status`
 
-Returns the current room view for a user-entered invite code.
-
-Clients should call this before opening a WebSocket so the guest can see the
-game title/system/core and verify local compatibility. Controller-netplay rooms
-require an exact `romSha256` match. Link-cable rooms require a compatible local
-runtime profile and may use different ROM hashes.
+Returns the current room view for a user-entered invite code. Guests should call
+this before opening a WebSocket so they can show the game/core preview and block
+unsupported local runtime combinations before launch.
 
 ## WebSocket
 
-### `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=2`
+### Join
 
-Attaches the room creator's Desktop client to Player 1.
-
-Required headers match room creation:
+Host:
 
 ```text
-Authorization: Bearer <client-token>
-X-Client-Kind: desktop | android
-X-Install-Id: <installationId>
-X-Req-Ts: <epoch milliseconds>
-X-Req-Nonce: <unique nonce>
-X-Req-Sig: <base64 signature>
+GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=3
 ```
 
-### `GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=2`
+Guest:
 
-Adds the guest Desktop client to Player 2.
+```text
+GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=3
+```
 
-`role` defaults to `guest` when omitted.
+`role` defaults to `guest` when omitted. Required auth headers match room
+creation.
 
 First successful socket message:
 
 ```json
 {
   "type": "roomJoined",
+  "eventSeq": 1,
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
   "yourPlayerIndex": 1,
-  "room": {
-    "roomId": "<uuid>",
-    "inviteCode": "AB23-CD",
-    "protocol": {
-      "protocolVersion": 2,
-      "minSupportedProtocolVersion": 1
-    },
-    "session": {
-      "game": {
-        "systemId": "gamecube",
-        "title": "Star Fox Adventures",
-        "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "contentKey": "gamecube-star-fox-adventures-usa"
-      },
-      "core": {
-        "coreId": "dolphin"
-      }
-    },
-    "maxPlayers": 2,
-    "status": "checkingCompatibility",
-    "players": []
-  }
+  "resumeToken": "<opaque-token>",
+  "room": {}
 }
 ```
 
-Whenever room state changes, subscribed sockets receive:
+The client must keep `resumeToken` in memory for the current room. It is an
+opaque slot-reclaim secret and must not be logged or shown to users.
+
+### Reconnect
+
+Reconnect uses the invite code, the player slot, the last accepted room epoch,
+and the resume token from `roomJoined`:
+
+```text
+GET /v1/ws?inviteCode=AB23-CD&protocolVersion=3&playerIndex=1&roomEpoch=4&resumeToken=<opaque-token>
+```
+
+All three reconnect fields are required together. Partial reconnect queries are
+rejected. A successful reconnect returns a fresh `roomJoined`, then the relay
+returns the room to compatibility checking and state sync before gameplay
+continues.
+
+### Server Messages
+
+State-carrying server messages include `eventSeq`, `roomEpoch`, and
+`sessionEpoch`:
 
 ```json
 {
-  "type": "roomStateChanged",
-  "room": {
-    "roomId": "<uuid>",
-    "inviteCode": "AB23-CD",
-    "protocol": {
-      "protocolVersion": 2,
-      "minSupportedProtocolVersion": 1
-    },
-    "session": {
-      "game": {
-        "systemId": "gamecube",
-        "title": "Star Fox Adventures",
-        "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "contentKey": "gamecube-star-fox-adventures-usa"
-      },
-      "core": {
-        "coreId": "dolphin"
-      }
-    },
-    "maxPlayers": 2,
-    "status": "checkingCompatibility",
-    "players": []
-  }
+  "type": "compatibilityRequested",
+  "eventSeq": 3,
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
+  "room": {}
 }
 ```
 
-The socket handles:
+Important server messages:
 
-```json
-{ "type": "ping" }
-```
+- `roomJoined`
+- `roomStateChanged`
+- `compatibilityRequested`
+- `recoveryStarted`
+- `startSession`
+- `snapshotChunk`
+- `snapshotComplete`
+- `inputFrame`
+- `linkCablePacket`
+- `sessionPauseScheduled`
+- `sessionPauseUpdated`
+- `sessionResumeScheduled`
+- `heartbeatAck`
+- `error`
 
-and replies:
+## Compatibility
 
-```json
-{ "type": "pong" }
-```
-
-## Compatibility Fingerprint
-
-Controller-netplay clients send these fields before the session can start:
+Controller-netplay clients send compatibility when the relay requests it:
 
 ```json
 {
   "type": "setCompatibilityFingerprint",
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
   "fingerprint": {
-    "desktopVersion": "0.2.10",
-    "protocolVersion": 2,
-    "systemId": "n64",
-    "coreId": "mupen64plus-next",
-    "coreBuild": "core-build",
-    "contentHash": "rom-hash",
-    "settingsHash": "settings-hash",
-    "cheatsHash": "cheats-hash",
+    "desktopVersion": "0.3.0",
+    "protocolVersion": 3,
+    "systemId": "snes",
+    "coreId": "snes9x",
+    "coreBuild": "informational-build",
+    "stateFormat": "snes9x:snes:s9x-freeze-stream-v1",
+    "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "settingsHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cheatsHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "systemDataHash": null,
     "saveDataMode": "netplay"
   }
 }
 ```
 
-Sessions must not start if connected players have different fingerprints.
+The relay compares protocol version, system id, core id, state format, content
+hash, settings hash, cheats hash, system-data hash, and save-data mode. It does
+not block only because app version or core build string differs.
 
-When both players match, the room enters `syncingState`.
+Use these empty hashes when no deterministic data is present:
 
-## Link Cable Compatibility
+```text
+settingsHash = SHA256("")
+cheatsHash = SHA256("")
+systemDataHash = null
+```
 
-Link-cable clients send a separate compatibility payload:
+If cheats are enabled and both clients cannot apply the exact same cheat set,
+the mismatch should block the room.
+
+Link-cable clients send:
 
 ```json
 {
   "type": "setLinkCableCompatibility",
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
   "compatibility": {
-    "protocolVersion": 2,
+    "protocolVersion": 3,
     "systemFamily": "gba",
     "linkProtocol": "gba-link-cable-v1",
     "runtimeProfile": "mgba-link-runtime-v1",
@@ -289,20 +284,16 @@ Link-cable clients send a separate compatibility payload:
 }
 ```
 
-The server compares protocol version, system family, link protocol, runtime
-profile, and system-data hash. It does not compare ROM hashes for link-cable
-rooms because trades and battles often use different game versions. When both
-players are compatible, the room enters `syncingState`; each client can then
-send `ready`.
+## Snapshot Sync And Ready
 
-## Snapshot Relay
-
-Only the host can relay snapshot payloads. Snapshot chunks are validated for
-size and then relayed to the guest:
+For controller netplay, only the host can relay snapshot payloads. Chunks are
+size-limited and relayed without persistence:
 
 ```json
 {
   "type": "snapshotChunk",
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
   "chunk": {
     "index": 0,
     "bytes": [1, 2, 3]
@@ -310,12 +301,13 @@ size and then relayed to the guest:
 }
 ```
 
-Snapshot completion sends a manifest. The server validates total byte limits and
-checksum format, but does not persist or reconstruct snapshot bytes:
+Completion includes a manifest:
 
 ```json
 {
   "type": "snapshotComplete",
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
   "manifest": {
     "totalBytes": 123456,
     "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -323,33 +315,39 @@ checksum format, but does not persist or reconstruct snapshot bytes:
 }
 ```
 
-## Ready And Start
-
-After compatibility and snapshot sync, each client sends:
+Controller rooms cannot start until the host snapshot is complete. Link-cable
+rooms can skip snapshot transfer and send `ready` after compatibility.
 
 ```json
 {
-  "type": "ready"
+  "type": "ready",
+  "roomEpoch": 2,
+  "sessionEpoch": 2
 }
 ```
 
-When both connected players are ready, the server broadcasts:
+When every connected player is ready, the relay broadcasts:
 
 ```json
 {
   "type": "startSession",
+  "eventSeq": 8,
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
   "startFrame": 0,
   "room": {}
 }
 ```
 
-## Input Frame
+## Input And Link Packets
 
-Every gameplay input packet must include:
+Controller input:
 
 ```json
 {
   "type": "inputFrame",
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
   "input": {
     "playerIndex": 0,
     "frame": 12345,
@@ -362,19 +360,17 @@ Validation rules:
 
 - The connection may only send input for its server-assigned `playerIndex`.
 - Frame numbers must increase per player.
-- Future frames are bounded by `MAX_FUTURE_FRAME_DISTANCE`.
-- Input is only accepted while the room is `playing`.
+- Future frames are bounded.
+- Input is only accepted while the room is `playing` or inside the coordinated
+  pause input-delay window.
 
-Accepted input frames are broadcast as authoritative `inputFrame` messages.
-
-## Link Cable Packet
-
-Link-cable packets are only accepted for `linkCable` rooms after both clients
-have sent `ready` and the room is `playing`.
+Link-cable packet:
 
 ```json
 {
   "type": "linkCablePacket",
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
   "packet": {
     "playerIndex": 0,
     "sequence": 123,
@@ -384,28 +380,117 @@ have sent `ready` and the room is `playing`.
 }
 ```
 
-Validation rules:
+Link packets are accepted only after a link room is `playing`; sequence numbers
+must increase per player. Packets are broadcast to the other connected player
+and are not echoed to the sender.
 
-- The connection may only send packets for its server-assigned `playerIndex`.
-- `sequence` must increase per player.
-- `payload` must be non-empty and under `MAX_LINK_CABLE_PACKET_BYTES`.
-- Packet bytes are opaque to the relay and are not persisted.
+## Coordinated Pause
 
-Accepted packets are broadcast as `linkCablePacket` messages to the other
-connected player, not echoed to the sender.
+Clients use coordinated pause for in-game menus, backgrounding, system pauses,
+and any user action that stops the emulation loop. The goal is for both clients
+to stop on the same frame and resume together.
 
-## Snapshot Validation
+Request:
 
-Save-state sync payloads are treated as untrusted data.
+```json
+{
+  "type": "requestSessionPause",
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
+  "requestId": "uuid-or-client-action-id",
+  "reason": "menu",
+  "localFrame": 900
+}
+```
 
-Chunk validation:
+The relay schedules a future pause frame and broadcasts `sessionPauseScheduled`.
+Each client continues running until `pause.pauseAtFrame`, stops there, then
+acknowledges:
 
-- each chunk must be under `MAX_SNAPSHOT_CHUNK_BYTES`
+```json
+{
+  "type": "sessionPauseReached",
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
+  "sequence": 1,
+  "pausedAtFrame": 908
+}
+```
 
-Completed snapshot validation:
+To resume, clients release their own pause holder:
 
-- byte length must match the manifest
-- total bytes must be under `MAX_SNAPSHOT_BYTES`
-- SHA-256 must match the manifest checksum
+```json
+{
+  "type": "requestSessionResume",
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
+  "requestId": "uuid-or-client-action-id",
+  "reason": "menu",
+  "sequence": 1
+}
+```
 
-The server relays snapshot data but must not persist it.
+If a resume request arrives before every client acknowledged the pause, the
+relay keeps the pause lifecycle active until all acknowledgements arrive, then
+broadcasts `sessionResumeScheduled`.
+
+Pause requests and resume requests are idempotent per player/request id.
+
+## Heartbeat And Recovery
+
+Clients send an app-level heartbeat during connected room lifetime:
+
+```json
+{
+  "type": "heartbeat",
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
+  "latestEventSeq": 8,
+  "localFrame": 12345,
+  "runtimeState": "playing"
+}
+```
+
+The relay replies:
+
+```json
+{
+  "type": "heartbeatAck",
+  "eventSeq": 8,
+  "roomEpoch": 2,
+  "sessionEpoch": 2
+}
+```
+
+Heartbeat runtime states:
+
+- `connected`
+- `checkingCompatibility`
+- `syncing`
+- `ready`
+- `playing`
+- `pausing`
+- `paused`
+- `reconnecting`
+- `disconnected`
+
+If a playing or paused socket exceeds `SB_NETPLAY_HEARTBEAT_DISCONNECT_SECONDS`,
+the relay moves the room to `recovering`, marks the slot `reconnecting`, bumps
+both epochs, and requires compatibility plus state sync again after reconnect.
+If recovery exceeds `SB_NETPLAY_RECONNECT_GRACE_SECONDS`, the room is removed.
+
+## Internal Operator Endpoints
+
+All internal endpoints require `Authorization: Bearer <SB_NETPLAY_ADMIN_TOKEN>`.
+
+```text
+GET /internal/metrics
+GET /internal/rooms
+GET /internal/rooms/{invite_code}
+GET /internal/rooms/{invite_code}/events?limit=100
+GET /internal/recent-events?limit=100
+```
+
+Event logs are sanitized. They include room ids, invite codes, event sequence,
+epochs, kind, and detail, but not access tokens, resume tokens, ROM data,
+snapshot bytes, or input payloads.

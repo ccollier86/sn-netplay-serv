@@ -22,6 +22,8 @@ pub enum RoomStatus {
     Playing,
     /// Gameplay is paused by the coordinated netplay pause contract.
     Paused,
+    /// Gameplay is interrupted while one or more players may reconnect.
+    Recovering,
     /// Room is no longer accepting traffic.
     Closed,
 }

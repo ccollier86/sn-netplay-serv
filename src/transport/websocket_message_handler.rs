@@ -20,6 +20,7 @@ pub async fn handle_client_text(
     payload: &str,
 ) -> bool {
     if payload.len() > MAX_WEBSOCKET_MESSAGE_BYTES {
+        services.metrics.record_protocol_error();
         return send_static_error(sender, "messageTooLarge", "Message is too large.")
             .await
             .is_ok();
@@ -29,9 +30,12 @@ pub async fn handle_client_text(
         Ok(message) => handle_client_message(sender, services, invite_code, connection_id, message)
             .await
             .is_ok(),
-        Err(_) => send_static_error(sender, "invalidMessage", "Message JSON is invalid.")
-            .await
-            .is_ok(),
+        Err(_) => {
+            services.metrics.record_protocol_error();
+            send_static_error(sender, "invalidMessage", "Message JSON is invalid.")
+                .await
+                .is_ok()
+        }
     }
 }
 
@@ -44,7 +48,16 @@ async fn handle_client_message(
 ) -> Result<(), axum::Error> {
     match message {
         ClientMessage::Ping => send_server_message(sender, &ServerMessage::Pong).await,
-        ClientMessage::SetCompatibilityFingerprint { fingerprint } => {
+        ClientMessage::SetCompatibilityFingerprint {
+            room_epoch,
+            session_epoch,
+            fingerprint,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
             apply_room_result(
                 sender,
                 services
@@ -55,7 +68,16 @@ async fn handle_client_message(
             )
             .await
         }
-        ClientMessage::SetLinkCableCompatibility { compatibility } => {
+        ClientMessage::SetLinkCableCompatibility {
+            room_epoch,
+            session_epoch,
+            compatibility,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
             apply_room_result(
                 sender,
                 services
@@ -66,7 +88,15 @@ async fn handle_client_message(
             )
             .await
         }
-        ClientMessage::Ready => {
+        ClientMessage::Ready {
+            room_epoch,
+            session_epoch,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
             apply_room_result(
                 sender,
                 services
@@ -77,7 +107,16 @@ async fn handle_client_message(
             )
             .await
         }
-        ClientMessage::SnapshotChunk { chunk } => {
+        ClientMessage::SnapshotChunk {
+            room_epoch,
+            session_epoch,
+            chunk,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
             apply_room_result(
                 sender,
                 services
@@ -87,7 +126,16 @@ async fn handle_client_message(
             )
             .await
         }
-        ClientMessage::SnapshotComplete { manifest } => {
+        ClientMessage::SnapshotComplete {
+            room_epoch,
+            session_epoch,
+            manifest,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
             apply_room_result(
                 sender,
                 services
@@ -97,7 +145,16 @@ async fn handle_client_message(
             )
             .await
         }
-        ClientMessage::InputFrame { input } => {
+        ClientMessage::InputFrame {
+            room_epoch,
+            session_epoch,
+            input,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
             apply_room_result(
                 sender,
                 services
@@ -107,7 +164,16 @@ async fn handle_client_message(
             )
             .await
         }
-        ClientMessage::LinkCablePacket { packet } => {
+        ClientMessage::LinkCablePacket {
+            room_epoch,
+            session_epoch,
+            packet,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
             apply_room_result(
                 sender,
                 services
@@ -117,25 +183,88 @@ async fn handle_client_message(
             )
             .await
         }
+        ClientMessage::Heartbeat {
+            room_epoch,
+            session_epoch,
+            latest_event_seq,
+            local_frame,
+            runtime_state,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            let room = match services
+                .rooms
+                .record_heartbeat(
+                    invite_code.clone(),
+                    connection_id,
+                    latest_event_seq,
+                    local_frame,
+                    runtime_state,
+                )
+                .await
+            {
+                Ok(room) => {
+                    services.metrics.record_heartbeat();
+                    room
+                }
+                Err(error) => {
+                    return apply_room_result(sender, Err(error)).await;
+                }
+            };
+            send_server_message(
+                sender,
+                &ServerMessage::HeartbeatAck {
+                    event_seq: room.event_seq,
+                    room_epoch: room.room_epoch,
+                    session_epoch: room.session_epoch,
+                },
+            )
+            .await
+        }
         ClientMessage::RequestSessionPause {
-            request_id: _,
+            room_epoch,
+            session_epoch,
+            request_id,
             reason,
             local_frame,
         } => {
+            services.metrics.record_pause_requested();
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
             apply_room_result(
                 sender,
                 services
                     .rooms
-                    .request_session_pause(invite_code.clone(), connection_id, reason, local_frame)
+                    .request_session_pause(
+                        invite_code.clone(),
+                        connection_id,
+                        request_id,
+                        reason,
+                        local_frame,
+                    )
                     .await
                     .map(|_| ()),
             )
             .await
         }
         ClientMessage::SessionPauseReached {
+            room_epoch,
+            session_epoch,
             sequence,
             paused_at_frame,
         } => {
+            services.metrics.record_resume_requested();
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
             apply_room_result(
                 sender,
                 services
@@ -152,21 +281,53 @@ async fn handle_client_message(
             .await
         }
         ClientMessage::RequestSessionResume {
-            request_id: _,
-            reason: _,
+            room_epoch,
+            session_epoch,
+            request_id,
+            reason,
             sequence,
         } => {
             apply_room_result(
                 sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            apply_room_result(
+                sender,
                 services
                     .rooms
-                    .request_session_resume(invite_code.clone(), connection_id, sequence)
+                    .request_session_resume(
+                        invite_code.clone(),
+                        connection_id,
+                        request_id,
+                        reason,
+                        sequence,
+                    )
                     .await
                     .map(|_| ()),
             )
             .await
         }
     }
+}
+
+async fn validate_epochs(
+    services: &AppServices,
+    invite_code: &InviteCode,
+    room_epoch: u64,
+    session_epoch: u64,
+) -> Result<(), RoomError> {
+    let room = services.rooms.room_view(invite_code.clone()).await?;
+
+    if room.room_epoch != room_epoch {
+        return Err(RoomError::StaleRoomEpoch);
+    }
+
+    if room.session_epoch != session_epoch {
+        return Err(RoomError::StaleSessionEpoch);
+    }
+
+    Ok(())
 }
 
 async fn apply_room_result(

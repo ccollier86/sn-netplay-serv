@@ -4,51 +4,101 @@
 //! happens in room modules before input or state is accepted.
 
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, LinkCableCompatibility, LinkCablePacket,
-    SessionPauseReason, SnapshotChunk, SnapshotManifest,
+    ClientRuntimeState, CompatibilityFingerprint, InputFrame, LinkCableCompatibility,
+    LinkCablePacket, SessionPauseReason, SnapshotChunk, SnapshotManifest,
 };
 use serde::Deserialize;
 
 /// Message sent by a Desktop client over a room WebSocket.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ClientMessage {
     /// Lightweight connection keepalive.
     Ping,
     /// Client compatibility fingerprint for the current game/core.
     SetCompatibilityFingerprint {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
         /// Netplay-relevant compatibility details.
         fingerprint: CompatibilityFingerprint,
     },
     /// Client link-cable compatibility for the selected runtime.
     SetLinkCableCompatibility {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
         /// Link-cable runtime compatibility details.
         compatibility: LinkCableCompatibility,
     },
     /// Client is ready to start or continue the sync phase.
-    Ready,
+    Ready {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+    },
     /// One chunk of host save-state snapshot data.
     SnapshotChunk {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
         /// Chunk payload.
         chunk: SnapshotChunk,
     },
     /// Manifest for a completed snapshot transfer.
     SnapshotComplete {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
         /// Snapshot manifest.
         manifest: SnapshotManifest,
     },
     /// Frame-numbered input from the local player.
     InputFrame {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
         /// Normalized input payload.
         input: InputFrame,
     },
     /// Opaque virtual link-cable packet from the local runtime.
     LinkCablePacket {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
         /// Link packet to relay.
         packet: LinkCablePacket,
     },
+    /// Periodic client health and progress report.
+    Heartbeat {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+        /// Latest server event sequence applied locally.
+        latest_event_seq: u64,
+        /// Local runtime frame when available.
+        local_frame: Option<u64>,
+        /// Local emulator/netplay runtime state.
+        runtime_state: ClientRuntimeState,
+    },
     /// Request a room-wide pause at a relay-selected frame.
     RequestSessionPause {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
         /// Client-generated id for logs and idempotent UI actions.
         request_id: String,
         /// Reason the client is pausing.
@@ -58,6 +108,10 @@ pub enum ClientMessage {
     },
     /// A client reached and paused at the scheduled frame.
     SessionPauseReached {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
         /// Pause sequence being acknowledged.
         sequence: u64,
         /// Frame where the runtime actually paused.
@@ -65,6 +119,10 @@ pub enum ClientMessage {
     },
     /// Release this client's pause holder and resume if every holder is gone.
     RequestSessionResume {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
         /// Client-generated id for logs and idempotent UI actions.
         request_id: String,
         /// Pause sequence being released.

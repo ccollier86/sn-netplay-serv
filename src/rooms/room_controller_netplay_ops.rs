@@ -8,8 +8,8 @@ use crate::protocol::{
     SessionPauseView,
 };
 use crate::rooms::{
-    ConnectionId, InputFrameAcceptance, NetplayRoom, PlayerStatus, RoomError, RoomStatus,
-    SessionPauseStateTracker,
+    ConnectionId, InputFrameAcceptance, NetplayRoom, PlayerRuntimeState, PlayerStatus, RoomError,
+    RoomStatus, SessionPauseStateTracker,
 };
 
 const SESSION_PAUSE_LEAD_FRAMES: u64 = 8;
@@ -64,6 +64,17 @@ impl NetplayRoom {
         reason: SessionPauseReason,
         local_frame: u64,
     ) -> Result<SessionPauseView, RoomError> {
+        self.request_session_pause_with_id(connection_id, String::new(), reason, local_frame)
+    }
+
+    /// Schedules or extends a coordinated pause with an idempotency key.
+    pub fn request_session_pause_with_id(
+        &mut self,
+        connection_id: ConnectionId,
+        request_id: String,
+        reason: SessionPauseReason,
+        local_frame: u64,
+    ) -> Result<SessionPauseView, RoomError> {
         if self.status != RoomStatus::Playing && self.status != RoomStatus::Paused {
             return Err(RoomError::NotPlaying);
         }
@@ -74,7 +85,7 @@ impl NetplayRoom {
         let current_pause_state = self.current_pause_state();
 
         if let Some(pause_state) = self.pause_state.as_mut() {
-            pause_state.hold(player_index, reason);
+            pause_state.hold(player_index, request_id, reason);
             return Ok(pause_state.view(current_pause_state));
         }
 
@@ -85,8 +96,13 @@ impl NetplayRoom {
             .max(local_frame)
             .saturating_add(SESSION_PAUSE_LEAD_FRAMES);
 
-        let pause_state =
-            SessionPauseStateTracker::new(sequence, reason, player_index, pause_at_frame);
+        let pause_state = SessionPauseStateTracker::new(
+            sequence,
+            request_id,
+            reason,
+            player_index,
+            pause_at_frame,
+        );
         let view = pause_state.view(SessionPauseState::Pausing);
         self.pause_state = Some(pause_state);
 
@@ -100,6 +116,24 @@ impl NetplayRoom {
         sequence: u64,
         paused_at_frame: u64,
     ) -> Result<SessionPauseView, RoomError> {
+        match self.mark_session_pause_reached_with_outcome(
+            connection_id,
+            sequence,
+            paused_at_frame,
+        )? {
+            SessionPauseReachedOutcome::Pausing(pause)
+            | SessionPauseReachedOutcome::Paused(pause) => Ok(pause),
+            SessionPauseReachedOutcome::Resumed { .. } => Err(RoomError::RoomNotReady),
+        }
+    }
+
+    /// Records a pause acknowledgement and returns whether pending resume can run.
+    pub fn mark_session_pause_reached_with_outcome(
+        &mut self,
+        connection_id: ConnectionId,
+        sequence: u64,
+        paused_at_frame: u64,
+    ) -> Result<SessionPauseReachedOutcome, RoomError> {
         let player_index = self
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
@@ -113,21 +147,45 @@ impl NetplayRoom {
         pause_state.acknowledge(player_index, paused_at_frame);
 
         if pause_state.every_connected_player_acknowledged(&connected_players) {
+            if !pause_state.has_holders() {
+                let resume_at_frame = pause_state.resume_at_frame();
+                self.pause_state = None;
+                self.status = RoomStatus::Playing;
+                self.players
+                    .iter_mut()
+                    .filter(|slot| slot.connection_id.is_some())
+                    .for_each(|slot| {
+                        slot.status = PlayerStatus::Playing;
+                        slot.runtime_state = PlayerRuntimeState::Playing;
+                    });
+                return Ok(SessionPauseReachedOutcome::Resumed {
+                    resume_at_frame,
+                    sequence,
+                });
+            }
+
             self.status = RoomStatus::Paused;
             self.players
                 .iter_mut()
                 .filter(|slot| slot.connection_id.is_some())
-                .for_each(|slot| slot.status = PlayerStatus::Paused);
+                .for_each(|slot| {
+                    slot.status = PlayerStatus::Paused;
+                    slot.runtime_state = PlayerRuntimeState::Paused;
+                });
             return self
                 .pause_state
                 .as_ref()
-                .map(|pause_state| pause_state.view(SessionPauseState::Paused))
+                .map(|pause_state| {
+                    SessionPauseReachedOutcome::Paused(pause_state.view(SessionPauseState::Paused))
+                })
                 .ok_or(RoomError::RoomNotReady);
         }
 
         self.pause_state
             .as_ref()
-            .map(|pause_state| pause_state.view(SessionPauseState::Pausing))
+            .map(|pause_state| {
+                SessionPauseReachedOutcome::Pausing(pause_state.view(SessionPauseState::Pausing))
+            })
             .ok_or(RoomError::RoomNotReady)
     }
 
@@ -135,6 +193,22 @@ impl NetplayRoom {
     pub fn request_session_resume(
         &mut self,
         connection_id: ConnectionId,
+        sequence: u64,
+    ) -> Result<SessionResumeOutcome, RoomError> {
+        self.request_session_resume_with_id(
+            connection_id,
+            String::new(),
+            SessionPauseReason::Menu,
+            sequence,
+        )
+    }
+
+    /// Releases one pause holder using an idempotency key.
+    pub fn request_session_resume_with_id(
+        &mut self,
+        connection_id: ConnectionId,
+        request_id: String,
+        _reason: SessionPauseReason,
         sequence: u64,
     ) -> Result<SessionResumeOutcome, RoomError> {
         let player_index = self
@@ -147,9 +221,15 @@ impl NetplayRoom {
             return Err(RoomError::RoomNotReady);
         }
 
-        pause_state.release(player_index);
+        pause_state.release(player_index, request_id);
 
         if pause_state.has_holders() {
+            return Ok(SessionResumeOutcome::StillPaused(
+                pause_state.view(current_pause_state),
+            ));
+        }
+
+        if self.status != RoomStatus::Paused {
             return Ok(SessionResumeOutcome::StillPaused(
                 pause_state.view(current_pause_state),
             ));
@@ -161,7 +241,10 @@ impl NetplayRoom {
         self.players
             .iter_mut()
             .filter(|slot| slot.connection_id.is_some())
-            .for_each(|slot| slot.status = PlayerStatus::Playing);
+            .for_each(|slot| {
+                slot.status = PlayerStatus::Playing;
+                slot.runtime_state = PlayerRuntimeState::Playing;
+            });
 
         Ok(SessionResumeOutcome::Resumed { resume_at_frame })
     }
@@ -212,6 +295,22 @@ pub enum SessionResumeOutcome {
     /// All holders released and the room can resume.
     Resumed {
         /// Frame clients resume from.
+        resume_at_frame: u64,
+    },
+}
+
+/// Result of a client acknowledging a scheduled pause frame.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SessionPauseReachedOutcome {
+    /// Pause is still waiting for other players.
+    Pausing(SessionPauseView),
+    /// Every connected player reached the pause and at least one holder remains.
+    Paused(SessionPauseView),
+    /// Every player reached the pause and all holders were already released.
+    Resumed {
+        /// Pause sequence that completed.
+        sequence: u64,
+        /// Frame clients should resume from.
         resume_at_frame: u64,
     },
 }

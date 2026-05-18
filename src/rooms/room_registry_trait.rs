@@ -1,0 +1,185 @@
+//! Room registry interface used by HTTP and WebSocket transports.
+//!
+//! The trait keeps transports depending on room capabilities instead of the
+//! concrete in-memory implementation. It owns no locking, serialization, or
+//! authorization behavior.
+
+use crate::auth::VerifiedLicense;
+use crate::protocol::{
+    ClientRuntimeState, CompatibilityFingerprint, InputFrame, LinkCableCompatibility,
+    LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason, SnapshotChunk, SnapshotManifest,
+};
+use crate::rooms::{
+    ConnectionId, InviteCode, PlayerIndex, RoomDebugEvent, RoomError, RoomEvent, RoomJoin,
+    RoomRegistrySnapshot, RoomView,
+};
+use tokio::sync::broadcast;
+
+/// Receiver for room domain events.
+pub type RoomEventReceiver = broadcast::Receiver<RoomEvent>;
+
+/// Room storage behavior needed by transports and routes.
+#[async_trait::async_trait]
+pub trait RoomRegistry: Send + Sync {
+    /// Creates a new room for a verified host.
+    async fn create_room(
+        &self,
+        host: VerifiedLicense,
+        host_connection: ConnectionId,
+        session: NetplaySessionDescriptor,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Adds a verified guest to an existing room.
+    async fn join_guest(
+        &self,
+        invite_code: InviteCode,
+        guest: VerifiedLicense,
+        connection_id: ConnectionId,
+    ) -> Result<PlayerIndex, RoomError>;
+
+    /// Attaches a host socket to its reserved Player 1 slot.
+    async fn connect_host(
+        &self,
+        invite_code: InviteCode,
+        host: VerifiedLicense,
+        connection_id: ConnectionId,
+    ) -> Result<RoomJoin, RoomError>;
+
+    /// Adds a verified guest socket and returns the joined room state.
+    async fn connect_guest(
+        &self,
+        invite_code: InviteCode,
+        guest: VerifiedLicense,
+        connection_id: ConnectionId,
+    ) -> Result<RoomJoin, RoomError>;
+
+    /// Reclaims an occupied player slot with a valid resume token.
+    async fn reconnect_player(
+        &self,
+        invite_code: InviteCode,
+        player_index: PlayerIndex,
+        room_epoch: u64,
+        resume_token: String,
+        connection_id: ConnectionId,
+    ) -> Result<RoomJoin, RoomError>;
+
+    /// Marks a socket connection as disconnected.
+    async fn disconnect(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Subscribes to domain events for one active room.
+    async fn subscribe(&self, invite_code: InviteCode) -> Result<RoomEventReceiver, RoomError>;
+
+    /// Stores a compatibility fingerprint from one connected player.
+    async fn set_compatibility(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        fingerprint: CompatibilityFingerprint,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Stores link-cable compatibility details from one connected player.
+    async fn set_link_cable_compatibility(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        compatibility: LinkCableCompatibility,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Marks one connected player ready and starts the session when all are ready.
+    async fn mark_ready(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Validates and broadcasts a host snapshot chunk.
+    async fn relay_snapshot_chunk(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        chunk: SnapshotChunk,
+    ) -> Result<(), RoomError>;
+
+    /// Validates and broadcasts a host snapshot completion manifest.
+    async fn relay_snapshot_complete(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        manifest: SnapshotManifest,
+    ) -> Result<(), RoomError>;
+
+    /// Validates and broadcasts one frame of player input.
+    async fn relay_input_frame(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        input: InputFrame,
+    ) -> Result<(), RoomError>;
+
+    /// Validates and broadcasts one virtual link-cable packet.
+    async fn relay_link_cable_packet(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        packet: LinkCablePacket,
+    ) -> Result<(), RoomError>;
+
+    /// Records a client heartbeat and returns the current room view.
+    async fn record_heartbeat(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        latest_event_seq: u64,
+        local_frame: Option<u64>,
+        runtime_state: ClientRuntimeState,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Requests a coordinated room pause.
+    async fn request_session_pause(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        request_id: String,
+        reason: SessionPauseReason,
+        local_frame: u64,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Marks one client paused at the scheduled frame.
+    async fn mark_session_pause_reached(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        sequence: u64,
+        paused_at_frame: u64,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Releases one client's coordinated pause holder.
+    async fn request_session_resume(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        request_id: String,
+        reason: SessionPauseReason,
+        sequence: u64,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Returns a serializable room view for an invite code.
+    async fn room_view(&self, invite_code: InviteCode) -> Result<RoomView, RoomError>;
+
+    /// Returns sanitized events for one room.
+    async fn room_events(
+        &self,
+        invite_code: InviteCode,
+        limit: usize,
+    ) -> Result<Vec<RoomDebugEvent>, RoomError>;
+
+    /// Returns sanitized recent events across active rooms.
+    async fn recent_events(&self, limit: usize) -> Vec<RoomDebugEvent>;
+
+    /// Returns a point-in-time snapshot of active rooms.
+    async fn snapshot(&self) -> RoomRegistrySnapshot;
+}

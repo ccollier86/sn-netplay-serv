@@ -12,10 +12,14 @@ Implemented:
 - `GET /health`
 - `POST /v1/rooms` with protocol version and game/core descriptor
 - `GET /v1/rooms/{invite_code}/status`
-- `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=2`
-- `GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=2`
+- `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=3`
+- `GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=3`
+- `GET /v1/ws?inviteCode=AB23-CD&protocolVersion=3&playerIndex=1&roomEpoch=2&resumeToken=...`
 - `GET /internal/metrics`
 - `GET /internal/rooms`
+- `GET /internal/rooms/{invite_code}`
+- `GET /internal/rooms/{invite_code}/events`
+- `GET /internal/recent-events`
 - HTTP-backed license-authority client
 - server-side netplay entitlement authorization through the metadata service
 - fakeable `LicenseAuthority` trait
@@ -37,6 +41,12 @@ Implemented:
 - ready/start handling
 - host snapshot chunk and manifest relay
 - frame-numbered input validation and relay
+- protocol v3 room/session epochs
+- resume tokens for slot reclaim after disconnect
+- app-level heartbeat acknowledgement
+- heartbeat timeout recovery and reconnect grace cleanup
+- coordinated pause/resume for in-game menu and lifecycle pauses
+- sanitized per-room and recent event logs
 - abandoned waiting-room expiration
 - invite-code parsing and generation
 - Player 1 / Player 2 slot model
@@ -47,8 +57,8 @@ Implemented:
 
 Not implemented yet:
 
-- ping/latency tracking
-- resync protocol
+- latency display and jitter quality scoring
+- durable room storage across relay restarts
 - multi-instance shared room backend
 
 ## Required Environment
@@ -63,6 +73,10 @@ SB_NETPLAY_TRUST_PROXY_HEADERS=true
 SB_NETPLAY_RATE_CREATE_ROOM_PER_MINUTE=12
 SB_NETPLAY_RATE_WS_JOIN_PER_MINUTE=30
 SB_NETPLAY_RATE_ROOM_STATUS_PER_MINUTE=120
+SB_NETPLAY_RECONNECT_GRACE_SECONDS=90
+SB_NETPLAY_HEARTBEAT_STALE_SECONDS=15
+SB_NETPLAY_HEARTBEAT_DISCONNECT_SECONDS=30
+SB_NETPLAY_ROOM_IDLE_SECONDS=300
 ```
 
 `SB_NETPLAY_BIND_ADDR` is optional and defaults to `127.0.0.1:8077`.
@@ -92,6 +106,10 @@ curl -fsS -H "Authorization: Bearer $SB_NETPLAY_ADMIN_TOKEN" \
   https://netplay.shadowboy.app/internal/metrics
 curl -fsS -H "Authorization: Bearer $SB_NETPLAY_ADMIN_TOKEN" \
   https://netplay.shadowboy.app/internal/rooms
+curl -fsS -H "Authorization: Bearer $SB_NETPLAY_ADMIN_TOKEN" \
+  "https://netplay.shadowboy.app/internal/rooms/AB23-CD/events?limit=100"
+curl -fsS -H "Authorization: Bearer $SB_NETPLAY_ADMIN_TOKEN" \
+  "https://netplay.shadowboy.app/internal/recent-events?limit=100"
 ```
 
 ## Client Authorization

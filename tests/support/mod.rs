@@ -85,12 +85,14 @@ impl Drop for SmokeServer {
 
 pub struct SmokeClient {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    room_epoch: u64,
+    session_epoch: u64,
 }
 
 impl SmokeClient {
     pub async fn connect(server: &SmokeServer, role: &str, token: &str, install_id: &str) -> Self {
         let mut request = format!(
-            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion=2",
+            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion=3",
             server.ws_base, INVITE_CODE
         )
         .into_client_request()
@@ -108,10 +110,15 @@ impl SmokeClient {
         let (socket, response) = connect_async(request).await.expect("websocket connect");
         assert_eq!(response.status().as_u16(), 101);
 
-        Self { socket }
+        Self {
+            socket,
+            room_epoch: 1,
+            session_epoch: 1,
+        }
     }
 
-    pub async fn send(&mut self, payload: Value) {
+    pub async fn send(&mut self, mut payload: Value) {
+        self.attach_epochs(&mut payload);
         self.socket
             .send(Message::Text(payload.to_string().into()))
             .await
@@ -126,7 +133,11 @@ impl SmokeClient {
             .expect("websocket result");
 
         match message {
-            Message::Text(payload) => serde_json::from_str(payload.as_str()).expect("json message"),
+            Message::Text(payload) => {
+                let value = serde_json::from_str(payload.as_str()).expect("json message");
+                self.update_epochs(&value);
+                value
+            }
             other => panic!("unexpected websocket message: {other:?}"),
         }
     }
@@ -188,12 +199,46 @@ impl SmokeClient {
             panic!("unexpected echoed link packet: {message}");
         }
     }
+
+    fn attach_epochs(&self, payload: &mut Value) {
+        let Some(object) = payload.as_object_mut() else {
+            return;
+        };
+        let Some(message_type) = object.get("type").and_then(Value::as_str) else {
+            return;
+        };
+
+        if message_type == "ping" {
+            return;
+        }
+
+        object
+            .entry("roomEpoch")
+            .or_insert_with(|| json!(self.room_epoch));
+        object
+            .entry("sessionEpoch")
+            .or_insert_with(|| json!(self.session_epoch));
+    }
+
+    fn update_epochs(&mut self, message: &Value) {
+        if let Some(room_epoch) = message["roomEpoch"].as_u64() {
+            self.room_epoch = room_epoch;
+        } else if let Some(room_epoch) = message["room"]["roomEpoch"].as_u64() {
+            self.room_epoch = room_epoch;
+        }
+
+        if let Some(session_epoch) = message["sessionEpoch"].as_u64() {
+            self.session_epoch = session_epoch;
+        } else if let Some(session_epoch) = message["room"]["sessionEpoch"].as_u64() {
+            self.session_epoch = session_epoch;
+        }
+    }
 }
 
 pub fn compatibility_fingerprint() -> Value {
     json!({
         "desktopVersion": "0.2.13",
-        "protocolVersion": 2,
+        "protocolVersion": 3,
         "systemId": "gamecube",
         "coreId": "dolphin",
         "coreBuild": "5.0-netplay",
@@ -213,6 +258,7 @@ pub async fn connect_ready_pair(server: &SmokeServer) -> (SmokeClient, SmokeClie
     let guest_join = guest.expect_type("roomJoined").await;
     assert_eq!(host_join["yourPlayerIndex"], 0);
     assert_eq!(guest_join["yourPlayerIndex"], 1);
+    host.expect_type("compatibilityRequested").await;
 
     (host, guest)
 }
@@ -238,7 +284,7 @@ pub async fn move_pair_to_syncing(host: &mut SmokeClient, guest: &mut SmokeClien
 
 pub fn link_cable_compatibility() -> Value {
     json!({
-        "protocolVersion": 2,
+        "protocolVersion": 3,
         "systemFamily": "gba",
         "linkProtocol": "gba-link-cable-v1",
         "runtimeProfile": "mgba-link-runtime-v1",
@@ -288,6 +334,9 @@ impl SmokeClient {
     async fn expect_room_status(&mut self, status: &str) -> Value {
         loop {
             let message = self.next_json().await;
+            if message["type"] == "error" {
+                panic!("unexpected netplay error while waiting for {status}: {message}");
+            }
             if message["type"] == "roomStateChanged" && message["room"]["status"] == status {
                 return message;
             }
@@ -314,7 +363,7 @@ fn test_services() -> AppServices {
 
 fn create_room_body() -> Value {
     json!({
-        "desktopProtocolVersion": 1,
+        "desktopProtocolVersion": 3,
         "session": {
             "hostAppVersion": "0.2.13",
             "game": {
@@ -338,7 +387,7 @@ fn create_room_body() -> Value {
 
 fn create_link_room_body() -> Value {
     json!({
-        "desktopProtocolVersion": 1,
+        "desktopProtocolVersion": 3,
         "session": {
             "hostAppVersion": "0.2.13",
             "mode": "linkCable",

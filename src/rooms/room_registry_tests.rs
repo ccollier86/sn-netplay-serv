@@ -10,7 +10,8 @@ use crate::protocol::{
     SessionPauseReason, SnapshotChunk, SnapshotManifest,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, RoomError, RoomEvent,
+    ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, PlayerRuntimeState, PlayerStatus,
+    RoomError, RoomEvent, RoomStatus,
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -400,6 +401,88 @@ async fn repeated_pause_request_updates_existing_pause() {
     ));
 }
 
+#[tokio::test]
+async fn reconnect_with_valid_resume_token_restores_player_slot() {
+    let (registry, invite, _host_connection, guest_connection, guest_token) =
+        reconnectable_room().await;
+
+    let recovery = registry
+        .disconnect(invite.clone(), guest_connection)
+        .await
+        .expect("guest disconnect");
+    let reconnect = registry
+        .reconnect_player(
+            invite,
+            PlayerIndex::TWO,
+            recovery.room_epoch,
+            guest_token,
+            ConnectionId::new(),
+        )
+        .await
+        .expect("guest reconnect");
+
+    assert_eq!(reconnect.player_index, PlayerIndex::TWO);
+    assert_eq!(reconnect.room.status, RoomStatus::CheckingCompatibility);
+    assert_eq!(reconnect.room.players[1].status, PlayerStatus::Connected);
+    assert_eq!(
+        reconnect.room.players[1].runtime_state,
+        PlayerRuntimeState::Connected
+    );
+}
+
+#[tokio::test]
+async fn reconnect_rejects_stale_room_epoch() {
+    let (registry, invite, _host_connection, guest_connection, guest_token) =
+        reconnectable_room().await;
+
+    let recovery = registry
+        .disconnect(invite.clone(), guest_connection)
+        .await
+        .expect("guest disconnect");
+    let stale_epoch = recovery.room_epoch.saturating_sub(1);
+    let result = registry
+        .reconnect_player(
+            invite,
+            PlayerIndex::TWO,
+            stale_epoch,
+            guest_token,
+            ConnectionId::new(),
+        )
+        .await;
+
+    assert!(matches!(result, Err(RoomError::StaleRoomEpoch)));
+}
+
+#[tokio::test]
+async fn heartbeat_timeout_enters_recovery_then_expires_room() {
+    let (registry, invite, _host_connection, _guest_connection, _guest_token) =
+        reconnectable_room().await;
+    let stale_at = Instant::now() + Duration::from_secs(31);
+
+    let first_removed = registry
+        .remove_expired_waiting_rooms(stale_at, Duration::from_secs(600))
+        .await;
+    let recovering = registry
+        .room_view(invite.clone())
+        .await
+        .expect("recovering room");
+
+    assert_eq!(first_removed, 0);
+    assert_eq!(recovering.status, RoomStatus::Recovering);
+    assert_eq!(recovering.players[0].status, PlayerStatus::Reconnecting);
+    assert_eq!(recovering.players[1].status, PlayerStatus::Reconnecting);
+
+    let second_removed = registry
+        .remove_expired_waiting_rooms(stale_at + Duration::from_secs(91), Duration::from_secs(600))
+        .await;
+
+    assert_eq!(second_removed, 1);
+    assert!(matches!(
+        registry.room_view(invite).await,
+        Err(RoomError::NotFound)
+    ));
+}
+
 fn registry() -> InMemoryRoomRegistry {
     InMemoryRoomRegistry::new(Arc::new(StaticInviteCodeGenerator))
 }
@@ -428,6 +511,53 @@ async fn compatible_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, C
         .expect("guest fingerprint");
 
     (registry, invite, host_connection, guest_connection)
+}
+
+async fn reconnectable_room() -> (
+    InMemoryRoomRegistry,
+    InviteCode,
+    ConnectionId,
+    ConnectionId,
+    String,
+) {
+    let registry = registry();
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let view = registry
+        .create_room(license("host"), host_connection, descriptor())
+        .await
+        .expect("room");
+    let invite = InviteCode::parse(view.invite_code).expect("invite");
+    let guest_join = registry
+        .connect_guest(invite.clone(), license("guest"), guest_connection)
+        .await
+        .expect("guest");
+
+    registry
+        .set_compatibility(invite.clone(), host_connection, fingerprint("rom"))
+        .await
+        .expect("host fingerprint");
+    registry
+        .set_compatibility(invite.clone(), guest_connection, fingerprint("rom"))
+        .await
+        .expect("guest fingerprint");
+    complete_snapshot(&registry, &invite, host_connection).await;
+    registry
+        .mark_ready(invite.clone(), host_connection)
+        .await
+        .expect("host ready");
+    registry
+        .mark_ready(invite.clone(), guest_connection)
+        .await
+        .expect("guest ready");
+
+    (
+        registry,
+        invite,
+        host_connection,
+        guest_connection,
+        guest_join.resume_token,
+    )
 }
 
 async fn complete_snapshot(

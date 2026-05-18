@@ -469,6 +469,37 @@ fn coordinated_resume_waits_for_all_pause_holders_to_release() {
     assert_eq!(room.status(), RoomStatus::Playing);
 }
 
+#[test]
+fn resume_before_pause_ack_waits_then_auto_resumes_after_all_acks() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+
+    let pause = room
+        .request_session_pause(host_connection, SessionPauseReason::Menu, 10)
+        .expect("pause scheduled");
+    assert!(matches!(
+        room.request_session_resume(host_connection, pause.sequence),
+        Ok(SessionResumeOutcome::StillPaused(_))
+    ));
+
+    room.mark_session_pause_reached(host_connection, pause.sequence, 18)
+        .expect("host paused");
+    assert_eq!(room.status(), RoomStatus::Playing);
+    let outcome = room
+        .mark_session_pause_reached_with_outcome(guest_connection, pause.sequence, 18)
+        .expect("guest paused");
+
+    assert!(matches!(
+        outcome,
+        crate::rooms::SessionPauseReachedOutcome::Resumed {
+            sequence: 1,
+            resume_at_frame: 19
+        }
+    ));
+    assert_eq!(room.status(), RoomStatus::Playing);
+}
+
 fn ready_room(host_connection: ConnectionId, guest_connection: ConnectionId) -> NetplayRoom {
     let mut room = compatible_room(host_connection, guest_connection);
     complete_snapshot(&mut room, host_connection);

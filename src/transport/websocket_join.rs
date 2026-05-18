@@ -4,7 +4,7 @@
 //! moved into the upgraded socket task.
 
 use crate::auth::VerifiedLicense;
-use crate::rooms::InviteCode;
+use crate::rooms::{InviteCode, PlayerIndex};
 use serde::Deserialize;
 
 /// Requested role for a room WebSocket join.
@@ -25,6 +25,12 @@ pub struct WebSocketJoinRequest {
     pub invite_code: InviteCode,
     /// Requested socket role.
     pub role: WebSocketJoinRole,
+    /// Player slot being reclaimed during reconnect.
+    pub reconnect_player_index: Option<PlayerIndex>,
+    /// Room epoch supplied for reconnect.
+    pub reconnect_room_epoch: Option<u64>,
+    /// Opaque resume token supplied for reconnect.
+    pub resume_token: Option<String>,
     /// Verified Desktop install/license identity.
     pub license: VerifiedLicense,
 }

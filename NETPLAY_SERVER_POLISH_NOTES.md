@@ -2,15 +2,13 @@
 
 ## Compatibility Recheck Contract
 
-Current behavior is functional, but the room recheck contract should be clearer.
-When room membership changes, the relay resets compatibility state and clients
-defensively resend their compatibility fingerprints after seeing the room return
-to `checkingCompatibility`.
+Current behavior is functional and v3 now emits `compatibilityRequested` when
+the relay returns a room to `checkingCompatibility`. Clients should still
+defensively resend their compatibility fingerprints after seeing that message or
+any room status change back to `checkingCompatibility`.
 
 Future server polish options:
 
-- Emit a dedicated `compatibilityRequested` message when the relay needs a
-  connected client to resubmit its fingerprint.
 - Preserve the host compatibility fingerprint when the host connection and
   advertised session descriptor have not changed.
 
@@ -20,19 +18,16 @@ require revalidation.
 
 ## Production Connection Handling
 
-The relay should grow a production-grade connection lifecycle before broad
-release. Areas to design and harden:
+The relay now has protocol v3 epochs, resume tokens, app-level heartbeats,
+reconnect grace windows, coordinated pause/resume, and internal event-log
+endpoints. Remaining production hardening:
 
-- Keepalive pings with clear timeout thresholds for stale HTTP/WebSocket clients.
-- Reconnection windows that let a dropped host or guest reclaim the same player
-  slot without immediately destroying the room.
-- Room durability rules for brief mobile network switches, desktop sleep/wake,
-  browser network changes, and relay restarts.
-- Explicit teardown after legitimate inactivity from both parties.
 - Different handling for host loss, guest loss, both players idle, and both
   sockets gone.
-- Clear room terminal states so clients can distinguish recoverable disconnects
-  from ended sessions.
-- Metrics and logs for connect, reconnect, timeout, teardown reason, and room
-  lifetime.
+- More detailed terminal states so clients can distinguish recoverable
+  disconnects from ended sessions.
+- Latency and jitter quality metrics, not only heartbeat liveness.
+- Structured logs for teardown reason and room lifetime.
 - Abuse limits for reconnect churn, abandoned rooms, and repeated room creation.
+- Durable room state or sticky routing if the relay ever runs more than one
+  instance.

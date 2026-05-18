@@ -16,6 +16,8 @@ pub enum SessionPauseReason {
     Backgrounded,
     /// Runtime or system-level pause.
     System,
+    /// Relay paused because a player connection dropped.
+    ConnectionLost,
 }
 
 /// Current state of a coordinated pause.

@@ -30,18 +30,41 @@ pub async fn handle_websocket_session(
             return;
         }
     };
-    let join = match request.role {
-        WebSocketJoinRole::Host => {
-            services
-                .rooms
-                .connect_host(request.invite_code.clone(), request.license, connection_id)
-                .await
+    let reconnect = match (
+        request.reconnect_player_index,
+        request.reconnect_room_epoch,
+        request.resume_token.clone(),
+    ) {
+        (Some(player_index), Some(room_epoch), Some(resume_token)) => {
+            Some((player_index, room_epoch, resume_token))
         }
-        WebSocketJoinRole::Guest => {
-            services
-                .rooms
-                .connect_guest(request.invite_code.clone(), request.license, connection_id)
-                .await
+        _ => None,
+    };
+    let join = if let Some((player_index, room_epoch, resume_token)) = reconnect.clone() {
+        services
+            .rooms
+            .reconnect_player(
+                request.invite_code.clone(),
+                player_index,
+                room_epoch,
+                resume_token,
+                connection_id,
+            )
+            .await
+    } else {
+        match request.role {
+            WebSocketJoinRole::Host => {
+                services
+                    .rooms
+                    .connect_host(request.invite_code.clone(), request.license, connection_id)
+                    .await
+            }
+            WebSocketJoinRole::Guest => {
+                services
+                    .rooms
+                    .connect_guest(request.invite_code.clone(), request.license, connection_id)
+                    .await
+            }
         }
     };
     let join = match join {
@@ -52,12 +75,19 @@ pub async fn handle_websocket_session(
         }
     };
     services.metrics.record_websocket_joined();
+    if reconnect.is_some() {
+        services.metrics.record_player_reconnected();
+    }
     let (mut sender, mut receiver) = socket.split();
 
     if send_server_message(
         &mut sender,
         &ServerMessage::RoomJoined {
+            event_seq: join.room.event_seq,
+            room_epoch: join.room.room_epoch,
+            session_epoch: join.room.session_epoch,
             your_player_index: join.player_index.zero_based(),
+            resume_token: join.resume_token,
             room: join.room,
         },
     )
@@ -103,7 +133,7 @@ async fn session_loop(
                 }
             }
             event = events.recv() => {
-                if !handle_room_event(sender, connection_id, event).await {
+                if !handle_room_event(sender, services, connection_id, event).await {
                     break;
                 }
             }
@@ -144,25 +174,46 @@ async fn handle_incoming(
 
 async fn handle_room_event(
     sender: &mut SocketSender,
+    services: &AppServices,
     connection_id: ConnectionId,
     event: Result<RoomEvent, tokio::sync::broadcast::error::RecvError>,
 ) -> bool {
     let message = match event {
-        Ok(RoomEvent::RoomStateChanged(room)) => ServerMessage::RoomStateChanged { room },
+        Ok(RoomEvent::RoomStateChanged(room)) => room_state_message(room),
         Ok(RoomEvent::SessionStarted { start_frame, room }) => {
-            ServerMessage::StartSession { start_frame, room }
+            services.metrics.record_session_started();
+            ServerMessage::StartSession {
+                event_seq: room.event_seq,
+                room_epoch: room.room_epoch,
+                session_epoch: room.session_epoch,
+                start_frame,
+                room,
+            }
         }
         Ok(RoomEvent::SessionPauseScheduled { pause, room }) => {
-            ServerMessage::SessionPauseScheduled { pause, room }
+            ServerMessage::SessionPauseScheduled {
+                event_seq: room.event_seq,
+                room_epoch: room.room_epoch,
+                session_epoch: room.session_epoch,
+                pause,
+                room,
+            }
         }
-        Ok(RoomEvent::SessionPauseUpdated { pause, room }) => {
-            ServerMessage::SessionPauseUpdated { pause, room }
-        }
+        Ok(RoomEvent::SessionPauseUpdated { pause, room }) => ServerMessage::SessionPauseUpdated {
+            event_seq: room.event_seq,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            pause,
+            room,
+        },
         Ok(RoomEvent::SessionResumeScheduled {
             sequence,
             resume_at_frame,
             room,
         }) => ServerMessage::SessionResumeScheduled {
+            event_seq: room.event_seq,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
             sequence,
             resume_at_frame,
             room,
@@ -194,4 +245,27 @@ async fn handle_room_event(
     };
 
     send_server_message(sender, &message).await.is_ok()
+}
+
+fn room_state_message(room: crate::rooms::RoomView) -> ServerMessage {
+    match room.status {
+        crate::rooms::RoomStatus::CheckingCompatibility => ServerMessage::CompatibilityRequested {
+            event_seq: room.event_seq,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            room,
+        },
+        crate::rooms::RoomStatus::Recovering => ServerMessage::RecoveryStarted {
+            event_seq: room.event_seq,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            room,
+        },
+        _ => ServerMessage::RoomStateChanged {
+            event_seq: room.event_seq,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            room,
+        },
+    }
 }

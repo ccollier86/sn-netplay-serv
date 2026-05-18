@@ -97,5 +97,18 @@ fn room_error_message(error: RoomError) -> ServerMessage {
             "compatibilityMismatch",
             "Netplay compatibility does not match.",
         ),
+        RoomError::StaleRoomEpoch => {
+            static_error("staleRoomEpoch", "Room state changed; refresh and retry.")
+        }
+        RoomError::StaleSessionEpoch => static_error(
+            "staleSessionEpoch",
+            "Netplay session changed; refresh and retry.",
+        ),
+        RoomError::ResumeTokenInvalid => {
+            static_error("resumeTokenInvalid", "Reconnect token is invalid.")
+        }
+        RoomError::RecoveryExpired => {
+            static_error("recoveryExpired", "Reconnect recovery window expired.")
+        }
     }
 }

@@ -56,4 +56,16 @@ pub enum RoomError {
     /// Connected players do not have matching compatibility fingerprints.
     #[error("netplay compatibility mismatch")]
     CompatibilityMismatch,
+    /// Client tried to use a room epoch that is no longer current.
+    #[error("room epoch is stale")]
+    StaleRoomEpoch,
+    /// Client tried to use a session epoch that is no longer current.
+    #[error("session epoch is stale")]
+    StaleSessionEpoch,
+    /// Reconnect token was missing, expired, or did not match the player slot.
+    #[error("resume token is invalid")]
+    ResumeTokenInvalid,
+    /// Reconnect grace elapsed before the player reclaimed the slot.
+    #[error("recovery window expired")]
+    RecoveryExpired,
 }

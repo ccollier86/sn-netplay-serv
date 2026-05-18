@@ -7,10 +7,10 @@
 use serde::Serialize;
 
 /// Current relay protocol version.
-pub const NETPLAY_PROTOCOL_VERSION: u16 = 2;
+pub const NETPLAY_PROTOCOL_VERSION: u16 = 3;
 
 /// Oldest Desktop protocol version this relay accepts.
-pub const MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION: u16 = 1;
+pub const MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION: u16 = 3;
 
 /// Serializable protocol compatibility view returned with room state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]

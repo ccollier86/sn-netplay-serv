@@ -145,7 +145,7 @@ async fn create_room_returns_invite_descriptor_and_protocol() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(value["room"]["inviteCode"], "AB23-CD");
-    assert_eq!(value["room"]["protocol"]["protocolVersion"], 2);
+    assert_eq!(value["room"]["protocol"]["protocolVersion"], 3);
     assert_eq!(
         value["room"]["session"]["game"]["romSha256"],
         "a".repeat(64)
@@ -334,6 +334,23 @@ async fn websocket_join_requires_protocol_version() {
 }
 
 #[tokio::test]
+async fn websocket_join_rejects_partial_reconnect_query() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=3&playerIndex=1")
+                .header("authorization", "Bearer valid")
+                .header("x-install-id", "install-1")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn internal_metrics_requires_admin_token() {
     let response = app()
         .oneshot(
@@ -399,7 +416,7 @@ fn create_room_body() -> String {
 
 fn create_room_value() -> Value {
     json!({
-        "desktopProtocolVersion": 1,
+        "desktopProtocolVersion": 3,
         "session": {
             "hostAppVersion": "0.3.0",
             "game": {

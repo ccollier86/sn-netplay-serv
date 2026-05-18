@@ -41,6 +41,10 @@ SB_NETPLAY_TRUST_PROXY_HEADERS=true
 SB_NETPLAY_RATE_CREATE_ROOM_PER_MINUTE=12
 SB_NETPLAY_RATE_WS_JOIN_PER_MINUTE=30
 SB_NETPLAY_RATE_ROOM_STATUS_PER_MINUTE=120
+SB_NETPLAY_RECONNECT_GRACE_SECONDS=90
+SB_NETPLAY_HEARTBEAT_STALE_SECONDS=15
+SB_NETPLAY_HEARTBEAT_DISCONNECT_SECONDS=30
+SB_NETPLAY_ROOM_IDLE_SECONDS=300
 ```
 
 Store these values in Coolify's environment/secret UI, not in git.
@@ -75,6 +79,22 @@ curl -fsS \
 The room snapshot includes invite codes, room statuses, player slots, and
 whether slots are occupied. It does not expose client tokens, install secrets,
 ROM names, or gameplay payloads.
+
+Authenticated room event history:
+
+```bash
+curl -fsS \
+  -H "Authorization: Bearer $SB_NETPLAY_ADMIN_TOKEN" \
+  "https://netplay.shadowboy.app/internal/rooms/AB23-CD/events?limit=100"
+```
+
+Authenticated recent event history across rooms:
+
+```bash
+curl -fsS \
+  -H "Authorization: Bearer $SB_NETPLAY_ADMIN_TOKEN" \
+  "https://netplay.shadowboy.app/internal/recent-events?limit=100"
+```
 
 Coolify container logs should show structured JSON when
 `SB_NETPLAY_LOG_FORMAT=json` is set. Use those logs for request failures,
