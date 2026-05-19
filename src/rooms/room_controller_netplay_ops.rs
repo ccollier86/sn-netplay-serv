@@ -27,7 +27,7 @@ impl NetplayRoom {
         }
 
         let owned_index = self
-            .player_index_for_connection(connection_id)
+            .player_index_for_input_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
 
         if owned_index != input.player_index {

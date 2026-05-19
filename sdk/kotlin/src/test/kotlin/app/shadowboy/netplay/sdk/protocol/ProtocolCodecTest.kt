@@ -79,6 +79,35 @@ class ProtocolCodecTest {
         assertTrue(error is IllegalArgumentException)
     }
 
+    @Test
+    fun `round trips binary input batches`() {
+        val codec = NetplayInputBatchCodec()
+        val encoded = codec.encode(
+            InputFrameBatch(
+                roomEpoch = 2,
+                sessionEpoch = 3,
+                playerIndex = 1,
+                frames = listOf(
+                    InputFrame(playerIndex = 1, frame = 10, payload = listOf(1, 2)),
+                    InputFrame(playerIndex = 1, frame = 11, payload = listOf(3, 4)),
+                ),
+            ),
+        )
+
+        assertEquals(
+            InputFrameBatch(
+                roomEpoch = 2,
+                sessionEpoch = 3,
+                playerIndex = 1,
+                frames = listOf(
+                    InputFrame(playerIndex = 1, frame = 10, payload = listOf(1, 2)),
+                    InputFrame(playerIndex = 1, frame = 11, payload = listOf(3, 4)),
+                ),
+            ),
+            codec.decode(encoded),
+        )
+    }
+
     private fun JsonObject.string(name: String): String =
         requireNotNull(this[name]).jsonPrimitive.content
 }
@@ -115,8 +144,8 @@ fun roomJson(
       "sessionEpoch": $sessionEpoch,
       "inviteCode": "ABCD-EF",
       "protocol": {
-        "protocolVersion": 3,
-        "minSupportedProtocolVersion": 3
+        "protocolVersion": 4,
+        "minSupportedProtocolVersion": 4
       },
       "session": ${NetplayJson.format.encodeToString(NetplaySessionDescriptor.serializer(), testSessionDescriptor())},
       "maxPlayers": 2,
@@ -130,6 +159,8 @@ fun roomJson(
           "status": "connected",
           "runtimeState": "connected",
           "occupied": true,
+          "controlConnected": true,
+          "inputConnected": false,
           "lastSeenAgeMs": 0,
           "reconnectGraceRemainingMs": null
         },
@@ -140,6 +171,8 @@ fun roomJson(
           "status": "empty",
           "runtimeState": "empty",
           "occupied": false,
+          "controlConnected": false,
+          "inputConnected": false,
           "lastSeenAgeMs": null,
           "reconnectGraceRemainingMs": null
         }

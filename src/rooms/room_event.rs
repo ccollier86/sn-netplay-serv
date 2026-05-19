@@ -4,7 +4,7 @@
 //! concepts inside the room domain model.
 
 use crate::protocol::{
-    InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
+    InputFrame, InputFrameBatch, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
 };
 use crate::rooms::{ConnectionId, RoomView};
 
@@ -44,6 +44,13 @@ pub enum RoomEvent {
         source: ConnectionId,
         /// Validated input frame.
         input: InputFrame,
+    },
+    /// Validated input frames should be relayed over binary input sockets.
+    InputFrameBatch {
+        /// Connection that supplied the input frames.
+        source: ConnectionId,
+        /// Validated input frame batch.
+        batch: InputFrameBatch,
     },
     /// Link-cable packet should be relayed to other subscribers.
     LinkCablePacket {

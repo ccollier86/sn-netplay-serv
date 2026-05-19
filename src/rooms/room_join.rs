@@ -12,6 +12,8 @@ pub struct RoomJoin {
     pub player_index: PlayerIndex,
     /// Opaque reconnect token sent only to this player.
     pub resume_token: String,
+    /// Opaque token used to attach the binary input socket.
+    pub input_socket_token: String,
     /// Room state immediately after the join.
     pub room: RoomView,
 }

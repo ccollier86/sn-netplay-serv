@@ -29,6 +29,8 @@ pub enum ServerMessage {
         your_player_index: u8,
         /// Opaque token this player can use to reclaim the same slot.
         resume_token: String,
+        /// Opaque token this player uses to attach the binary input socket.
+        input_socket_token: String,
         /// Current room state.
         room: RoomView,
     },

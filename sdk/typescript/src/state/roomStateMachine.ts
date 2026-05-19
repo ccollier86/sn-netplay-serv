@@ -77,6 +77,12 @@ export class RoomStateMachine {
     return this.state;
   }
 
+  public reset(): void {
+    this.pause.reset();
+    this.reconnectTokens.clear();
+    this.state = initialClientState();
+  }
+
   private updateRoom(room: RoomView, assignedPlayerIndex = this.state.assignedPlayerIndex): void {
     this.reconnectTokens.updateAcceptedEpoch(room.roomEpoch);
     this.state = {

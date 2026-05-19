@@ -46,7 +46,9 @@ export function roomView({
     pause: null,
     players: [
       {
+        controlConnected: true,
         displayNumber: 1,
+        inputConnected: false,
         lastSeenAgeMs: 0,
         occupied: true,
         playerIndex: 0,
@@ -56,7 +58,9 @@ export function roomView({
         status: "connected",
       },
       {
+        controlConnected: false,
         displayNumber: 2,
+        inputConnected: false,
         lastSeenAgeMs: null,
         occupied: false,
         playerIndex: 1,

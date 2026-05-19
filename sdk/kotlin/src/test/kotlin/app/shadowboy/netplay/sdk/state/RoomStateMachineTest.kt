@@ -25,6 +25,7 @@ class RoomStateMachineTest {
                 sessionEpoch = 3,
                 yourPlayerIndex = 0,
                 resumeToken = "token",
+                inputSocketToken = "input-token",
                 room = room(status = "waitingForGuest", eventSeq = 1, roomEpoch = 2, sessionEpoch = 3),
             ),
         )
@@ -44,6 +45,7 @@ class RoomStateMachineTest {
                 sessionEpoch = 3,
                 yourPlayerIndex = 0,
                 resumeToken = "token",
+                inputSocketToken = "input-token",
                 room = room(status = "waitingForGuest", eventSeq = 1, roomEpoch = 2, sessionEpoch = 3),
             ),
         )

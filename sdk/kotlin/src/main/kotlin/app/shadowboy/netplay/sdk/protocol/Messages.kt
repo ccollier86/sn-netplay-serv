@@ -118,6 +118,7 @@ public sealed interface ServerMessage {
         public val sessionEpoch: Long,
         public val yourPlayerIndex: Int,
         public val resumeToken: String,
+        public val inputSocketToken: String,
         public val room: RoomView,
     ) : ServerMessage {
         override val eventSeqOrNull: Long = eventSeq

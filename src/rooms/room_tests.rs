@@ -176,6 +176,7 @@ fn ready_from_both_players_starts_gameplay() {
     let guest_connection = ConnectionId::new();
     let mut room = compatible_room(host_connection, guest_connection);
     complete_snapshot(&mut room, host_connection);
+    attach_input_sockets(&mut room, host_connection, guest_connection);
 
     assert!(!room.mark_ready(host_connection).expect("host ready"));
     assert!(room.mark_ready(guest_connection).expect("guest ready"));
@@ -503,6 +504,7 @@ fn resume_before_pause_ack_waits_then_auto_resumes_after_all_acks() {
 fn ready_room(host_connection: ConnectionId, guest_connection: ConnectionId) -> NetplayRoom {
     let mut room = compatible_room(host_connection, guest_connection);
     complete_snapshot(&mut room, host_connection);
+    attach_input_sockets(&mut room, host_connection, guest_connection);
     room.mark_ready(host_connection).expect("host ready");
     room.mark_ready(guest_connection).expect("guest ready");
     room
@@ -538,6 +540,33 @@ fn compatible_room(host_connection: ConnectionId, guest_connection: ConnectionId
     room.set_compatibility_for_connection(guest_connection, fingerprint("rom"))
         .expect("guest fingerprint");
     room
+}
+
+fn attach_input_sockets(
+    room: &mut NetplayRoom,
+    host_input_connection: ConnectionId,
+    guest_input_connection: ConnectionId,
+) {
+    let view = room.view();
+
+    room.attach_input_socket(
+        PlayerIndex::ONE,
+        view.room_epoch,
+        view.session_epoch,
+        "",
+        host_input_connection,
+        std::time::Instant::now(),
+    )
+    .expect("host input socket");
+    room.attach_input_socket(
+        PlayerIndex::TWO,
+        view.room_epoch,
+        view.session_epoch,
+        "",
+        guest_input_connection,
+        std::time::Instant::now(),
+    )
+    .expect("guest input socket");
 }
 
 fn complete_snapshot(room: &mut NetplayRoom, host_connection: ConnectionId) {

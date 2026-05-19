@@ -7,6 +7,7 @@ mod client_message;
 mod client_runtime_state;
 mod compatibility;
 mod descriptor_validation;
+mod input_batch;
 mod input_frame;
 mod link_cable_compatibility;
 mod link_cable_descriptor;
@@ -22,6 +23,9 @@ mod snapshot;
 pub use client_message::ClientMessage;
 pub use client_runtime_state::ClientRuntimeState;
 pub use compatibility::{CompatibilityFingerprint, CompatibilityMismatch};
+pub use input_batch::{
+    InputFrameBatch, InputFrameBatchCodecError, decode_input_frame_batch, encode_input_frame_batch,
+};
 pub use input_frame::{InputFrame, InputFrameLimits};
 pub use link_cable_compatibility::LinkCableCompatibility;
 pub use link_cable_descriptor::{LinkCableDescriptor, LinkCableTransport};

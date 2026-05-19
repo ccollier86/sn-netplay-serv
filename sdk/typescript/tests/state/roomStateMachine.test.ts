@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   HeartbeatTracker,
+  NetplayInputFrameBatcher,
   PauseCoordinator,
   RoomStateMachine,
   type ServerMessage,
@@ -13,6 +14,7 @@ describe("TypeScript netplay room state", () => {
 
     const state = stateMachine.apply({
       eventSeq: 1,
+      inputSocketToken: "input-token",
       resumeToken: "token",
       room: roomView({ eventSeq: 1, roomEpoch: 2, sessionEpoch: 3 }),
       roomEpoch: 2,
@@ -33,6 +35,7 @@ describe("TypeScript netplay room state", () => {
     const stateMachine = new RoomStateMachine();
     stateMachine.apply({
       eventSeq: 1,
+      inputSocketToken: "input-token",
       resumeToken: "token",
       room: roomView({ eventSeq: 1, roomEpoch: 2, sessionEpoch: 3 }),
       roomEpoch: 2,
@@ -58,6 +61,44 @@ describe("TypeScript netplay room state", () => {
     expect(state.latestEventSeq).toBe(10);
     expect(state.room?.status).toBe("checkingCompatibility");
     expect(stateMachine.reconnectTokens.current()?.roomEpoch).toBe(5);
+  });
+
+  test("reset clears room, reconnect, and pause state", () => {
+    const stateMachine = new RoomStateMachine();
+    stateMachine.apply({
+      eventSeq: 1,
+      inputSocketToken: "input-token",
+      resumeToken: "token",
+      room: roomView({ eventSeq: 1, roomEpoch: 2, sessionEpoch: 3 }),
+      roomEpoch: 2,
+      sessionEpoch: 3,
+      type: "roomJoined",
+      yourPlayerIndex: 0,
+    });
+    stateMachine.apply({
+      eventSeq: 2,
+      pause: {
+        acknowledgedPlayerIndexes: [],
+        holders: [],
+        pauseAtFrame: 50,
+        pausedAtFrame: null,
+        reason: "menu",
+        requestedByPlayerIndex: 0,
+        sequence: 1,
+        state: "pausing",
+      },
+      room: roomView({ eventSeq: 2, roomEpoch: 2, sessionEpoch: 3 }),
+      roomEpoch: 2,
+      sessionEpoch: 3,
+      type: "sessionPauseScheduled",
+    });
+
+    stateMachine.reset();
+
+    expect(stateMachine.state.room).toBeNull();
+    expect(stateMachine.state.assignedPlayerIndex).toBeNull();
+    expect(stateMachine.pause.currentPause).toBeNull();
+    expect(stateMachine.reconnectTokens.current()).toBeNull();
   });
 
   test("heartbeat tracker reports stale and recovery timeout", () => {
@@ -136,5 +177,28 @@ describe("TypeScript netplay room state", () => {
       kind: "relayError",
       message: "Snapshot payload is invalid.",
     });
+  });
+
+  test("input batcher rejects frames for the wrong player", () => {
+    const batcher = new NetplayInputFrameBatcher({
+      flush: () => {
+        throw new Error("Unexpected input batch flush.");
+      },
+    });
+
+    expect(() =>
+      batcher.enqueue(
+        {
+          playerIndex: 0,
+          roomEpoch: 2,
+          sessionEpoch: 3,
+        },
+        {
+          frame: 12,
+          payload: [1],
+          playerIndex: 1,
+        },
+      ),
+    ).toThrow("Netplay input frame player does not match batch context.");
   });
 });

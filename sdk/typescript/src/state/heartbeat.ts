@@ -15,8 +15,11 @@ export const defaultHeartbeatPolicy: HeartbeatPolicy = {
 
 export class HeartbeatTracker {
   private lastAckMs: number | null = null;
+  private readonly policy: HeartbeatPolicy;
 
-  public constructor(private readonly policy: HeartbeatPolicy = defaultHeartbeatPolicy) {}
+  public constructor(policy: HeartbeatPolicy = defaultHeartbeatPolicy) {
+    this.policy = policy;
+  }
 
   public markAck(message: Extract<ServerMessage, { readonly type: "heartbeatAck" }>, nowMs: number): void {
     void message;

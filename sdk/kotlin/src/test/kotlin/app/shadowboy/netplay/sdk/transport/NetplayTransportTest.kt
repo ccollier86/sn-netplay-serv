@@ -37,7 +37,7 @@ class NetplayTransportTest {
         assertEquals(HttpMethod.Post, request.method)
         assertEquals("/v1/rooms", request.pathAndQuery)
         assertEquals("signed", request.headers["Authorization"])
-        assertTrue(requireNotNull(request.body).contains("\"desktopProtocolVersion\":3"))
+        assertTrue(requireNotNull(request.body).contains("\"desktopProtocolVersion\":4"))
         assertEquals(request.pathAndQuery, auth.lastPath)
         assertEquals(request.body, auth.lastBody)
     }
@@ -58,7 +58,29 @@ class NetplayTransportTest {
         )
 
         assertEquals(
-            "/v1/ws?inviteCode=AB%20CD&protocolVersion=3&playerIndex=0&roomEpoch=4&resumeToken=resume%20token%2F%2B",
+            "/v1/ws?inviteCode=AB%20CD&protocolVersion=4&playerIndex=0&roomEpoch=4&resumeToken=resume%20token%2F%2B",
+            request.pathAndQuery,
+        )
+        assertEquals(request.pathAndQuery, auth.lastPath)
+    }
+
+    @Test
+    fun `input websocket path includes token and session epoch`() = runTest {
+        val auth = CapturingAuthHeadersProvider()
+        val endpoint = NetplayWebSocketEndpoint(auth)
+
+        val request = endpoint.inputJoinRequest(
+            NetplayInputWebSocketJoinOptions(
+                inviteCode = "AB CD",
+                playerIndex = 1,
+                roomEpoch = 4,
+                sessionEpoch = 7,
+                inputSocketToken = "input token/+",
+            ),
+        )
+
+        assertEquals(
+            "/v1/ws/input?inviteCode=AB%20CD&protocolVersion=4&playerIndex=1&roomEpoch=4&sessionEpoch=7&inputSocketToken=input%20token%2F%2B",
             request.pathAndQuery,
         )
         assertEquals(request.pathAndQuery, auth.lastPath)

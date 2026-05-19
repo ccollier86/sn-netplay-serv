@@ -3,8 +3,8 @@ package app.shadowboy.netplay.sdk
 import app.shadowboy.netplay.sdk.state.ReconnectTicket
 import java.net.URLEncoder
 
-public const val NETPLAY_PROTOCOL_VERSION: Int = 3
-public const val MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION: Int = 3
+public const val NETPLAY_PROTOCOL_VERSION: Int = 4
+public const val MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION: Int = 4
 
 public object NetplayPaths {
     public const val CREATE_ROOM: String = "/v1/rooms"
@@ -28,6 +28,20 @@ public object NetplayPaths {
             "&roomEpoch=${reconnect.roomEpoch}" +
             "&resumeToken=${encode(reconnect.resumeToken)}"
     }
+
+    public fun websocketInputJoin(
+        inviteCode: String,
+        playerIndex: Int,
+        roomEpoch: Long,
+        sessionEpoch: Long,
+        inputSocketToken: String,
+    ): String =
+        "/v1/ws/input?inviteCode=${encode(inviteCode.trim())}" +
+            "&protocolVersion=$NETPLAY_PROTOCOL_VERSION" +
+            "&playerIndex=$playerIndex" +
+            "&roomEpoch=$roomEpoch" +
+            "&sessionEpoch=$sessionEpoch" +
+            "&inputSocketToken=${encode(inputSocketToken)}"
 
     private fun encode(value: String): String =
         URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")

@@ -6,8 +6,9 @@
 use super::stored_room::StoredRoom;
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    ClientRuntimeState, CompatibilityFingerprint, InputFrame, LinkCableCompatibility,
-    LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason, SnapshotChunk, SnapshotManifest,
+    ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
+    LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason,
+    SnapshotChunk, SnapshotManifest,
 };
 use crate::rooms::{
     Clock, ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeTokenGenerator,
@@ -171,6 +172,35 @@ impl RoomRegistry for InMemoryRoomRegistry {
         self.disconnect_impl(invite_code, connection_id).await
     }
 
+    async fn connect_input_socket(
+        &self,
+        invite_code: InviteCode,
+        player_index: PlayerIndex,
+        room_epoch: u64,
+        session_epoch: u64,
+        input_socket_token: String,
+        connection_id: ConnectionId,
+    ) -> Result<RoomView, RoomError> {
+        self.connect_input_socket_impl(
+            invite_code,
+            player_index,
+            room_epoch,
+            session_epoch,
+            input_socket_token,
+            connection_id,
+        )
+        .await
+    }
+
+    async fn disconnect_input_socket(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<RoomView, RoomError> {
+        self.disconnect_input_socket_impl(invite_code, connection_id)
+            .await
+    }
+
     async fn subscribe(&self, invite_code: InviteCode) -> Result<RoomEventReceiver, RoomError> {
         let rooms = self.invite_codes.read().await;
         let stored_room = rooms
@@ -235,6 +265,16 @@ impl RoomRegistry for InMemoryRoomRegistry {
         input: InputFrame,
     ) -> Result<(), RoomError> {
         self.relay_input_frame_impl(invite_code, connection_id, input)
+            .await
+    }
+
+    async fn relay_input_frame_batch(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        batch: InputFrameBatch,
+    ) -> Result<(), RoomError> {
+        self.relay_input_frame_batch_impl(invite_code, connection_id, batch)
             .await
     }
 

@@ -87,6 +87,8 @@ pub struct PlayerSlot {
     pub subject_key: Option<String>,
     /// Active socket connection occupying the slot.
     pub connection_id: Option<ConnectionId>,
+    /// Active binary input socket for this slot.
+    pub input_connection_id: Option<ConnectionId>,
     /// Optional name shown in Desktop room UI.
     pub display_name: Option<String>,
     /// Current lifecycle status.
@@ -95,6 +97,8 @@ pub struct PlayerSlot {
     pub runtime_state: PlayerRuntimeState,
     /// Hash of the per-player token used to reclaim this slot.
     pub resume_token_hash: Option<ResumeTokenHash>,
+    /// Hash of the token used to attach the binary input socket.
+    pub input_socket_token_hash: Option<ResumeTokenHash>,
     /// Last heartbeat time seen by the relay.
     pub last_seen_at: Option<Instant>,
     /// Deadline for reclaiming this slot after transport loss.
@@ -111,10 +115,12 @@ impl PlayerSlot {
             role: PlayerRole::Guest,
             subject_key: None,
             connection_id: None,
+            input_connection_id: None,
             display_name: None,
             status: PlayerStatus::Empty,
             runtime_state: PlayerRuntimeState::Empty,
             resume_token_hash: None,
+            input_socket_token_hash: None,
             last_seen_at: None,
             reconnect_deadline: None,
             reconnect_room_epoch: None,
@@ -126,6 +132,7 @@ impl PlayerSlot {
         license: &VerifiedLicense,
         connection_id: ConnectionId,
         resume_token_hash: ResumeTokenHash,
+        input_socket_token_hash: ResumeTokenHash,
         now: Instant,
     ) -> Self {
         Self {
@@ -133,10 +140,12 @@ impl PlayerSlot {
             role: PlayerRole::Host,
             subject_key: Some(license.identity_key()),
             connection_id: Some(connection_id),
+            input_connection_id: None,
             display_name: None,
             status: PlayerStatus::Connected,
             runtime_state: PlayerRuntimeState::Connected,
             resume_token_hash: Some(resume_token_hash),
+            input_socket_token_hash: Some(input_socket_token_hash),
             last_seen_at: Some(now),
             reconnect_deadline: None,
             reconnect_room_epoch: None,
@@ -149,14 +158,17 @@ impl PlayerSlot {
         license: &VerifiedLicense,
         connection_id: ConnectionId,
         resume_token_hash: ResumeTokenHash,
+        input_socket_token_hash: ResumeTokenHash,
         now: Instant,
     ) {
         self.role = PlayerRole::Guest;
         self.subject_key = Some(license.identity_key());
         self.connection_id = Some(connection_id);
+        self.input_connection_id = None;
         self.status = PlayerStatus::Connected;
         self.runtime_state = PlayerRuntimeState::Connected;
         self.resume_token_hash = Some(resume_token_hash);
+        self.input_socket_token_hash = Some(input_socket_token_hash);
         self.last_seen_at = Some(now);
         self.reconnect_deadline = None;
         self.reconnect_room_epoch = None;

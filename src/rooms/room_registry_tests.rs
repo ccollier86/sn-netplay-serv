@@ -6,8 +6,8 @@
 use super::{InMemoryRoomRegistry, RoomRegistry};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor,
-    SessionPauseReason, SnapshotChunk, SnapshotManifest,
+    CompatibilityFingerprint, InputFrame, InputFrameBatch, NETPLAY_PROTOCOL_VERSION,
+    NetplaySessionDescriptor, SessionPauseReason, SnapshotChunk, SnapshotManifest,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, PlayerRuntimeState, PlayerStatus,
@@ -344,15 +344,22 @@ async fn validated_input_frame_is_broadcast() {
         .await
         .expect("guest ready");
     let mut events = registry.subscribe(invite.clone()).await.expect("events");
+    let room_epoch = room_epoch(&registry, &invite).await;
+    let session_epoch = session_epoch(&registry, &invite).await;
 
     registry
-        .relay_input_frame(
+        .relay_input_frame_batch(
             invite,
             host_connection,
-            InputFrame {
+            InputFrameBatch {
+                room_epoch,
+                session_epoch,
                 player_index: PlayerIndex::ONE,
-                frame: 0,
-                payload: vec![0],
+                frames: vec![InputFrame {
+                    player_index: PlayerIndex::ONE,
+                    frame: 0,
+                    payload: vec![0],
+                }],
             },
         )
         .await
@@ -360,7 +367,10 @@ async fn validated_input_frame_is_broadcast() {
 
     let event = events.recv().await.expect("event");
 
-    assert!(matches!(event, crate::rooms::RoomEvent::InputFrame { .. }));
+    assert!(matches!(
+        event,
+        crate::rooms::RoomEvent::InputFrameBatch { .. }
+    ));
 }
 
 #[tokio::test]
@@ -572,15 +582,20 @@ fn registry() -> InMemoryRoomRegistry {
 
 async fn compatible_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, ConnectionId) {
     let registry = registry();
+    let create_connection = ConnectionId::new();
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let view = registry
-        .create_room(license("host"), host_connection, descriptor())
+        .create_room(license("host"), create_connection, descriptor())
         .await
         .expect("room");
     let invite = InviteCode::parse(view.invite_code).expect("invite");
 
-    registry
+    let host_join = registry
+        .connect_host(invite.clone(), license("host"), host_connection)
+        .await
+        .expect("host");
+    let guest_join = registry
         .connect_guest(invite.clone(), license("guest"), guest_connection)
         .await
         .expect("guest");
@@ -592,8 +607,54 @@ async fn compatible_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, C
         .set_compatibility(invite.clone(), guest_connection, fingerprint("rom"))
         .await
         .expect("guest fingerprint");
+    connect_input_sockets(
+        &registry,
+        &invite,
+        host_connection,
+        &host_join.input_socket_token,
+        guest_connection,
+        &guest_join.input_socket_token,
+    )
+    .await;
 
     (registry, invite, host_connection, guest_connection)
+}
+
+async fn connect_input_sockets(
+    registry: &InMemoryRoomRegistry,
+    invite: &InviteCode,
+    host_connection: ConnectionId,
+    host_token: &str,
+    guest_connection: ConnectionId,
+    guest_token: &str,
+) {
+    let view = registry
+        .room_view(invite.clone())
+        .await
+        .expect("room before input sockets");
+
+    registry
+        .connect_input_socket(
+            invite.clone(),
+            PlayerIndex::ONE,
+            view.room_epoch,
+            view.session_epoch,
+            host_token.to_string(),
+            host_connection,
+        )
+        .await
+        .expect("host input socket");
+    registry
+        .connect_input_socket(
+            invite.clone(),
+            PlayerIndex::TWO,
+            view.room_epoch,
+            view.session_epoch,
+            guest_token.to_string(),
+            guest_connection,
+        )
+        .await
+        .expect("guest input socket");
 }
 
 async fn reconnectable_room() -> (
@@ -630,6 +691,15 @@ async fn reconnectable_room() -> (
         .set_compatibility(invite.clone(), guest_connection, fingerprint("rom"))
         .await
         .expect("guest fingerprint");
+    connect_input_sockets(
+        &registry,
+        &invite,
+        host_connection,
+        &host_join.input_socket_token,
+        guest_connection,
+        &guest_join.input_socket_token,
+    )
+    .await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
         .mark_ready(invite.clone(), host_connection)
@@ -648,6 +718,22 @@ async fn reconnectable_room() -> (
         host_join.resume_token,
         guest_join.resume_token,
     )
+}
+
+async fn room_epoch(registry: &InMemoryRoomRegistry, invite: &InviteCode) -> u64 {
+    registry
+        .room_view(invite.clone())
+        .await
+        .expect("room")
+        .room_epoch
+}
+
+async fn session_epoch(registry: &InMemoryRoomRegistry, invite: &InviteCode) -> u64 {
+    registry
+        .room_view(invite.clone())
+        .await
+        .expect("room")
+        .session_epoch
 }
 
 async fn complete_snapshot(

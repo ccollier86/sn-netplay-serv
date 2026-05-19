@@ -11,8 +11,20 @@ export interface NetplayWebSocketRequest {
   readonly headers: Readonly<Record<string, string>>;
 }
 
+export interface NetplayInputWebSocketJoinOptions {
+  readonly inputSocketToken: string;
+  readonly inviteCode: string;
+  readonly playerIndex: number;
+  readonly roomEpoch: number;
+  readonly sessionEpoch: number;
+}
+
 export class NetplayWebSocketEndpoint {
-  public constructor(private readonly authHeadersProvider: NetplayAuthHeadersProvider) {}
+  private readonly authHeadersProvider: NetplayAuthHeadersProvider;
+
+  public constructor(authHeadersProvider: NetplayAuthHeadersProvider) {
+    this.authHeadersProvider = authHeadersProvider;
+  }
 
   public async joinRequest({
     inviteCode,
@@ -28,6 +40,17 @@ export class NetplayWebSocketEndpoint {
       reconnect: reconnectTicket,
       role,
     });
+
+    return {
+      headers: await this.authHeadersProvider.headersFor("GET", pathAndQuery, null),
+      pathAndQuery,
+    };
+  }
+
+  public async inputJoinRequest(
+    options: NetplayInputWebSocketJoinOptions,
+  ): Promise<NetplayWebSocketRequest> {
+    const pathAndQuery = netplayPaths.websocketInputJoin(options);
 
     return {
       headers: await this.authHeadersProvider.headersFor("GET", pathAndQuery, null),

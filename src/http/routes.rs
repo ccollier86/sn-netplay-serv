@@ -15,7 +15,10 @@ use crate::protocol::{NetplaySessionDescriptor, validate_client_protocol_version
 use crate::rate_limit::RateLimitAction;
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, RoomView};
 use crate::rooms::{RoomDebugEvent, RoomRegistrySnapshot};
-use crate::transport::{WebSocketJoinRequest, WebSocketJoinRole, handle_websocket_session};
+use crate::transport::{
+    WebSocketInputJoinRequest, WebSocketJoinRequest, WebSocketJoinRole,
+    handle_websocket_input_session, handle_websocket_session,
+};
 use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::ws::WebSocketUpgrade;
@@ -37,6 +40,7 @@ pub fn build_router(services: AppServices) -> Router {
         .route("/v1/rooms", post(create_room))
         .route("/v1/rooms/{invite_code}/status", get(room_status))
         .route("/v1/ws", get(websocket_room))
+        .route("/v1/ws/input", get(websocket_input_room))
         .route("/internal/metrics", get(internal_metrics))
         .route("/internal/rooms", get(internal_rooms))
         .route("/internal/rooms/{invite_code}", get(internal_room))
@@ -148,6 +152,56 @@ pub async fn websocket_room(
         .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
         .max_frame_size(MAX_WEBSOCKET_FRAME_BYTES)
         .on_upgrade(move |socket| handle_websocket_session(socket, services, join_request)))
+}
+
+/// Upgrades an authenticated ShadowBoy client into a binary input socket.
+pub async fn websocket_input_room(
+    websocket: WebSocketUpgrade,
+    State(services): State<AppServices>,
+    Query(query): Query<WebSocketInputRoomQuery>,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Result<Response, HttpError> {
+    enforce_rate_limit(&services, RateLimitAction::WebSocketJoin, &headers)?;
+    let path_and_query = uri
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or(uri.path());
+    let auth = client_auth_proof(&headers, "GET", path_and_query, &[])?;
+    let license = match services
+        .license_authority
+        .verify_client_access(auth, NETPLAY_FEATURE)
+        .await
+    {
+        Ok(license) => license,
+        Err(error) => {
+            services.metrics.record_auth_rejected();
+            return Err(error.into());
+        }
+    };
+    validate_client_protocol_version(query.protocol_version.ok_or(HttpError::InvalidRequest {
+        code: "missingProtocolVersion",
+        message: "Netplay protocol version is required.",
+    })?)?;
+    let invite_code = InviteCode::parse(&query.invite_code)?;
+    let player_index = PlayerIndex::new(query.player_index, crate::limits::MVP_ROOM_CAPACITY)
+        .ok_or(HttpError::InvalidRequest {
+            code: "invalidPlayerIndex",
+            message: "Input socket playerIndex is invalid.",
+        })?;
+    let join_request = WebSocketInputJoinRequest {
+        input_socket_token: query.input_socket_token,
+        invite_code,
+        license,
+        player_index,
+        room_epoch: query.room_epoch,
+        session_epoch: query.session_epoch,
+    };
+
+    Ok(websocket
+        .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
+        .max_frame_size(MAX_WEBSOCKET_FRAME_BYTES)
+        .on_upgrade(move |socket| handle_websocket_input_session(socket, services, join_request)))
 }
 
 fn parse_create_room_request(body: &[u8]) -> Result<CreateRoomRequest, HttpError> {
@@ -332,6 +386,17 @@ pub struct WebSocketRoomQuery {
     room_epoch: Option<u64>,
     #[serde(default)]
     resume_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSocketInputRoomQuery {
+    invite_code: String,
+    protocol_version: Option<u16>,
+    player_index: u8,
+    room_epoch: u64,
+    session_epoch: u64,
+    input_socket_token: String,
 }
 
 struct ReconnectQuery {

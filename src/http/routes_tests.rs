@@ -145,7 +145,7 @@ async fn create_room_returns_invite_descriptor_and_protocol() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(value["room"]["inviteCode"], "AB23-CD");
-    assert_eq!(value["room"]["protocol"]["protocolVersion"], 3);
+    assert_eq!(value["room"]["protocol"]["protocolVersion"], 4);
     assert_eq!(
         value["room"]["session"]["game"]["romSha256"],
         "a".repeat(64)
@@ -338,7 +338,7 @@ async fn websocket_join_rejects_partial_reconnect_query() {
     let response = app()
         .oneshot(
             Request::builder()
-                .uri("/v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=3&playerIndex=1")
+                .uri("/v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=4&playerIndex=1")
                 .header("authorization", "Bearer valid")
                 .header("x-install-id", "install-1")
                 .body(Body::empty())
@@ -416,7 +416,7 @@ fn create_room_body() -> String {
 
 fn create_room_value() -> Value {
     json!({
-        "desktopProtocolVersion": 3,
+        "desktopProtocolVersion": 4,
         "session": {
             "hostAppVersion": "0.3.0",
             "game": {

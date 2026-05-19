@@ -51,6 +51,10 @@ pub struct PlayerSlotView {
     pub runtime_state: crate::rooms::PlayerRuntimeState,
     /// Whether a verified player currently occupies the slot.
     pub occupied: bool,
+    /// Whether the JSON control socket is connected.
+    pub control_connected: bool,
+    /// Whether the binary input socket is connected.
+    pub input_connected: bool,
     /// Milliseconds since this slot was last seen by heartbeat or socket IO.
     pub last_seen_age_ms: Option<u128>,
     /// Milliseconds remaining before reconnect grace expires.

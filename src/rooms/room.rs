@@ -54,6 +54,7 @@ impl NetplayRoom {
             invite_code,
             session,
             String::new(),
+            String::new(),
             Instant::now(),
         )
     }
@@ -65,6 +66,7 @@ impl NetplayRoom {
         invite_code: InviteCode,
         session: NetplaySessionDescriptor,
         host_resume_token_hash: ResumeTokenHash,
+        host_input_socket_token_hash: ResumeTokenHash,
         now: Instant,
     ) -> Self {
         let max_players = MVP_ROOM_CAPACITY;
@@ -73,6 +75,7 @@ impl NetplayRoom {
             &host,
             host_connection,
             host_resume_token_hash,
+            host_input_socket_token_hash,
             now,
         ));
 
@@ -191,6 +194,12 @@ impl NetplayRoom {
             return Err(RoomError::RoomNotReady);
         }
 
+        if self.session.mode == NetplaySessionMode::ControllerNetplay
+            && !self.connected_players_have_input_sockets()
+        {
+            return Err(RoomError::RoomNotReady);
+        }
+
         let player_index = self
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
@@ -281,6 +290,8 @@ impl NetplayRoom {
                     status: slot.status,
                     runtime_state: slot.runtime_state,
                     occupied: !slot.is_empty(),
+                    control_connected: slot.connection_id.is_some(),
+                    input_connected: slot.input_connection_id.is_some(),
                     last_seen_age_ms: slot
                         .last_seen_at
                         .map(|last_seen| now.saturating_duration_since(last_seen).as_millis()),
@@ -301,6 +312,18 @@ impl NetplayRoom {
                 .all(|player_index| self.compatibility.contains_key(player_index))
     }
 
+    fn connected_players_have_input_sockets(&self) -> bool {
+        let connected_players = self.connected_player_indices();
+
+        connected_players.len() == usize::from(self.max_players)
+            && connected_players.iter().all(|player_index| {
+                self.players
+                    .iter()
+                    .find(|slot| slot.player_index == *player_index)
+                    .is_some_and(|slot| slot.input_connection_id.is_some())
+            })
+    }
+
     pub(super) fn player_index_for_connection(
         &self,
         connection_id: ConnectionId,
@@ -308,6 +331,16 @@ impl NetplayRoom {
         self.players
             .iter()
             .find(|slot| slot.connection_id == Some(connection_id))
+            .map(|slot| slot.player_index)
+    }
+
+    pub(super) fn player_index_for_input_connection(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Option<PlayerIndex> {
+        self.players
+            .iter()
+            .find(|slot| slot.input_connection_id == Some(connection_id))
             .map(|slot| slot.player_index)
     }
 

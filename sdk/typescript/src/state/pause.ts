@@ -6,8 +6,11 @@ export type RequestIdFactory = () => string;
 
 export class PauseCoordinator {
   public currentPause: SessionPauseView | null = null;
+  private readonly requestIdFactory: RequestIdFactory;
 
-  public constructor(private readonly requestIdFactory: RequestIdFactory = createRequestId) {}
+  public constructor(requestIdFactory: RequestIdFactory = createRequestId) {
+    this.requestIdFactory = requestIdFactory;
+  }
 
   public apply(pause: SessionPauseView): void {
     this.currentPause = pause;
@@ -17,6 +20,10 @@ export class PauseCoordinator {
     if (this.currentPause?.sequence === sequence) {
       this.currentPause = null;
     }
+  }
+
+  public reset(): void {
+    this.currentPause = null;
   }
 
   public requestPause({

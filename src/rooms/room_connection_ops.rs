@@ -19,7 +19,13 @@ impl NetplayRoom {
         license: VerifiedLicense,
         connection_id: ConnectionId,
     ) -> Result<PlayerIndex, RoomError> {
-        self.join_guest_with_resume(license, connection_id, String::new(), Instant::now())
+        self.join_guest_with_resume(
+            license,
+            connection_id,
+            String::new(),
+            String::new(),
+            Instant::now(),
+        )
     }
 
     /// Adds a guest and stores the resume-token hash for future reconnects.
@@ -28,6 +34,7 @@ impl NetplayRoom {
         license: VerifiedLicense,
         connection_id: ConnectionId,
         resume_token_hash: ResumeTokenHash,
+        input_socket_token_hash: ResumeTokenHash,
         now: Instant,
     ) -> Result<PlayerIndex, RoomError> {
         if self.status == RoomStatus::Closed {
@@ -40,7 +47,13 @@ impl NetplayRoom {
                 .iter_mut()
                 .find(|candidate| candidate.is_empty())
                 .ok_or(RoomError::RoomFull)?;
-            slot.occupy_guest(&license, connection_id, resume_token_hash, now);
+            slot.occupy_guest(
+                &license,
+                connection_id,
+                resume_token_hash,
+                input_socket_token_hash,
+                now,
+            );
             slot.player_index
         };
         self.reset_sync_for_checking_compatibility();
@@ -54,7 +67,13 @@ impl NetplayRoom {
         license: VerifiedLicense,
         connection_id: ConnectionId,
     ) -> Result<PlayerIndex, RoomError> {
-        self.attach_host_with_resume(license, connection_id, String::new(), Instant::now())
+        self.attach_host_with_resume(
+            license,
+            connection_id,
+            String::new(),
+            String::new(),
+            Instant::now(),
+        )
     }
 
     /// Attaches a host socket and stores a fresh resume-token hash.
@@ -63,6 +82,7 @@ impl NetplayRoom {
         license: VerifiedLicense,
         connection_id: ConnectionId,
         resume_token_hash: ResumeTokenHash,
+        input_socket_token_hash: ResumeTokenHash,
         now: Instant,
     ) -> Result<PlayerIndex, RoomError> {
         if self.status == RoomStatus::Closed {
@@ -84,9 +104,11 @@ impl NetplayRoom {
         }
 
         slot.connection_id = Some(connection_id);
+        slot.input_connection_id = None;
         slot.status = PlayerStatus::Connected;
         slot.runtime_state = PlayerRuntimeState::Connected;
         slot.resume_token_hash = Some(resume_token_hash);
+        slot.input_socket_token_hash = Some(input_socket_token_hash);
         slot.reconnect_deadline = None;
         slot.reconnect_room_epoch = None;
         slot.last_seen_at = Some(now);
@@ -126,6 +148,7 @@ impl NetplayRoom {
         });
 
         slot.connection_id = None;
+        slot.input_connection_id = None;
         slot.last_seen_at = Some(now);
         self.compatibility.remove(&player_index);
         self.ready_players.remove(&player_index);
@@ -153,6 +176,7 @@ impl NetplayRoom {
         &mut self,
         player_index: PlayerIndex,
         resume_token_hash: &str,
+        input_socket_token_hash: ResumeTokenHash,
         room_epoch: u64,
         connection_id: ConnectionId,
         now: Instant,
@@ -185,8 +209,10 @@ impl NetplayRoom {
         }
 
         slot.connection_id = Some(connection_id);
+        slot.input_connection_id = None;
         slot.status = PlayerStatus::Connected;
         slot.runtime_state = PlayerRuntimeState::Reconnecting;
+        slot.input_socket_token_hash = Some(input_socket_token_hash);
         slot.last_seen_at = Some(now);
         slot.reconnect_deadline = None;
         slot.reconnect_room_epoch = None;
@@ -255,6 +281,7 @@ impl NetplayRoom {
                 .find(|slot| slot.player_index == player_index)
             {
                 slot.connection_id = None;
+                slot.input_connection_id = None;
                 slot.last_seen_at = Some(now);
                 slot.status = PlayerStatus::Reconnecting;
                 slot.runtime_state = PlayerRuntimeState::Reconnecting;
@@ -362,12 +389,14 @@ impl NetplayRoom {
         {
             slot.reconnect_deadline = None;
             slot.reconnect_room_epoch = None;
+            slot.input_connection_id = None;
             slot.runtime_state = PlayerRuntimeState::Disconnected;
             slot.status = if is_host {
                 PlayerStatus::Disconnected
             } else {
                 slot.subject_key = None;
                 slot.resume_token_hash = None;
+                slot.input_socket_token_hash = None;
                 PlayerStatus::Empty
             };
         }
@@ -378,7 +407,7 @@ impl NetplayRoom {
         }
     }
 
-    fn enter_recovery_state(&mut self, reconnect_room_epoch: u64) {
+    pub(super) fn enter_recovery_state(&mut self, reconnect_room_epoch: u64) {
         self.status = RoomStatus::Recovering;
         self.reset_sync_state();
         self.bump_room_epoch();

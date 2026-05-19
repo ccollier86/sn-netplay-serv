@@ -87,6 +87,7 @@ pub async fn handle_websocket_session(
             room_epoch: join.room.room_epoch,
             session_epoch: join.room.session_epoch,
             your_player_index: join.player_index.zero_based(),
+            input_socket_token: join.input_socket_token,
             resume_token: join.resume_token,
             room: join.room,
         },
@@ -218,7 +219,9 @@ async fn handle_room_event(
             resume_at_frame,
             room,
         },
-        Ok(RoomEvent::InputFrame { input, .. }) => ServerMessage::InputFrame { input },
+        Ok(RoomEvent::InputFrame { .. }) | Ok(RoomEvent::InputFrameBatch { .. }) => {
+            return true;
+        }
         Ok(RoomEvent::LinkCablePacket { source, packet }) => {
             if source == connection_id {
                 return true;

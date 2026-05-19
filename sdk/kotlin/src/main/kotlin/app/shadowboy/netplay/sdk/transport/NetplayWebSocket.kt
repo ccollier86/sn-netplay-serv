@@ -16,6 +16,14 @@ public data class NetplayWebSocketRequest(
     public val headers: Map<String, String>,
 )
 
+public data class NetplayInputWebSocketJoinOptions(
+    public val inviteCode: String,
+    public val playerIndex: Int,
+    public val roomEpoch: Long,
+    public val sessionEpoch: Long,
+    public val inputSocketToken: String,
+)
+
 public class NetplayWebSocketEndpoint(
     private val authHeadersProvider: NetplayAuthHeadersProvider,
 ) {
@@ -28,6 +36,23 @@ public class NetplayWebSocketEndpoint(
             inviteCode = inviteCode,
             role = role.wireValue,
             reconnect = reconnectTicket,
+        )
+
+        return NetplayWebSocketRequest(
+            pathAndQuery = path,
+            headers = authHeadersProvider.headersFor(HttpMethod.Get, path, null),
+        )
+    }
+
+    public suspend fun inputJoinRequest(
+        options: NetplayInputWebSocketJoinOptions,
+    ): NetplayWebSocketRequest {
+        val path = NetplayPaths.websocketInputJoin(
+            inviteCode = options.inviteCode,
+            playerIndex = options.playerIndex,
+            roomEpoch = options.roomEpoch,
+            sessionEpoch = options.sessionEpoch,
+            inputSocketToken = options.inputSocketToken,
         )
 
         return NetplayWebSocketRequest(

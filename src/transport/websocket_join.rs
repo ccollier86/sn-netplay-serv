@@ -34,3 +34,20 @@ pub struct WebSocketJoinRequest {
     /// Verified Desktop install/license identity.
     pub license: VerifiedLicense,
 }
+
+/// Authenticated binary input WebSocket join request.
+#[derive(Clone, Debug)]
+pub struct WebSocketInputJoinRequest {
+    /// Room invite code.
+    pub invite_code: InviteCode,
+    /// Player slot attaching this input socket.
+    pub player_index: PlayerIndex,
+    /// Room epoch observed by the client.
+    pub room_epoch: u64,
+    /// Session epoch observed by the client.
+    pub session_epoch: u64,
+    /// Opaque input socket token returned by the control socket.
+    pub input_socket_token: String,
+    /// Verified Desktop install/license identity.
+    pub license: VerifiedLicense,
+}

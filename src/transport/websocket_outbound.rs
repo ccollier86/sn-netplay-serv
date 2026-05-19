@@ -22,6 +22,14 @@ pub async fn send_server_message(
     sender.send(Message::Text(payload.into())).await
 }
 
+/// Sends a binary WebSocket payload.
+pub async fn send_binary_message(
+    sender: &mut SocketSender,
+    payload: Vec<u8>,
+) -> Result<(), axum::Error> {
+    sender.send(Message::Binary(payload.into())).await
+}
+
 /// Sends a stable protocol error.
 pub async fn send_static_error(
     sender: &mut SocketSender,

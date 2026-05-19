@@ -27,9 +27,28 @@ describe("TypeScript netplay transport helpers", () => {
     expect(transport.lastRequest?.method).toBe("POST");
     expect(transport.lastRequest?.pathAndQuery).toBe("/v1/rooms");
     expect(transport.lastRequest?.headers.Authorization).toBe("signed");
-    expect(transport.lastRequest?.body).toContain('"desktopProtocolVersion":3');
+    expect(transport.lastRequest?.body).toContain('"desktopProtocolVersion":4');
     expect(auth.lastPath).toBe("/v1/rooms");
     expect(auth.lastBody).toBe(transport.lastRequest?.body);
+  });
+
+  test("input WebSocket path includes token and session epoch", async () => {
+    const auth = new CapturingAuthHeadersProvider();
+    const endpoint = new NetplayWebSocketEndpoint(auth);
+
+    const request = await endpoint.inputJoinRequest({
+      inputSocketToken: "input token/+",
+      inviteCode: "AB CD",
+      playerIndex: 1,
+      roomEpoch: 4,
+      sessionEpoch: 7,
+    });
+
+    expect(request.pathAndQuery).toBe(
+      "/v1/ws/input?inviteCode=AB%20CD&protocolVersion=4" +
+        "&playerIndex=1&roomEpoch=4&sessionEpoch=7&inputSocketToken=input%20token%2F%2B",
+    );
+    expect(auth.lastPath).toBe(request.pathAndQuery);
   });
 
   test("WebSocket reconnect path includes escaped token and epoch", async () => {
@@ -47,7 +66,7 @@ describe("TypeScript netplay transport helpers", () => {
     });
 
     expect(request.pathAndQuery).toBe(
-      "/v1/ws?inviteCode=AB%20CD&protocolVersion=3" +
+      "/v1/ws?inviteCode=AB%20CD&protocolVersion=4" +
         "&playerIndex=0&roomEpoch=4&resumeToken=resume%20token%2F%2B",
     );
     expect(auth.lastPath).toBe(request.pathAndQuery);

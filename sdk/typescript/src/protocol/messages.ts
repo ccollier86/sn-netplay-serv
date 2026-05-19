@@ -45,6 +45,7 @@ export type ServerMessage =
   | RoomEpochMessage<"roomJoined"> & {
       readonly yourPlayerIndex: number;
       readonly resumeToken: string;
+      readonly inputSocketToken: string;
       readonly room: RoomView;
     }
   | RoomEpochMessage<"roomStateChanged"> & { readonly room: RoomView }

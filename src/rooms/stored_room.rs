@@ -5,7 +5,7 @@
 //! messages or apply room-domain rules.
 
 use crate::protocol::{
-    InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
+    InputFrame, InputFrameBatch, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
 };
 use crate::rooms::{
     ConnectionId, NetplayRoom, RoomDebugEvent, RoomDebugEventLog, RoomEvent, RoomView,
@@ -168,8 +168,21 @@ impl StoredRoom {
         source: ConnectionId,
         input: InputFrame,
     ) {
-        self.record_event(now, "inputFrame", "input frame relayed");
+        let _ = now;
         let _ = self.events.send(RoomEvent::InputFrame { source, input });
+    }
+
+    /// Emits validated controller input frames without recording debug spam.
+    pub(super) fn emit_input_frame_batch(
+        &mut self,
+        now: Instant,
+        source: ConnectionId,
+        batch: InputFrameBatch,
+    ) {
+        let _ = now;
+        let _ = self
+            .events
+            .send(RoomEvent::InputFrameBatch { batch, source });
     }
 
     /// Emits a validated link-cable packet.

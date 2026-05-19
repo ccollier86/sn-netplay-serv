@@ -6,8 +6,9 @@
 
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    ClientRuntimeState, CompatibilityFingerprint, InputFrame, LinkCableCompatibility,
-    LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason, SnapshotChunk, SnapshotManifest,
+    ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
+    LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason,
+    SnapshotChunk, SnapshotManifest,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, RoomDebugEvent, RoomError, RoomEvent, RoomJoin,
@@ -70,6 +71,24 @@ pub trait RoomRegistry: Send + Sync {
         connection_id: ConnectionId,
     ) -> Result<RoomView, RoomError>;
 
+    /// Attaches a binary input socket to an occupied player slot.
+    async fn connect_input_socket(
+        &self,
+        invite_code: InviteCode,
+        player_index: PlayerIndex,
+        room_epoch: u64,
+        session_epoch: u64,
+        input_socket_token: String,
+        connection_id: ConnectionId,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Detaches a binary input socket and starts recovery when needed.
+    async fn disconnect_input_socket(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<RoomView, RoomError>;
+
     /// Subscribes to domain events for one active room.
     async fn subscribe(&self, invite_code: InviteCode) -> Result<RoomEventReceiver, RoomError>;
 
@@ -118,6 +137,14 @@ pub trait RoomRegistry: Send + Sync {
         invite_code: InviteCode,
         connection_id: ConnectionId,
         input: InputFrame,
+    ) -> Result<(), RoomError>;
+
+    /// Validates and broadcasts a binary batch of player input frames.
+    async fn relay_input_frame_batch(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        batch: InputFrameBatch,
     ) -> Result<(), RoomError>;
 
     /// Validates and broadcasts one virtual link-cable packet.

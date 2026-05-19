@@ -19,6 +19,7 @@ mod room_controller_netplay_ops;
 mod room_debug_event;
 mod room_event;
 mod room_expiration_task;
+mod room_input_connection_ops;
 mod room_join;
 mod room_link_cable_ops;
 mod room_registry;

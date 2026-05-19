@@ -21,6 +21,12 @@ pub const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
 /// Maximum accepted WebSocket frame size.
 pub const MAX_WEBSOCKET_FRAME_BYTES: usize = 2 * 1024 * 1024;
 
+/// Maximum controller input frames accepted in one binary batch.
+pub const MAX_INPUT_BATCH_FRAMES: usize = 4;
+
+/// Maximum accepted binary input-batch message size.
+pub const MAX_INPUT_BATCH_BYTES: usize = 8 * 1024;
+
 /// Maximum size for one snapshot chunk relayed through the server.
 pub const MAX_SNAPSHOT_CHUNK_BYTES: usize = 256 * 1024;
 

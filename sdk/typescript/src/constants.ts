@@ -1,7 +1,7 @@
 import type { ReconnectTicket } from "./state/reconnect.ts";
 
-export const netplayProtocolVersion = 3;
-export const minSupportedNetplayProtocolVersion = 3;
+export const netplayProtocolVersion = 4;
+export const minSupportedNetplayProtocolVersion = 4;
 
 export const netplayPaths = {
   createRoom: "/v1/rooms",
@@ -31,6 +31,29 @@ export const netplayPaths = {
       `&playerIndex=${reconnect.playerIndex}` +
       `&roomEpoch=${reconnect.roomEpoch}` +
       `&resumeToken=${encodeURIComponent(reconnect.resumeToken)}`
+    );
+  },
+
+  websocketInputJoin({
+    inputSocketToken,
+    inviteCode,
+    playerIndex,
+    roomEpoch,
+    sessionEpoch,
+  }: {
+    readonly inputSocketToken: string;
+    readonly inviteCode: string;
+    readonly playerIndex: number;
+    readonly roomEpoch: number;
+    readonly sessionEpoch: number;
+  }): string {
+    return (
+      `/v1/ws/input?inviteCode=${encodeURIComponent(inviteCode.trim())}` +
+      `&protocolVersion=${netplayProtocolVersion}` +
+      `&playerIndex=${playerIndex}` +
+      `&roomEpoch=${roomEpoch}` +
+      `&sessionEpoch=${sessionEpoch}` +
+      `&inputSocketToken=${encodeURIComponent(inputSocketToken)}`
     );
   },
 } as const;

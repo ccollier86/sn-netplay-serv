@@ -10,7 +10,8 @@ input sampling, and UI.
 ## Responsibilities
 
 - Typed REST requests and responses for room creation and room status.
-- Typed WebSocket client/server messages for protocol v3.
+- Typed WebSocket client/server messages for protocol v4.
+- Binary input-socket batch encoding/decoding for controller hot-path traffic.
 - JSON encoding/decoding with server-compatible field names and message tags.
 - Reconnect token state and reconnect WebSocket query construction.
 - Heartbeat state, stale detection, and recovery timeout detection.
@@ -32,5 +33,5 @@ input sampling, and UI.
 Until this repo has its own Gradle wrapper, verify with:
 
 ```bash
-JAVA_HOME=/home/catalyst-2/.local/jdk-21 /home/catalyst-2/projects/gba-emulator/gradlew -p sdk/kotlin test
+JAVA_HOME=/home/catalyst-2/.local/jdk-21 /home/catalyst-2/projects/gba-emulator/gradlew -p /home/catalyst-2/projects/sb-desktop/sb-netplay-serv/sdk/kotlin test
 ```

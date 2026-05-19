@@ -5,6 +5,7 @@ import {
   firstCompatibilityMismatch,
   linkCableCompatibilityMatchesPeer,
   validateNetplaySessionDescriptor,
+  NetplayInputBatchCodec,
 } from "../../src/index.ts";
 import {
   compatibilityFingerprint,
@@ -80,7 +81,7 @@ describe("TypeScript netplay protocol codec", () => {
   test("compares link cable peers by protocol runtime and system data", () => {
     const left = {
       linkProtocol: "gba-link-cable-v1",
-      protocolVersion: 3,
+      protocolVersion: 4,
       runtimeProfile: "mgba-link-v1",
       systemDataHash: null,
       systemFamily: "gba",
@@ -91,5 +92,45 @@ describe("TypeScript netplay protocol codec", () => {
     };
 
     expect(linkCableCompatibilityMatchesPeer(left, right)).toBe(true);
+  });
+
+  test("round trips binary input batches", () => {
+    const codec = new NetplayInputBatchCodec();
+    const encoded = codec.encode({
+      frames: [
+        {
+          frame: 10,
+          payload: [1, 2],
+          playerIndex: 1,
+        },
+        {
+          frame: 11,
+          payload: [3, 4],
+          playerIndex: 1,
+        },
+      ],
+      playerIndex: 1,
+      roomEpoch: 2,
+      sessionEpoch: 3,
+    });
+    const decoded = codec.decode(encoded);
+
+    expect(decoded).toEqual({
+      frames: [
+        {
+          frame: 10,
+          payload: [1, 2],
+          playerIndex: 1,
+        },
+        {
+          frame: 11,
+          payload: [3, 4],
+          playerIndex: 1,
+        },
+      ],
+      playerIndex: 1,
+      roomEpoch: 2,
+      sessionEpoch: 3,
+    });
   });
 });

@@ -24,6 +24,7 @@ impl InMemoryRoomRegistry {
     ) -> Result<RoomView, RoomError> {
         let invite_code = self.invite_code_generator.generate();
         let resume_token = self.resume_token_generator.generate();
+        let input_socket_token = self.resume_token_generator.generate();
         let now = self.clock.now();
         let room = NetplayRoom::new_with_resume(
             host,
@@ -31,6 +32,7 @@ impl InMemoryRoomRegistry {
             invite_code.clone(),
             session,
             resume_token.hash(),
+            input_socket_token.hash(),
             now,
         );
         let view = room.view_for_event(0, now);
@@ -55,11 +57,13 @@ impl InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
         let resume_token = self.resume_token_generator.generate();
+        let input_socket_token = self.resume_token_generator.generate();
         let now = self.clock.now();
         let player_index = stored_room.room.join_guest_with_resume(
             guest,
             connection_id,
             resume_token.hash(),
+            input_socket_token.hash(),
             now,
         )?;
 
@@ -81,11 +85,13 @@ impl InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
         let resume_token = self.resume_token_generator.generate();
+        let input_socket_token = self.resume_token_generator.generate();
         let now = self.clock.now();
         let player_index = stored_room.room.attach_host_with_resume(
             host,
             connection_id,
             resume_token.hash(),
+            input_socket_token.hash(),
             now,
         )?;
 
@@ -94,6 +100,7 @@ impl InMemoryRoomRegistry {
         self.record_recent_events(stored_room.debug_events(1));
 
         Ok(RoomJoin {
+            input_socket_token: input_socket_token.expose().to_string(),
             player_index,
             resume_token: resume_token.expose().to_string(),
             room,
@@ -112,11 +119,13 @@ impl InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
         let resume_token = self.resume_token_generator.generate();
+        let input_socket_token = self.resume_token_generator.generate();
         let now = self.clock.now();
         let player_index = stored_room.room.join_guest_with_resume(
             guest,
             connection_id,
             resume_token.hash(),
+            input_socket_token.hash(),
             now,
         )?;
 
@@ -125,6 +134,7 @@ impl InMemoryRoomRegistry {
         self.record_recent_events(stored_room.debug_events(1));
 
         Ok(RoomJoin {
+            input_socket_token: input_socket_token.expose().to_string(),
             player_index,
             resume_token: resume_token.expose().to_string(),
             room,
@@ -145,9 +155,11 @@ impl InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
         let now = self.clock.now();
+        let input_socket_token = self.resume_token_generator.generate();
         stored_room.room.reconnect_player(
             player_index,
             &hash_resume_token(&resume_token),
+            input_socket_token.hash(),
             room_epoch,
             connection_id,
             now,
@@ -157,6 +169,7 @@ impl InMemoryRoomRegistry {
         self.record_recent_events(stored_room.debug_events(1));
 
         Ok(RoomJoin {
+            input_socket_token: input_socket_token.expose().to_string(),
             player_index,
             resume_token,
             room,
@@ -186,6 +199,59 @@ impl InMemoryRoomRegistry {
         if closed {
             rooms.remove(&normalized);
         }
+
+        Ok(room)
+    }
+
+    /// Attaches a binary input socket to an occupied player slot.
+    pub(super) async fn connect_input_socket_impl(
+        &self,
+        invite_code: InviteCode,
+        player_index: PlayerIndex,
+        room_epoch: u64,
+        session_epoch: u64,
+        input_socket_token: String,
+        connection_id: ConnectionId,
+    ) -> Result<RoomView, RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        let now = self.clock.now();
+
+        stored_room.room.attach_input_socket(
+            player_index,
+            room_epoch,
+            session_epoch,
+            &hash_resume_token(&input_socket_token),
+            connection_id,
+            now,
+        )?;
+        stored_room.emit_state(now, "inputSocketConnected", "input socket connected");
+        let room = stored_room.view(now);
+        self.record_recent_events(stored_room.debug_events(1));
+
+        Ok(room)
+    }
+
+    /// Detaches a binary input socket from a room.
+    pub(super) async fn disconnect_input_socket_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<RoomView, RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        let now = self.clock.now();
+
+        stored_room
+            .room
+            .disconnect_input_socket(connection_id, now)?;
+        stored_room.emit_state(now, "inputSocketDisconnected", "input socket disconnected");
+        let room = stored_room.view(now);
+        self.record_recent_events(stored_room.debug_events(1));
 
         Ok(room)
     }

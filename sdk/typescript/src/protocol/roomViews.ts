@@ -34,6 +34,8 @@ export interface PlayerSlotView {
   readonly status: PlayerStatus;
   readonly runtimeState: PlayerRuntimeState;
   readonly occupied: boolean;
+  readonly controlConnected: boolean;
+  readonly inputConnected: boolean;
   readonly lastSeenAgeMs?: number | null;
   readonly reconnectGraceRemainingMs?: number | null;
 }

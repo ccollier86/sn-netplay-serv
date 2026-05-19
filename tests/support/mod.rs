@@ -8,8 +8,12 @@ use sb_netplay_serv::auth::{
 };
 use sb_netplay_serv::http::{AdminAuthorizer, AppServices, build_router};
 use sb_netplay_serv::observability::InMemoryMetrics;
+use sb_netplay_serv::protocol::{
+    InputFrame, InputFrameBatch, NETPLAY_PROTOCOL_VERSION, decode_input_frame_batch,
+    encode_input_frame_batch,
+};
 use sb_netplay_serv::rate_limit::{InMemoryRateLimiter, RateLimitPolicy};
-use sb_netplay_serv::rooms::{InMemoryRoomRegistry, InviteCode, InviteCodeGenerator};
+use sb_netplay_serv::rooms::{InMemoryRoomRegistry, InviteCode, InviteCodeGenerator, PlayerIndex};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -85,6 +89,8 @@ impl Drop for SmokeServer {
 
 pub struct SmokeClient {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    input_socket: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    player_index: Option<u8>,
     room_epoch: u64,
     session_epoch: u64,
 }
@@ -92,8 +98,8 @@ pub struct SmokeClient {
 impl SmokeClient {
     pub async fn connect(server: &SmokeServer, role: &str, token: &str, install_id: &str) -> Self {
         let mut request = format!(
-            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion=3",
-            server.ws_base, INVITE_CODE
+            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion={}",
+            server.ws_base, INVITE_CODE, NETPLAY_PROTOCOL_VERSION
         )
         .into_client_request()
         .expect("websocket request");
@@ -112,9 +118,53 @@ impl SmokeClient {
 
         Self {
             socket,
+            input_socket: None,
+            player_index: None,
             room_epoch: 1,
             session_epoch: 1,
         }
+    }
+
+    pub async fn connect_input(
+        &mut self,
+        server: &SmokeServer,
+        token: &str,
+        install_id: &str,
+        room_joined: &Value,
+    ) {
+        let player_index = room_joined["yourPlayerIndex"]
+            .as_u64()
+            .expect("joined player index") as u8;
+        let input_socket_token = room_joined["inputSocketToken"]
+            .as_str()
+            .expect("input socket token");
+        let mut request = format!(
+            "{}/v1/ws/input?inviteCode={}&protocolVersion={}&playerIndex={player_index}&roomEpoch={}&sessionEpoch={}&inputSocketToken={}",
+            server.ws_base,
+            INVITE_CODE,
+            NETPLAY_PROTOCOL_VERSION,
+            self.room_epoch,
+            self.session_epoch,
+            input_socket_token
+        )
+        .into_client_request()
+        .expect("input websocket request");
+        let headers = request.headers_mut();
+        headers.insert(
+            "authorization",
+            HeaderValue::from_str(&format!("Bearer {token}")).expect("authorization header"),
+        );
+        headers.insert(
+            "x-install-id",
+            HeaderValue::from_str(install_id).expect("install id header"),
+        );
+
+        let (socket, response) = connect_async(request)
+            .await
+            .expect("input websocket connect");
+        assert_eq!(response.status().as_u16(), 101);
+        self.input_socket = Some(socket);
+        self.player_index = Some(player_index);
     }
 
     pub async fn send(&mut self, mut payload: Value) {
@@ -142,6 +192,31 @@ impl SmokeClient {
         }
     }
 
+    pub async fn send_input_frame(&mut self, frame: u64, payload: Vec<u8>) {
+        let player_index = PlayerIndex::new(
+            self.player_index.expect("connected player index"),
+            sb_netplay_serv::limits::MVP_ROOM_CAPACITY,
+        )
+        .expect("valid player index");
+        let encoded = encode_input_frame_batch(&InputFrameBatch {
+            frames: vec![InputFrame {
+                frame,
+                payload,
+                player_index,
+            }],
+            player_index,
+            room_epoch: self.room_epoch,
+            session_epoch: self.session_epoch,
+        })
+        .expect("encoded input batch");
+        let input_socket = self.input_socket.as_mut().expect("input socket connected");
+
+        input_socket
+            .send(Message::Binary(encoded.into()))
+            .await
+            .expect("send input batch");
+    }
+
     pub async fn expect_type(&mut self, message_type: &str) -> Value {
         loop {
             let message = self.next_json().await;
@@ -161,12 +236,30 @@ impl SmokeClient {
     }
 
     pub async fn expect_input_from(&mut self, player_index: u8) -> Value {
+        let input_socket = self.input_socket.as_mut().expect("input socket connected");
+
         loop {
-            let message = self.next_json().await;
-            if message["type"] == "inputFrame"
-                && message["input"]["playerIndex"] == u64::from(player_index)
-            {
-                return message;
+            let message = timeout(READ_TIMEOUT, input_socket.next())
+                .await
+                .expect("input websocket message timed out")
+                .expect("input websocket message")
+                .expect("input websocket result");
+
+            if let Message::Binary(payload) = message {
+                let batch = decode_input_frame_batch(&payload).expect("input batch");
+                if batch.player_index.zero_based() != player_index {
+                    continue;
+                }
+                let input = batch.frames.first().expect("input frame");
+
+                return json!({
+                    "type": "inputFrame",
+                    "input": {
+                        "playerIndex": input.player_index.zero_based(),
+                        "frame": input.frame,
+                        "payload": input.payload
+                    }
+                });
             }
         }
     }
@@ -232,13 +325,17 @@ impl SmokeClient {
         } else if let Some(session_epoch) = message["room"]["sessionEpoch"].as_u64() {
             self.session_epoch = session_epoch;
         }
+
+        if message["type"] == "roomJoined" {
+            self.player_index = message["yourPlayerIndex"].as_u64().map(|value| value as u8);
+        }
     }
 }
 
 pub fn compatibility_fingerprint() -> Value {
     json!({
         "desktopVersion": "0.2.13",
-        "protocolVersion": 3,
+        "protocolVersion": NETPLAY_PROTOCOL_VERSION,
         "systemId": "gamecube",
         "coreId": "dolphin",
         "coreBuild": "5.0-netplay",
@@ -259,6 +356,11 @@ pub async fn connect_ready_pair(server: &SmokeServer) -> (SmokeClient, SmokeClie
     assert_eq!(host_join["yourPlayerIndex"], 0);
     assert_eq!(guest_join["yourPlayerIndex"], 1);
     host.expect_type("compatibilityRequested").await;
+    host.connect_input(server, "host-token", "host-install", &host_join)
+        .await;
+    guest
+        .connect_input(server, "guest-token", "guest-install", &guest_join)
+        .await;
 
     (host, guest)
 }
@@ -284,7 +386,7 @@ pub async fn move_pair_to_syncing(host: &mut SmokeClient, guest: &mut SmokeClien
 
 pub fn link_cable_compatibility() -> Value {
     json!({
-        "protocolVersion": 3,
+        "protocolVersion": NETPLAY_PROTOCOL_VERSION,
         "systemFamily": "gba",
         "linkProtocol": "gba-link-cable-v1",
         "runtimeProfile": "mgba-link-runtime-v1",
@@ -363,7 +465,7 @@ fn test_services() -> AppServices {
 
 fn create_room_body() -> Value {
     json!({
-        "desktopProtocolVersion": 3,
+        "desktopProtocolVersion": NETPLAY_PROTOCOL_VERSION,
         "session": {
             "hostAppVersion": "0.2.13",
             "game": {
@@ -387,7 +489,7 @@ fn create_room_body() -> Value {
 
 fn create_link_room_body() -> Value {
     json!({
-        "desktopProtocolVersion": 3,
+        "desktopProtocolVersion": NETPLAY_PROTOCOL_VERSION,
         "session": {
             "hostAppVersion": "0.2.13",
             "mode": "linkCable",

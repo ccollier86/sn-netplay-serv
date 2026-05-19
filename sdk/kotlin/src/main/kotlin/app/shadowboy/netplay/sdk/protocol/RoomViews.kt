@@ -31,6 +31,8 @@ public data class PlayerSlotView(
     public val status: PlayerStatus,
     public val runtimeState: PlayerRuntimeState,
     public val occupied: Boolean,
+    public val controlConnected: Boolean,
+    public val inputConnected: Boolean,
     public val lastSeenAgeMs: Long? = null,
     public val reconnectGraceRemainingMs: Long? = null,
 )

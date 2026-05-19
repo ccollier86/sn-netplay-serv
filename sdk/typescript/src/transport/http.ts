@@ -33,10 +33,16 @@ export interface NetplayAuthHeadersProvider {
 }
 
 export class NetplayRestClient {
+  private readonly authHeadersProvider: NetplayAuthHeadersProvider;
+  private readonly transport: NetplayHttpTransport;
+
   public constructor(
-    private readonly transport: NetplayHttpTransport,
-    private readonly authHeadersProvider: NetplayAuthHeadersProvider,
-  ) {}
+    transport: NetplayHttpTransport,
+    authHeadersProvider: NetplayAuthHeadersProvider,
+  ) {
+    this.transport = transport;
+    this.authHeadersProvider = authHeadersProvider;
+  }
 
   public async createRoom(request: CreateRoomRequest): Promise<CreateRoomResponse> {
     validateNetplaySessionDescriptor(request.session);
@@ -64,11 +70,16 @@ export class NetplayRestClient {
 }
 
 export class NetplayRestError extends Error {
+  public readonly responseBody: string;
+  public readonly statusCode: number;
+
   public constructor(
-    public readonly statusCode: number,
-    public readonly responseBody: string,
+    statusCode: number,
+    responseBody: string,
   ) {
     super(`Netplay REST request failed with HTTP ${statusCode}`);
+    this.statusCode = statusCode;
+    this.responseBody = responseBody;
   }
 }
 

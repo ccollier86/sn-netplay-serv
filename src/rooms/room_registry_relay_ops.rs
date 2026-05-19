@@ -5,8 +5,8 @@
 
 use super::InMemoryRoomRegistry;
 use crate::protocol::{
-    ClientRuntimeState, InputFrame, InputFrameLimits, LinkCablePacket, LinkCablePacketLimits,
-    SessionPauseReason,
+    ClientRuntimeState, InputFrame, InputFrameBatch, InputFrameLimits, LinkCablePacket,
+    LinkCablePacketLimits, SessionPauseReason,
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, InviteCode, RoomError, RoomView,
@@ -34,7 +34,53 @@ impl InMemoryRoomRegistry {
         if acceptance == InputFrameAcceptance::Relay {
             let now = self.clock.now();
             stored_room.emit_input_frame(now, connection_id, input);
-            self.record_recent_events(stored_room.debug_events(1));
+        }
+
+        Ok(())
+    }
+
+    /// Validates and broadcasts a binary batch of controller input frames.
+    pub(super) async fn relay_input_frame_batch_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        batch: InputFrameBatch,
+    ) -> Result<(), RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        if stored_room.room.room_epoch != batch.room_epoch {
+            return Err(RoomError::StaleRoomEpoch);
+        }
+
+        if stored_room.room.session_epoch != batch.session_epoch {
+            return Err(RoomError::StaleSessionEpoch);
+        }
+
+        let mut next_room = stored_room.room.clone();
+        let mut accepted_frames = Vec::with_capacity(batch.frames.len());
+
+        for input in batch.frames {
+            let acceptance =
+                next_room.accept_input_frame(connection_id, &input, InputFrameLimits::default())?;
+
+            if acceptance == InputFrameAcceptance::Relay {
+                accepted_frames.push(input);
+            }
+        }
+
+        if !accepted_frames.is_empty() {
+            stored_room.room = next_room;
+            let now = self.clock.now();
+            stored_room.emit_input_frame_batch(
+                now,
+                connection_id,
+                InputFrameBatch {
+                    frames: accepted_frames,
+                    ..batch
+                },
+            );
         }
 
         Ok(())
