@@ -13,12 +13,14 @@ mod link_cable_compatibility;
 mod link_cable_descriptor;
 mod link_cable_packet;
 mod netplay_protocol;
+mod server_frame;
 mod server_message;
 mod session_descriptor;
 mod session_descriptor_error;
 mod session_mode;
 mod session_pause;
 mod snapshot;
+mod state_hash;
 
 pub use client_message::ClientMessage;
 pub use client_runtime_state::ClientRuntimeState;
@@ -34,6 +36,9 @@ pub use netplay_protocol::{
     MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION, NETPLAY_PROTOCOL_VERSION, NetplayProtocolView,
     ProtocolVersionError, validate_client_protocol_version,
 };
+pub use server_frame::{
+    ServerFrame, ServerFrameCodecError, decode_server_frame, encode_server_frame,
+};
 pub use server_message::ServerMessage;
 pub use session_descriptor::{
     ControllerNetplayDescriptor, NetplayCoreDescriptor, NetplayGameDescriptor,
@@ -45,3 +50,4 @@ pub use session_pause::{
     SessionPauseHolder, SessionPauseReason, SessionPauseState, SessionPauseView,
 };
 pub use snapshot::{SnapshotChunk, SnapshotLimits, SnapshotManifest};
+pub use state_hash::{PlayerStateHashView, StateHashMismatchView, StateHashReport};

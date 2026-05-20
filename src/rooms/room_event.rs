@@ -4,7 +4,8 @@
 //! concepts inside the room domain model.
 
 use crate::protocol::{
-    InputFrame, InputFrameBatch, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
+    InputFrame, InputFrameBatch, LinkCablePacket, ServerFrame, SessionPauseView, SnapshotChunk,
+    SnapshotManifest, StateHashMismatchView,
 };
 use crate::rooms::{ConnectionId, RoomView};
 
@@ -75,6 +76,13 @@ pub enum RoomEvent {
         /// Current room state after the exit.
         room: RoomView,
     },
+    /// Deterministic state hash mismatch was detected.
+    StateHashMismatch {
+        /// Mismatch details.
+        mismatch: StateHashMismatchView,
+        /// Current room state.
+        room: RoomView,
+    },
 }
 
 /// Event emitted on the dedicated binary input relay channel.
@@ -86,5 +94,10 @@ pub enum RoomInputEvent {
         source: ConnectionId,
         /// Validated input frame batch.
         batch: InputFrameBatch,
+    },
+    /// Canonical server frame released to every input socket.
+    ServerFrame {
+        /// Relay-owned frame release cursor.
+        frame: ServerFrame,
     },
 }

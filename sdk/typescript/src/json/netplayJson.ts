@@ -17,6 +17,8 @@ const serverMessageTypes = new Set([
   "playerReconnected",
   "playerExited",
   "recoveryResyncRequired",
+  "serverFrame",
+  "stateHashMismatch",
   "heartbeatAck",
   "error",
 ]);

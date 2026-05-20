@@ -29,10 +29,36 @@ pub struct RoomView {
     pub max_players: u8,
     /// Active coordinated pause details, if any.
     pub pause: Option<SessionPauseView>,
+    /// Controller-netplay frame cursors used for diagnostics and recovery.
+    pub frame_clock: RoomFrameClockView,
     /// Current room lifecycle status.
     pub status: RoomStatus,
     /// Player slots in display order.
     pub players: Vec<PlayerSlotView>,
+}
+
+/// Serializable relay-owned frame clock state.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomFrameClockView {
+    /// Latest frame for which every connected player has submitted input.
+    pub canonical_frame: u64,
+    /// Last server frame released to input sockets, if gameplay has advanced.
+    pub released_frame: Option<u64>,
+    /// Next frame the relay will release when the canonical cursor allows it.
+    pub next_release_frame: u64,
+    /// Per-player accepted input cursors.
+    pub accepted_inputs: Vec<PlayerFrameCursorView>,
+}
+
+/// Serializable per-player input cursor.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerFrameCursorView {
+    /// Zero-based player index.
+    pub player_index: u8,
+    /// Latest accepted input frame for this player.
+    pub frame: Option<u64>,
 }
 
 /// Serializable player slot view.

@@ -19,6 +19,10 @@ public class PauseCoordinator {
         }
     }
 
+    public fun reset() {
+        currentPause = null
+    }
+
     public fun requestPause(
         roomEpoch: Long,
         sessionEpoch: Long,

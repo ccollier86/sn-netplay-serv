@@ -201,4 +201,34 @@ describe("TypeScript netplay room state", () => {
       ),
     ).toThrow("Netplay input frame player does not match batch context.");
   });
+
+  test("frame clock tracks server frame and peer read frame", () => {
+    const stateMachine = new RoomStateMachine();
+
+    stateMachine.apply({
+      frame: {
+        canonicalFrame: 20,
+        frame: 18,
+        roomEpoch: 1,
+        sessionEpoch: 1,
+      },
+      type: "serverFrame",
+    });
+    stateMachine.apply({
+      input: {
+        frame: 16,
+        payload: [1],
+        playerIndex: 1,
+      },
+      type: "inputFrame",
+    });
+    stateMachine.frameClock.markLocalFrame(31);
+
+    expect(stateMachine.frameClock.snapshot()).toMatchObject({
+      canonicalFrame: 20,
+      peerReadFrame: 16,
+      serverFrame: 18,
+      stalled: true,
+    });
+  });
 });

@@ -20,3 +20,18 @@ export interface LinkCablePacket {
   readonly emulatedTime: number;
   readonly payload: readonly number[];
 }
+
+export interface StateHashReport {
+  readonly frame: number;
+  readonly sha256: string;
+}
+
+export interface PlayerStateHashView {
+  readonly playerIndex: number;
+  readonly sha256: string;
+}
+
+export interface StateHashMismatchView {
+  readonly frame: number;
+  readonly hashes: readonly PlayerStateHashView[];
+}

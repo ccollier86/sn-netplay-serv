@@ -46,3 +46,6 @@ pub const ROOM_JOIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// How often the in-memory registry scans for waiting rooms to expire.
 pub const ROOM_EXPIRATION_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How often controller-netplay rooms release one canonical server frame.
+pub const ROOM_FRAME_CLOCK_INTERVAL: Duration = Duration::from_millis(16);

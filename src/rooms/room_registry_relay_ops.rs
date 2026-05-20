@@ -6,7 +6,7 @@
 use super::InMemoryRoomRegistry;
 use crate::protocol::{
     ClientRuntimeState, InputFrame, InputFrameBatch, InputFrameLimits, LinkCablePacket,
-    LinkCablePacketLimits, SessionPauseReason,
+    LinkCablePacketLimits, SessionPauseReason, StateHashReport,
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, InviteCode, RoomError, RoomView,
@@ -32,14 +32,7 @@ impl InMemoryRoomRegistry {
         )?;
 
         if acceptance == InputFrameAcceptance::Relay {
-            let now = self.clock.now();
             stored_room.buffer_input_frame(connection_id, input);
-            stored_room.emit_ready_input_frames(
-                now,
-                stored_room.room.room_frame,
-                stored_room.room.room_epoch,
-                stored_room.room.session_epoch,
-            );
         }
 
         Ok(())
@@ -78,16 +71,9 @@ impl InMemoryRoomRegistry {
 
         if !accepted_frames.is_empty() {
             stored_room.room = next_room;
-            let now = self.clock.now();
             for input in accepted_frames {
                 stored_room.buffer_input_frame(connection_id, input);
             }
-            stored_room.emit_ready_input_frames(
-                now,
-                stored_room.room.room_frame,
-                stored_room.room.room_epoch,
-                stored_room.room.session_epoch,
-            );
         }
 
         Ok(())
@@ -113,6 +99,30 @@ impl InMemoryRoomRegistry {
         let now = self.clock.now();
         stored_room.emit_link_cable_packet(now, connection_id, packet);
         self.record_recent_events(stored_room.debug_events(1));
+
+        Ok(())
+    }
+
+    /// Records a deterministic state hash and broadcasts mismatches.
+    pub(super) async fn record_state_hash_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        report: StateHashReport,
+    ) -> Result<(), RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        let mismatch = stored_room.room.accept_state_hash(connection_id, report)?;
+
+        if let Some(mismatch) = mismatch {
+            let now = self.clock.now();
+            stored_room.room.enter_state_hash_resync();
+            stored_room.reset_input_relay_buffer();
+            stored_room.emit_state_hash_mismatch(now, mismatch);
+            self.record_recent_events(stored_room.debug_events(1));
+        }
 
         Ok(())
     }

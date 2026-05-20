@@ -19,8 +19,23 @@ public data class RoomView(
     public val session: NetplaySessionDescriptor,
     public val maxPlayers: Int,
     public val pause: SessionPauseView? = null,
+    public val frameClock: RoomFrameClockView = RoomFrameClockView(),
     public val status: RoomStatus,
     public val players: List<PlayerSlotView>,
+)
+
+@Serializable
+public data class RoomFrameClockView(
+    public val canonicalFrame: Long = 0,
+    public val releasedFrame: Long? = null,
+    public val nextReleaseFrame: Long = 0,
+    public val acceptedInputs: List<PlayerFrameCursorView> = emptyList(),
+)
+
+@Serializable
+public data class PlayerFrameCursorView(
+    public val playerIndex: Int,
+    public val frame: Long? = null,
 )
 
 @Serializable

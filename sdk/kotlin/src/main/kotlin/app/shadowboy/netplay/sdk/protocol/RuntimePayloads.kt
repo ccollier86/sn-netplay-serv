@@ -28,3 +28,21 @@ public data class LinkCablePacket(
     public val emulatedTime: Long,
     public val payload: List<Int>,
 )
+
+@Serializable
+public data class StateHashReport(
+    public val frame: Long,
+    public val sha256: String,
+)
+
+@Serializable
+public data class PlayerStateHashView(
+    public val playerIndex: Int,
+    public val sha256: String,
+)
+
+@Serializable
+public data class StateHashMismatchView(
+    public val frame: Long,
+    public val hashes: List<PlayerStateHashView>,
+)

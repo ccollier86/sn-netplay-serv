@@ -5,14 +5,50 @@ export const maxInputBatchBytes = 8 * 1024;
 
 const inputBatchMagic = [0x53, 0x42, 0x49, 0x31] as const;
 const inputBatchType = 1;
+const serverFrameMagic = [0x53, 0x42, 0x46, 0x31] as const;
+const serverFrameType = 2;
 const batchHeaderBytes = 4 + 1 + 8 + 8 + 1 + 1;
 const frameHeaderBytes = 8 + 2;
+const serverFrameBytes = 4 + 1 + 8 + 8 + 8 + 8;
 
 export interface InputFrameBatch {
   readonly roomEpoch: number;
   readonly sessionEpoch: number;
   readonly playerIndex: number;
   readonly frames: readonly InputFrame[];
+}
+
+export interface ServerFrameRelease {
+  readonly roomEpoch: number;
+  readonly sessionEpoch: number;
+  readonly frame: number;
+  readonly canonicalFrame: number;
+}
+
+export type NetplayInputChannelMessage =
+  | { readonly type: "inputBatch"; readonly batch: InputFrameBatch }
+  | { readonly type: "serverFrame"; readonly frame: ServerFrameRelease };
+
+export class NetplayInputChannelCodec {
+  private readonly inputBatchCodec = new NetplayInputBatchCodec();
+
+  public decode(payload: Uint8Array): NetplayInputChannelMessage {
+    if (isInputBatchPayload(payload)) {
+      return {
+        batch: this.inputBatchCodec.decode(payload),
+        type: "inputBatch",
+      };
+    }
+
+    if (isServerFramePayload(payload)) {
+      return {
+        frame: decodeServerFrame(payload),
+        type: "serverFrame",
+      };
+    }
+
+    throw new Error("Netplay input channel message type is unsupported.");
+  }
 }
 
 export class NetplayInputBatchCodec {
@@ -125,6 +161,43 @@ export class NetplayInputBatchCodec {
       sessionEpoch,
     };
   }
+}
+
+function decodeServerFrame(payload: Uint8Array): ServerFrameRelease {
+  if (payload.byteLength !== serverFrameBytes || payload.byteLength > maxInputBatchBytes) {
+    throw new Error("Netplay server frame is malformed.");
+  }
+
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+
+  return {
+    canonicalFrame: readU64(view, 29),
+    frame: readU64(view, 21),
+    roomEpoch: readU64(view, 5),
+    sessionEpoch: readU64(view, 13),
+  };
+}
+
+function isInputBatchPayload(payload: Uint8Array): boolean {
+  return (
+    payload.byteLength >= batchHeaderBytes &&
+    payload[0] === inputBatchMagic[0] &&
+    payload[1] === inputBatchMagic[1] &&
+    payload[2] === inputBatchMagic[2] &&
+    payload[3] === inputBatchMagic[3] &&
+    payload[4] === inputBatchType
+  );
+}
+
+function isServerFramePayload(payload: Uint8Array): boolean {
+  return (
+    payload.byteLength === serverFrameBytes &&
+    payload[0] === serverFrameMagic[0] &&
+    payload[1] === serverFrameMagic[1] &&
+    payload[2] === serverFrameMagic[2] &&
+    payload[3] === serverFrameMagic[3] &&
+    payload[4] === serverFrameType
+  );
 }
 
 function validateBatch(batch: InputFrameBatch): void {

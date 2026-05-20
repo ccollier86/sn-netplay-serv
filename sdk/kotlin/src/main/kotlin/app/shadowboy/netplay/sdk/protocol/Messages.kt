@@ -110,6 +110,14 @@ public sealed interface ClientMessage {
         public val sessionEpoch: Long,
         public val reason: String,
     ) : ClientMessage
+
+    @Serializable
+    @SerialName("stateHash")
+    public data class StateHash(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val report: StateHashReport,
+    ) : ClientMessage
 }
 
 @Serializable
@@ -216,6 +224,20 @@ public sealed interface ServerMessage {
     }
 
     @Serializable
+    @SerialName("stateHashMismatch")
+    public data class StateHashMismatch(
+        public val eventSeq: Long,
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val mismatch: StateHashMismatchView,
+        public val room: RoomView,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long = eventSeq
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
     @SerialName("startSession")
     public data class StartSession(
         public val eventSeq: Long,
@@ -287,6 +309,14 @@ public sealed interface ServerMessage {
     @Serializable
     @SerialName("inputFrame")
     public data class InputFrameMessage(public val input: InputFrame) : ServerMessage {
+        override val eventSeqOrNull: Long? = null
+        override val roomEpochOrNull: Long? = null
+        override val sessionEpochOrNull: Long? = null
+    }
+
+    @Serializable
+    @SerialName("serverFrame")
+    public data class ServerFrameMessage(public val frame: ServerFrameRelease) : ServerMessage {
         override val eventSeqOrNull: Long? = null
         override val roomEpochOrNull: Long? = null
         override val sessionEpochOrNull: Long? = null

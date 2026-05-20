@@ -8,7 +8,7 @@ use crate::auth::VerifiedLicense;
 use crate::protocol::{
     ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
     LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason,
-    SnapshotChunk, SnapshotManifest,
+    SnapshotChunk, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, RoomDebugEvent, RoomError, RoomEvent, RoomInputEvent,
@@ -169,6 +169,14 @@ pub trait RoomRegistry: Send + Sync {
         invite_code: InviteCode,
         connection_id: ConnectionId,
         packet: LinkCablePacket,
+    ) -> Result<(), RoomError>;
+
+    /// Records a deterministic state hash report.
+    async fn record_state_hash(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        report: StateHashReport,
     ) -> Result<(), RoomError>;
 
     /// Records a client heartbeat and returns the current room view.

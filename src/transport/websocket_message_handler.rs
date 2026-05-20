@@ -328,6 +328,25 @@ async fn handle_client_message(
             )
             .await
         }
+        ClientMessage::StateHash {
+            room_epoch,
+            session_epoch,
+            report,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            apply_room_result(
+                sender,
+                services
+                    .rooms
+                    .record_state_hash(invite_code.clone(), connection_id, report)
+                    .await,
+            )
+            .await
+        }
     }
 }
 

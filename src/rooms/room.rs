@@ -8,14 +8,16 @@ use crate::auth::VerifiedLicense;
 use crate::limits::MVP_ROOM_CAPACITY;
 use crate::protocol::{
     CompatibilityFingerprint, NetplayProtocolView, NetplaySessionDescriptor, NetplaySessionMode,
-    SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    PlayerStateHashView, ServerFrame, SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    StateHashMismatchView, StateHashReport,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, LinkCableRoomState, PlayerIndex, PlayerRole, PlayerRuntimeState,
-    PlayerSlot, PlayerSlotView, PlayerStatus, ResumeTokenHash, RoomError, RoomId, RoomStatus,
-    RoomView, SessionPauseStateTracker, SnapshotTransferState,
+    ConnectionId, InviteCode, LinkCableRoomState, PlayerFrameCursorView, PlayerIndex, PlayerRole,
+    PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus, ResumeTokenHash, RoomError,
+    RoomFrameClockView, RoomId, RoomStatus, RoomView, SessionPauseStateTracker,
+    SnapshotTransferState,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 
 /// Active netplay room.
@@ -38,6 +40,9 @@ pub struct NetplayRoom {
     pub(super) pause_state: Option<SessionPauseStateTracker>,
     snapshot_transfer: Option<SnapshotTransferState>,
     pub(super) room_frame: u64,
+    pub(super) released_frame: Option<u64>,
+    pub(super) next_release_frame: u64,
+    state_hashes: BTreeMap<u64, HashMap<PlayerIndex, String>>,
 }
 
 impl NetplayRoom {
@@ -102,6 +107,9 @@ impl NetplayRoom {
             pause_state: None,
             snapshot_transfer: None,
             room_frame: 0,
+            released_frame: None,
+            next_release_frame: 0,
+            state_hashes: BTreeMap::new(),
         }
     }
 
@@ -279,6 +287,7 @@ impl NetplayRoom {
                 .pause_state
                 .as_ref()
                 .map(|pause_state| pause_state.view(self.current_pause_state())),
+            frame_clock: self.frame_clock_view(),
             status: self.status,
             players: self
                 .players
@@ -300,6 +309,94 @@ impl NetplayRoom {
                         .map(|deadline| deadline.saturating_duration_since(now).as_millis()),
                 })
                 .collect(),
+        }
+    }
+
+    /// Releases the next relay-owned server frame if the canonical cursor allows it.
+    pub(super) fn release_next_server_frame(&mut self) -> Option<ServerFrame> {
+        if self.status != RoomStatus::Playing {
+            return None;
+        }
+
+        if self.next_release_frame > self.room_frame {
+            return None;
+        }
+
+        if !self.connected_player_indices().iter().all(|player_index| {
+            self.last_input_frames
+                .get(player_index)
+                .is_some_and(|frame| *frame >= self.next_release_frame)
+        }) {
+            return None;
+        }
+
+        let frame = self.next_release_frame;
+
+        self.next_release_frame = self.next_release_frame.saturating_add(1);
+        self.released_frame = Some(frame);
+
+        Some(ServerFrame {
+            room_epoch: self.room_epoch,
+            session_epoch: self.session_epoch,
+            frame,
+            canonical_frame: self.room_frame,
+        })
+    }
+
+    /// Stores one deterministic state hash and returns a mismatch once all
+    /// connected players reported the same frame.
+    pub(super) fn accept_state_hash(
+        &mut self,
+        connection_id: ConnectionId,
+        report: StateHashReport,
+    ) -> Result<Option<StateHashMismatchView>, RoomError> {
+        if self.status != RoomStatus::Playing && self.status != RoomStatus::Paused {
+            return Err(RoomError::NotPlaying);
+        }
+
+        report.validate().map_err(|_| RoomError::InvalidPayload)?;
+        let player_index = self
+            .player_index_for_connection(connection_id)
+            .ok_or(RoomError::UnknownConnection)?;
+        let normalized_hash = report.sha256.to_ascii_lowercase();
+        let connected_players = self.connected_player_indices();
+        let frame_hashes = self.state_hashes.entry(report.frame).or_default();
+
+        frame_hashes.insert(player_index, normalized_hash);
+
+        if !connected_players
+            .iter()
+            .all(|player_index| frame_hashes.contains_key(player_index))
+        {
+            return Ok(None);
+        }
+
+        let mut hashes = connected_players
+            .into_iter()
+            .filter_map(|player_index| {
+                frame_hashes
+                    .get(&player_index)
+                    .map(|sha256| PlayerStateHashView {
+                        player_index,
+                        sha256: sha256.clone(),
+                    })
+            })
+            .collect::<Vec<_>>();
+
+        hashes.sort_by_key(|hash| hash.player_index.zero_based());
+        self.prune_state_hashes(report.frame);
+
+        let Some(first_hash) = hashes.first().map(|hash| hash.sha256.as_str()) else {
+            return Ok(None);
+        };
+
+        if hashes.iter().all(|hash| hash.sha256 == first_hash) {
+            Ok(None)
+        } else {
+            Ok(Some(StateHashMismatchView {
+                frame: report.frame,
+                hashes,
+            }))
         }
     }
 
@@ -416,6 +513,23 @@ impl NetplayRoom {
         self.pause_state = None;
         self.snapshot_transfer = None;
         self.room_frame = 0;
+        self.released_frame = None;
+        self.next_release_frame = 0;
+        self.state_hashes.clear();
+    }
+
+    /// Returns an active controller-netplay room to snapshot sync after desync.
+    pub(super) fn enter_state_hash_resync(&mut self) {
+        self.reset_sync_state();
+        self.bump_session_epoch();
+        self.status = RoomStatus::CheckingCompatibility;
+        self.players
+            .iter_mut()
+            .filter(|slot| !slot.is_empty() && slot.connection_id.is_some())
+            .for_each(|slot| {
+                slot.status = PlayerStatus::Connected;
+                slot.runtime_state = PlayerRuntimeState::Connected;
+            });
     }
 
     pub(super) fn bump_room_epoch(&mut self) {
@@ -444,6 +558,28 @@ impl NetplayRoom {
             Some(state_format) => fingerprint.state_format.as_deref() == Some(state_format),
             None => true,
         }
+    }
+
+    fn frame_clock_view(&self) -> RoomFrameClockView {
+        RoomFrameClockView {
+            canonical_frame: self.room_frame,
+            released_frame: self.released_frame,
+            next_release_frame: self.next_release_frame,
+            accepted_inputs: self
+                .players
+                .iter()
+                .filter(|slot| !slot.is_empty())
+                .map(|slot| PlayerFrameCursorView {
+                    player_index: slot.player_index.zero_based(),
+                    frame: self.last_input_frames.get(&slot.player_index).copied(),
+                })
+                .collect(),
+        }
+    }
+
+    fn prune_state_hashes(&mut self, frame: u64) {
+        let retain_from = frame.saturating_sub(120);
+        self.state_hashes = self.state_hashes.split_off(&retain_from);
     }
 }
 

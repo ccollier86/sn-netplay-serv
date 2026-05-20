@@ -9,6 +9,7 @@ use crate::protocol::{
     CompatibilityFingerprint, InputFrame, InputFrameLimits, LinkCableCompatibility,
     LinkCablePacket, LinkCablePacketLimits, NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor,
     SessionPauseReason, SessionPauseState, SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    StateHashReport,
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, InviteCode, PlayerIndex, PlayerStatus, RoomError,
@@ -341,6 +342,37 @@ fn room_frame_waits_for_every_connected_player() {
     )
     .expect("guest prediction-window frame");
     assert_eq!(room.room_frame, 180);
+}
+
+#[test]
+fn state_hash_mismatch_can_enter_snapshot_resync() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+    let session_epoch = room.view().session_epoch;
+
+    assert!(
+        room.accept_state_hash(host_connection, state_hash(60, "a"))
+            .expect("host hash")
+            .is_none()
+    );
+    let mismatch = room
+        .accept_state_hash(guest_connection, state_hash(60, "b"))
+        .expect("guest hash");
+
+    assert!(mismatch.is_some());
+    room.enter_state_hash_resync();
+
+    let view = room.view();
+    assert_eq!(view.status, RoomStatus::CheckingCompatibility);
+    assert_eq!(view.session_epoch, session_epoch + 1);
+    assert_eq!(view.frame_clock.canonical_frame, 0);
+    assert_eq!(view.players[0].status, PlayerStatus::Connected);
+    assert_eq!(view.players[1].status, PlayerStatus::Connected);
+    assert!(matches!(
+        room.mark_ready(host_connection),
+        Err(RoomError::RoomNotReady)
+    ));
 }
 
 #[test]
@@ -692,6 +724,13 @@ fn input(player_index: PlayerIndex, frame: u64) -> InputFrame {
         player_index,
         frame,
         payload: vec![0],
+    }
+}
+
+fn state_hash(frame: u64, fill: &str) -> StateHashReport {
+    StateHashReport {
+        frame,
+        sha256: fill.repeat(64),
     }
 }
 

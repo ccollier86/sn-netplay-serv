@@ -7,7 +7,7 @@ use super::{InMemoryRoomRegistry, RoomRegistry};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
     CompatibilityFingerprint, InputFrame, InputFrameBatch, NETPLAY_PROTOCOL_VERSION,
-    NetplaySessionDescriptor, SessionPauseReason, SnapshotChunk, SnapshotManifest,
+    NetplaySessionDescriptor, SessionPauseReason, SnapshotChunk, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, PlayerRuntimeState, PlayerStatus,
@@ -399,7 +399,7 @@ async fn validated_input_frame_is_broadcast() {
 
     registry
         .relay_input_frame_batch(
-            invite,
+            invite.clone(),
             host_connection,
             InputFrameBatch {
                 room_epoch,
@@ -414,6 +414,28 @@ async fn validated_input_frame_is_broadcast() {
         )
         .await
         .expect("input frame");
+
+    assert_eq!(registry.release_next_controller_frames().await, 0);
+
+    registry
+        .relay_input_frame_batch(
+            invite,
+            guest_connection,
+            InputFrameBatch {
+                room_epoch,
+                session_epoch,
+                player_index: PlayerIndex::TWO,
+                frames: vec![InputFrame {
+                    player_index: PlayerIndex::TWO,
+                    frame: 0,
+                    payload: vec![0],
+                }],
+            },
+        )
+        .await
+        .expect("guest input frame");
+
+    assert_eq!(registry.release_next_controller_frames().await, 1);
 
     let event = events.recv().await.expect("event");
 
@@ -475,17 +497,54 @@ async fn future_input_frame_waits_for_room_frame_before_broadcast() {
         .await
         .expect("guest matching input");
 
-    let first_event = events.recv().await.expect("first input event");
-    let second_event = events.recv().await.expect("second input event");
+    for _ in 0..=5 {
+        registry.release_next_controller_frames().await;
+    }
 
-    assert!(matches!(
-        first_event,
-        crate::rooms::RoomInputEvent::InputFrameBatch { .. }
-    ));
-    assert!(matches!(
-        second_event,
-        crate::rooms::RoomInputEvent::InputFrameBatch { .. }
-    ));
+    let mut input_batch_count = 0;
+    while input_batch_count < 2 {
+        let event = events.recv().await.expect("input event");
+        if matches!(event, crate::rooms::RoomInputEvent::InputFrameBatch { .. }) {
+            input_batch_count += 1;
+        }
+    }
+
+    assert_eq!(input_batch_count, 2);
+}
+
+#[tokio::test]
+async fn state_hash_mismatch_broadcasts_resync_room() {
+    let (registry, invite, host_connection, guest_connection) = compatible_room().await;
+    complete_snapshot(&registry, &invite, host_connection).await;
+    registry
+        .mark_ready(invite.clone(), host_connection)
+        .await
+        .expect("host ready");
+    registry
+        .mark_ready(invite.clone(), guest_connection)
+        .await
+        .expect("guest ready");
+    let session_epoch = session_epoch(&registry, &invite).await;
+    let mut events = registry.subscribe(invite.clone()).await.expect("events");
+
+    registry
+        .record_state_hash(invite.clone(), host_connection, state_hash(60, "a"))
+        .await
+        .expect("host hash");
+    registry
+        .record_state_hash(invite.clone(), guest_connection, state_hash(60, "b"))
+        .await
+        .expect("guest hash");
+
+    let event = events.recv().await.expect("state hash mismatch");
+    let RoomEvent::StateHashMismatch { mismatch, room } = event else {
+        panic!("expected state hash mismatch event");
+    };
+
+    assert_eq!(mismatch.frame, 60);
+    assert_eq!(room.status, RoomStatus::CheckingCompatibility);
+    assert_eq!(room.session_epoch, session_epoch + 1);
+    assert_eq!(room.frame_clock.canonical_frame, 0);
 }
 
 #[tokio::test]
@@ -922,6 +981,13 @@ fn input(player_index: PlayerIndex, frame: u64) -> InputFrame {
         frame,
         payload: vec![0],
         player_index,
+    }
+}
+
+fn state_hash(frame: u64, fill: &str) -> StateHashReport {
+    StateHashReport {
+        frame,
+        sha256: fill.repeat(64),
     }
 }
 

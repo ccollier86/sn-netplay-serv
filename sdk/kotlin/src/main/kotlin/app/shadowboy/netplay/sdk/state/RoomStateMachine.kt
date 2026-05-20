@@ -16,6 +16,7 @@ public class RoomStateMachine(
     public val reconnectTokens: ReconnectTokenStore = ReconnectTokenStore(),
     public val pause: PauseCoordinator = PauseCoordinator(),
     public val heartbeat: HeartbeatTracker = HeartbeatTracker(),
+    public val frameClock: FrameClockTracker = FrameClockTracker(),
 ) {
     public var state: NetplayClientState = NetplayClientState()
         private set
@@ -32,6 +33,7 @@ public class RoomStateMachine(
             is ServerMessage.PlayerReconnected -> updateRoom(message.room)
             is ServerMessage.PlayerExited -> updateRoom(message.room)
             is ServerMessage.RecoveryResyncRequired -> updateRoom(message.room)
+            is ServerMessage.StateHashMismatch -> updateRoom(message.room)
             is ServerMessage.StartSession -> updateRoom(message.room)
             is ServerMessage.SessionPauseScheduled -> {
                 pause.apply(message.pause)
@@ -53,8 +55,9 @@ public class RoomStateMachine(
             is ServerMessage.Error -> {
                 state = state.copy(lastError = NetplayCloseReason.RelayError(message.code, message.message))
             }
+            is ServerMessage.InputFrameMessage -> frameClock.markPeerInputFrame(message.input)
+            is ServerMessage.ServerFrameMessage -> frameClock.applyServerFrame(message.frame)
             ServerMessage.Pong,
-            is ServerMessage.InputFrameMessage,
             is ServerMessage.LinkCablePacketMessage,
             is ServerMessage.SnapshotChunkMessage,
             is ServerMessage.SnapshotComplete -> Unit
@@ -65,6 +68,7 @@ public class RoomStateMachine(
 
     private fun updateRoom(room: RoomView, assignedPlayerIndex: Int? = state.assignedPlayerIndex) {
         reconnectTokens.updateAcceptedEpoch(room.roomEpoch)
+        frameClock.applyRoom(room)
         state = state.copy(
             room = room,
             assignedPlayerIndex = assignedPlayerIndex,
@@ -82,5 +86,12 @@ public class RoomStateMachine(
             roomEpoch = roomEpoch,
             sessionEpoch = sessionEpoch,
         )
+    }
+
+    public fun reset() {
+        reconnectTokens.clear()
+        pause.reset()
+        frameClock.reset()
+        state = NetplayClientState()
     }
 }

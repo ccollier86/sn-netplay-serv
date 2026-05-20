@@ -6,7 +6,10 @@ import type {
   LinkCablePacket,
   SnapshotChunk,
   SnapshotManifest,
+  StateHashMismatchView,
+  StateHashReport,
 } from "./runtimePayloads.ts";
+import type { ServerFrameRelease } from "./inputBatch.ts";
 
 export type ClientMessage =
   | { readonly type: "ping" }
@@ -40,7 +43,8 @@ export type ClientMessage =
       readonly reason: SessionPauseReason;
       readonly sequence: number;
     }
-  | EpochMessage<"playerExited"> & { readonly reason: string };
+  | EpochMessage<"playerExited"> & { readonly reason: string }
+  | EpochMessage<"stateHash"> & { readonly report: StateHashReport };
 
 export type ServerMessage =
   | RoomEpochMessage<"roomJoined"> & {
@@ -56,6 +60,7 @@ export type ServerMessage =
       readonly room: RoomView;
     }
   | { readonly type: "inputFrame"; readonly input: InputFrame }
+  | { readonly type: "serverFrame"; readonly frame: ServerFrameRelease }
   | { readonly type: "linkCablePacket"; readonly packet: LinkCablePacket }
   | { readonly type: "snapshotChunk"; readonly chunk: SnapshotChunk }
   | { readonly type: "snapshotComplete"; readonly manifest: SnapshotManifest }
@@ -84,6 +89,10 @@ export type ServerMessage =
       readonly room: RoomView;
     }
   | RoomEpochMessage<"recoveryResyncRequired"> & { readonly room: RoomView }
+  | RoomEpochMessage<"stateHashMismatch"> & {
+      readonly mismatch: StateHashMismatchView;
+      readonly room: RoomView;
+    }
   | RoomEpochMessage<"heartbeatAck">
   | { readonly type: "error"; readonly code: string; readonly message: string };
 

@@ -231,6 +231,13 @@ async fn handle_room_event(
             reason,
             room,
         },
+        Ok(RoomEvent::StateHashMismatch { mismatch, room }) => ServerMessage::StateHashMismatch {
+            event_seq: room.event_seq,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            mismatch,
+            room,
+        },
         Ok(RoomEvent::InputFrame { .. }) => {
             return true;
         }

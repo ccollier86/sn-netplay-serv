@@ -13,7 +13,9 @@ use sb_netplay_serv::protocol::{
     encode_input_frame_batch,
 };
 use sb_netplay_serv::rate_limit::{InMemoryRateLimiter, RateLimitPolicy};
-use sb_netplay_serv::rooms::{InMemoryRoomRegistry, InviteCode, InviteCodeGenerator, PlayerIndex};
+use sb_netplay_serv::rooms::{
+    InMemoryRoomRegistry, InviteCode, InviteCodeGenerator, PlayerIndex, spawn_room_frame_clock_task,
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -31,6 +33,7 @@ const INVITE_CODE: &str = "AB23-CD";
 pub struct SmokeServer {
     pub http_base: String,
     pub ws_base: String,
+    frame_clock_task: JoinHandle<()>,
     task: JoinHandle<()>,
 }
 
@@ -40,12 +43,17 @@ impl SmokeServer {
             .await
             .expect("bind test server");
         let address = listener.local_addr().expect("server local address");
-        let app = build_router(test_services());
+        let rooms = Arc::new(InMemoryRoomRegistry::new(Arc::new(
+            StaticInviteCodeGenerator,
+        )));
+        let frame_clock_task = spawn_room_frame_clock_task(rooms.clone());
+        let app = build_router(test_services(rooms));
         let task = tokio::spawn(async move {
             axum::serve(listener, app).await.expect("serve test router");
         });
 
         Self {
+            frame_clock_task,
             http_base: format!("http://{address}"),
             ws_base: format!("ws://{address}"),
             task,
@@ -83,6 +91,7 @@ impl SmokeServer {
 
 impl Drop for SmokeServer {
     fn drop(&mut self) {
+        self.frame_clock_task.abort();
         self.task.abort();
     }
 }
@@ -246,7 +255,9 @@ impl SmokeClient {
                 .expect("input websocket result");
 
             if let Message::Binary(payload) = message {
-                let batch = decode_input_frame_batch(&payload).expect("input batch");
+                let Ok(batch) = decode_input_frame_batch(&payload) else {
+                    continue;
+                };
                 if batch.player_index.zero_based() != player_index {
                     continue;
                 }
@@ -446,12 +457,10 @@ impl SmokeClient {
     }
 }
 
-fn test_services() -> AppServices {
+fn test_services(rooms: Arc<InMemoryRoomRegistry>) -> AppServices {
     AppServices::new(
         Arc::new(FakeLicenseAuthority),
-        Arc::new(InMemoryRoomRegistry::new(Arc::new(
-            StaticInviteCodeGenerator,
-        ))),
+        rooms,
         Arc::new(InMemoryRateLimiter::new(RateLimitPolicy {
             create_room_per_minute: 100,
             websocket_join_per_minute: 100,

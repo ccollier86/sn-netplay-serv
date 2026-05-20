@@ -5,7 +5,8 @@
 //! messages or apply room-domain rules.
 
 use crate::protocol::{
-    InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
+    InputFrame, LinkCablePacket, ServerFrame, SessionPauseView, SnapshotChunk, SnapshotManifest,
+    StateHashMismatchView,
 };
 use crate::rooms::{
     ConnectionId, InputFrameRelayBuffer, NetplayRoom, RoomDebugEvent, RoomDebugEventLog, RoomEvent,
@@ -158,6 +159,18 @@ impl StoredRoom {
         });
     }
 
+    /// Emits deterministic state hash mismatch diagnostics.
+    pub(super) fn emit_state_hash_mismatch(
+        &mut self,
+        now: Instant,
+        mismatch: StateHashMismatchView,
+    ) {
+        let room = self.record_event(now, "stateHashMismatch", "state hash mismatch detected");
+        let _ = self
+            .events
+            .send(RoomEvent::StateHashMismatch { mismatch, room });
+    }
+
     /// Emits a validated snapshot chunk.
     pub(super) fn emit_snapshot_chunk(
         &mut self,
@@ -187,25 +200,30 @@ impl StoredRoom {
         self.input_relay_buffer.push(source, input);
     }
 
-    /// Emits ready controller input frames without recording debug spam.
-    pub(super) fn emit_ready_input_frames(
-        &mut self,
-        now: Instant,
-        through_frame: u64,
-        room_epoch: u64,
-        session_epoch: u64,
-    ) {
-        let _ = now;
+    /// Drops buffered input from a previous gameplay epoch.
+    pub(super) fn reset_input_relay_buffer(&mut self) {
+        self.input_relay_buffer.clear();
+    }
+
+    /// Releases one canonical server frame and its ready input batches.
+    pub(super) fn emit_next_server_frame(&mut self, _now: Instant) -> Option<ServerFrame> {
+        let frame = self.room.release_next_server_frame()?;
 
         for ready_batch in
             self.input_relay_buffer
-                .drain_ready(through_frame, room_epoch, session_epoch)
+                .drain_frame(frame.frame, frame.room_epoch, frame.session_epoch)
         {
             let _ = self.input_events.send(RoomInputEvent::InputFrameBatch {
                 batch: ready_batch.batch,
                 source: ready_batch.source,
             });
         }
+
+        let _ = self.input_events.send(RoomInputEvent::ServerFrame {
+            frame: frame.clone(),
+        });
+
+        Some(frame)
     }
 
     /// Emits a validated link-cable packet.

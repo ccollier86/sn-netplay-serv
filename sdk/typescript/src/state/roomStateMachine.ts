@@ -1,6 +1,7 @@
 import type { ServerMessage } from "../protocol/messages.ts";
 import type { RoomView } from "../protocol/roomViews.ts";
 import type { NetplayCloseReason } from "./closeReason.ts";
+import { FrameClockTracker } from "./frameClock.ts";
 import { HeartbeatTracker } from "./heartbeat.ts";
 import { PauseCoordinator } from "./pause.ts";
 import { ReconnectTokenStore } from "./reconnect.ts";
@@ -16,20 +17,24 @@ export interface NetplayClientState {
 
 export class RoomStateMachine {
   public readonly heartbeat: HeartbeatTracker;
+  public readonly frameClock: FrameClockTracker;
   public readonly pause: PauseCoordinator;
   public readonly reconnectTokens: ReconnectTokenStore;
   public state: NetplayClientState = initialClientState();
 
   public constructor({
     heartbeat = new HeartbeatTracker(),
+    frameClock = new FrameClockTracker(),
     pause = new PauseCoordinator(),
     reconnectTokens = new ReconnectTokenStore(),
   }: {
     readonly heartbeat?: HeartbeatTracker;
+    readonly frameClock?: FrameClockTracker;
     readonly pause?: PauseCoordinator;
     readonly reconnectTokens?: ReconnectTokenStore;
   } = {}) {
     this.heartbeat = heartbeat;
+    this.frameClock = frameClock;
     this.pause = pause;
     this.reconnectTokens = reconnectTokens;
   }
@@ -46,6 +51,7 @@ export class RoomStateMachine {
       case "playerReconnected":
       case "playerExited":
       case "recoveryResyncRequired":
+      case "stateHashMismatch":
       case "startSession":
         this.updateRoom(message.room);
         break;
@@ -61,14 +67,19 @@ export class RoomStateMachine {
       case "heartbeatAck":
         this.updateEpochs(message.eventSeq, message.roomEpoch, message.sessionEpoch);
         break;
+      case "serverFrame":
+        this.frameClock.applyServerFrame(message.frame);
+        break;
       case "error":
         this.state = {
           ...this.state,
           lastError: { code: message.code, kind: "relayError", message: message.message },
         };
         break;
-      case "pong":
       case "inputFrame":
+        this.frameClock.markPeerInputFrame(message.input);
+        break;
+      case "pong":
       case "linkCablePacket":
       case "snapshotChunk":
       case "snapshotComplete":
@@ -80,12 +91,14 @@ export class RoomStateMachine {
 
   public reset(): void {
     this.pause.reset();
+    this.frameClock.reset();
     this.reconnectTokens.clear();
     this.state = initialClientState();
   }
 
   private updateRoom(room: RoomView, assignedPlayerIndex = this.state.assignedPlayerIndex): void {
     this.reconnectTokens.updateAcceptedEpoch(room.roomEpoch);
+    this.frameClock.applyRoom(room);
     this.state = {
       assignedPlayerIndex,
       lastError: null,

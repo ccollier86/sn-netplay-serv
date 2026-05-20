@@ -8,6 +8,7 @@ export * from "./protocol/messages.ts";
 export * from "./protocol/roomViews.ts";
 export * from "./protocol/runtimePayloads.ts";
 export * from "./state/closeReason.ts";
+export * from "./state/frameClock.ts";
 export * from "./state/heartbeat.ts";
 export * from "./state/inputBatcher.ts";
 export * from "./state/pause.ts";

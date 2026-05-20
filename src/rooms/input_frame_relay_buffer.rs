@@ -35,33 +35,31 @@ impl InputFrameRelayBuffer {
             .push(BufferedInputFrame { source, input });
     }
 
-    /// Drains every frame that is no newer than the canonical room frame.
-    pub fn drain_ready(
+    /// Drains exactly one released frame.
+    pub fn drain_frame(
         &mut self,
-        through_frame: u64,
+        frame: u64,
         room_epoch: u64,
         session_epoch: u64,
     ) -> Vec<BufferedInputFrameBatch> {
-        let pending = match through_frame.checked_add(1) {
-            Some(next_frame) => self.frames_by_number.split_off(&next_frame),
-            None => BTreeMap::new(),
-        };
-        let ready = std::mem::replace(&mut self.frames_by_number, pending);
         let mut batches = Vec::new();
 
-        for buffered_frames in ready.into_values() {
-            for buffered in buffered_frames {
-                push_to_batch(
-                    &mut batches,
-                    buffered.source,
-                    room_epoch,
-                    session_epoch,
-                    buffered.input,
-                );
-            }
+        for buffered in self.frames_by_number.remove(&frame).unwrap_or_default() {
+            push_to_batch(
+                &mut batches,
+                buffered.source,
+                room_epoch,
+                session_epoch,
+                buffered.input,
+            );
         }
 
         batches
+    }
+
+    /// Drops all buffered input that belongs to a previous sync epoch.
+    pub fn clear(&mut self) {
+        self.frames_by_number.clear();
     }
 }
 
@@ -99,22 +97,22 @@ mod tests {
     use crate::rooms::{ConnectionId, PlayerIndex};
 
     #[test]
-    fn drains_only_frames_reached_by_canonical_room_frame() {
+    fn drains_only_released_frame() {
         let mut buffer = InputFrameRelayBuffer::default();
         let source = ConnectionId::new();
 
         buffer.push(source, input(PlayerIndex::ONE, 2));
         buffer.push(source, input(PlayerIndex::ONE, 3));
 
-        assert!(buffer.drain_ready(1, 7, 9).is_empty());
+        assert!(buffer.drain_frame(1, 7, 9).is_empty());
 
-        let drained = buffer.drain_ready(2, 7, 9);
+        let drained = buffer.drain_frame(2, 7, 9);
 
         assert_eq!(drained.len(), 1);
         assert_eq!(drained[0].batch.frames[0].frame, 2);
         assert_eq!(drained[0].batch.room_epoch, 7);
         assert_eq!(drained[0].batch.session_epoch, 9);
-        assert_eq!(buffer.drain_ready(3, 7, 9)[0].batch.frames[0].frame, 3);
+        assert_eq!(buffer.drain_frame(3, 7, 9)[0].batch.frames[0].frame, 3);
     }
 
     fn input(player_index: PlayerIndex, frame: u64) -> InputFrame {

@@ -53,6 +53,9 @@ pub enum RoomError {
     /// Link-cable packet sequence did not increase.
     #[error("link-cable packet is out of order")]
     OutOfOrderLinkPacket,
+    /// Generic client payload failed validation.
+    #[error("client payload is invalid")]
+    InvalidPayload,
     /// Connected players do not have matching compatibility fingerprints.
     #[error("netplay compatibility mismatch")]
     CompatibilityMismatch,

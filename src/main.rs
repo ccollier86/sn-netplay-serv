@@ -11,6 +11,7 @@ use sb_netplay_serv::observability::{InMemoryMetrics, init_tracing};
 use sb_netplay_serv::rate_limit::InMemoryRateLimiter;
 use sb_netplay_serv::rooms::{
     InMemoryRoomRegistry, UuidInviteCodeGenerator, spawn_room_expiration_task,
+    spawn_room_frame_clock_task,
 };
 use std::sync::Arc;
 use tracing::info;
@@ -34,6 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let metrics = Arc::new(InMemoryMetrics::new());
     let admin_authorizer = AdminAuthorizer::new(config.admin_token.clone());
     let _room_expiration_task = spawn_room_expiration_task(rooms.clone());
+    let _room_frame_clock_task = spawn_room_frame_clock_task(rooms.clone());
     let services = AppServices::new(
         license_authority,
         rooms,

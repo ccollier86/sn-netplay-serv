@@ -84,6 +84,7 @@ fn room_error_message(error: RoomError) -> ServerMessage {
         RoomError::LinkPacketInvalid => {
             static_error("linkPacketInvalid", "Link-cable packet is invalid.")
         }
+        RoomError::InvalidPayload => static_error("invalidPayload", "Payload is invalid."),
         RoomError::OutOfOrderLinkPacket => {
             static_error("outOfOrderLinkPacket", "Link-cable packet is out of order.")
         }

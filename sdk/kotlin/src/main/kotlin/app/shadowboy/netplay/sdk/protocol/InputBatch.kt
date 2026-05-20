@@ -1,19 +1,51 @@
 package app.shadowboy.netplay.sdk.protocol
 
+import kotlinx.serialization.Serializable
+
 public const val MAX_INPUT_BATCH_FRAMES: Int = 4
 public const val MAX_INPUT_BATCH_BYTES: Int = 8 * 1024
 
 private val inputBatchMagic = byteArrayOf(0x53, 0x42, 0x49, 0x31)
 private const val inputBatchType: Int = 1
+private val serverFrameMagic = byteArrayOf(0x53, 0x42, 0x46, 0x31)
+private const val serverFrameType: Int = 2
 private const val batchHeaderBytes: Int = 4 + 1 + 8 + 8 + 1 + 1
 private const val frameHeaderBytes: Int = 8 + 2
+private const val serverFrameBytes: Int = 4 + 1 + 8 + 8 + 8 + 8
 
+@Serializable
 public data class InputFrameBatch(
     public val roomEpoch: Long,
     public val sessionEpoch: Long,
     public val playerIndex: Int,
     public val frames: List<InputFrame>,
 )
+
+@Serializable
+public data class ServerFrameRelease(
+    public val roomEpoch: Long,
+    public val sessionEpoch: Long,
+    public val frame: Long,
+    public val canonicalFrame: Long,
+)
+
+public sealed interface NetplayInputChannelMessage {
+    public data class InputBatch(public val batch: InputFrameBatch) : NetplayInputChannelMessage
+    public data class ServerFrame(public val frame: ServerFrameRelease) : NetplayInputChannelMessage
+}
+
+public class NetplayInputChannelCodec {
+    private val inputBatchCodec = NetplayInputBatchCodec()
+
+    public fun decode(payload: ByteArray): NetplayInputChannelMessage =
+        when {
+            isInputBatchPayload(payload) ->
+                NetplayInputChannelMessage.InputBatch(inputBatchCodec.decode(payload))
+            isServerFramePayload(payload) ->
+                NetplayInputChannelMessage.ServerFrame(decodeServerFrame(payload))
+            else -> error("Netplay input channel message type is unsupported.")
+        }
+}
 
 public class NetplayInputBatchCodec {
     public fun encode(batch: InputFrameBatch): ByteArray {
@@ -149,4 +181,34 @@ public class NetplayInputBatchCodec {
 
     private fun readU16(payload: ByteArray, offset: Int): Int =
         ((payload[offset].toInt() and 0xff) shl 8) or (payload[offset + 1].toInt() and 0xff)
+}
+
+private fun decodeServerFrame(payload: ByteArray): ServerFrameRelease {
+    require(payload.size == serverFrameBytes) { "Netplay server frame is malformed." }
+
+    return ServerFrameRelease(
+        roomEpoch = readLong(payload, 5),
+        sessionEpoch = readLong(payload, 13),
+        frame = readLong(payload, 21),
+        canonicalFrame = readLong(payload, 29),
+    )
+}
+
+private fun isInputBatchPayload(payload: ByteArray): Boolean =
+    payload.size >= batchHeaderBytes &&
+        inputBatchMagic.indices.all { index -> payload[index] == inputBatchMagic[index] } &&
+        payload[4].toInt() and 0xff == inputBatchType
+
+private fun isServerFramePayload(payload: ByteArray): Boolean =
+    payload.size == serverFrameBytes &&
+        serverFrameMagic.indices.all { index -> payload[index] == serverFrameMagic[index] } &&
+        payload[4].toInt() and 0xff == serverFrameType
+
+private fun readLong(payload: ByteArray, offset: Int): Long {
+    var value = 0L
+    for (index in 0 until 8) {
+        value = (value shl 8) or (payload[offset + index].toLong() and 0xffL)
+    }
+    require(value >= 0) { "Netplay input channel integer is out of range." }
+    return value
 }

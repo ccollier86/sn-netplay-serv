@@ -4,8 +4,8 @@
 //! only binary input batches and relays only binary input batches to peers.
 
 use crate::http::AppServices;
-use crate::protocol::{decode_input_frame_batch, encode_input_frame_batch};
-use crate::rooms::{ConnectionId, RoomInputEvent};
+use crate::protocol::{decode_input_frame_batch, encode_input_frame_batch, encode_server_frame};
+use crate::rooms::{ConnectionId, RoomError, RoomInputEvent};
 use crate::transport::WebSocketInputJoinRequest;
 use crate::transport::websocket_outbound::{
     SocketSender, send_binary_message, send_room_error, send_static_error, send_upgrade_error,
@@ -119,6 +119,10 @@ async fn handle_incoming(
             {
                 Ok(()) => true,
                 Err(error) => {
+                    if is_droppable_input_error(&error) {
+                        return true;
+                    }
+
                     let _ = send_room_error(sender, error).await;
                     false
                 }
@@ -139,6 +143,13 @@ async fn handle_incoming(
     }
 }
 
+fn is_droppable_input_error(error: &RoomError) -> bool {
+    matches!(
+        error,
+        RoomError::NotPlaying | RoomError::StaleRoomEpoch | RoomError::StaleSessionEpoch
+    )
+}
+
 async fn handle_room_event(
     sender: &mut SocketSender,
     connection_id: ConnectionId,
@@ -155,6 +166,11 @@ async fn handle_room_event(
                 Err(_) => return false,
             };
             send_binary_message(sender, payload).await.is_ok()
+        }
+        Ok(RoomInputEvent::ServerFrame { frame }) => {
+            send_binary_message(sender, encode_server_frame(&frame))
+                .await
+                .is_ok()
         }
         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => false,
         Err(tokio::sync::broadcast::error::RecvError::Closed) => false,

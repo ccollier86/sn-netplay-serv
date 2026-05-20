@@ -5,6 +5,7 @@
 
 use crate::protocol::{
     InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
+    StateHashMismatchView,
 };
 use crate::rooms::RoomView;
 use serde::Serialize;
@@ -179,6 +180,19 @@ pub enum ServerMessage {
         room_epoch: u64,
         /// Current session epoch.
         session_epoch: u64,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Relay detected mismatched deterministic state hashes.
+    StateHashMismatch {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Mismatch details.
+        mismatch: StateHashMismatchView,
         /// Current room state.
         room: RoomView,
     },

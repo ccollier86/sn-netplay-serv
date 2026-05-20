@@ -2,8 +2,10 @@ package app.shadowboy.netplay.sdk.state
 
 import app.shadowboy.netplay.sdk.json.NetplayJson
 import app.shadowboy.netplay.sdk.protocol.ClientRuntimeState
+import app.shadowboy.netplay.sdk.protocol.InputFrame
 import app.shadowboy.netplay.sdk.protocol.RoomStatus
 import app.shadowboy.netplay.sdk.protocol.ServerMessage
+import app.shadowboy.netplay.sdk.protocol.ServerFrameRelease
 import app.shadowboy.netplay.sdk.protocol.SessionPauseReason
 import app.shadowboy.netplay.sdk.protocol.SessionPauseState
 import app.shadowboy.netplay.sdk.protocol.SessionPauseView
@@ -102,6 +104,38 @@ class RoomStateMachineTest {
 
         pause.clear(3)
         assertNull(pause.currentPause)
+    }
+
+    @Test
+    fun `frame clock tracks server frame and peer read frame`() {
+        val stateMachine = RoomStateMachine()
+
+        stateMachine.apply(
+            ServerMessage.ServerFrameMessage(
+                ServerFrameRelease(
+                    roomEpoch = 1,
+                    sessionEpoch = 1,
+                    frame = 18,
+                    canonicalFrame = 20,
+                ),
+            ),
+        )
+        stateMachine.apply(
+            ServerMessage.InputFrameMessage(
+                InputFrame(
+                    playerIndex = 1,
+                    frame = 16,
+                    payload = listOf(1),
+                ),
+            ),
+        )
+        stateMachine.frameClock.markLocalFrame(31)
+
+        val diagnostics = stateMachine.frameClock.snapshot()
+        assertEquals(20, diagnostics.canonicalFrame)
+        assertEquals(18, diagnostics.serverFrame)
+        assertEquals(16, diagnostics.peerReadFrame)
+        assertEquals(true, diagnostics.stalled)
     }
 
     private fun room(

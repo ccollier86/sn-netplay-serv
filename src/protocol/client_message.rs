@@ -5,7 +5,7 @@
 
 use crate::protocol::{
     ClientRuntimeState, CompatibilityFingerprint, InputFrame, LinkCableCompatibility,
-    LinkCablePacket, SessionPauseReason, SnapshotChunk, SnapshotManifest,
+    LinkCablePacket, SessionPauseReason, SnapshotChunk, SnapshotManifest, StateHashReport,
 };
 use serde::Deserialize;
 
@@ -138,5 +138,14 @@ pub enum ClientMessage {
         session_epoch: u64,
         /// Short client-provided reason for diagnostics and peer UI.
         reason: String,
+    },
+    /// Low-frequency deterministic state hash for desync detection.
+    StateHash {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+        /// Hash report for one emulator frame.
+        report: StateHashReport,
     },
 }

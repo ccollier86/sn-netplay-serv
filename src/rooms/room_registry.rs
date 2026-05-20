@@ -8,7 +8,7 @@ use crate::auth::VerifiedLicense;
 use crate::protocol::{
     ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
     LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason,
-    SnapshotChunk, SnapshotManifest,
+    SnapshotChunk, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
     Clock, ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeTokenGenerator,
@@ -84,6 +84,21 @@ impl InMemoryRoomRegistry {
         join_timeout: Duration,
     ) -> usize {
         self.sweep_expired_rooms(now, join_timeout).await
+    }
+
+    /// Releases one canonical controller frame for each active room.
+    pub async fn release_next_controller_frames(&self) -> usize {
+        let mut rooms = self.invite_codes.write().await;
+        let now = self.clock.now();
+        let mut released_count = 0;
+
+        for stored_room in rooms.values_mut() {
+            if stored_room.emit_next_server_frame(now).is_some() {
+                released_count += 1;
+            }
+        }
+
+        released_count
     }
 
     /// Test-facing pause helper that uses an empty idempotency key.
@@ -307,6 +322,16 @@ impl RoomRegistry for InMemoryRoomRegistry {
         packet: LinkCablePacket,
     ) -> Result<(), RoomError> {
         self.relay_link_cable_packet_impl(invite_code, connection_id, packet)
+            .await
+    }
+
+    async fn record_state_hash(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        report: StateHashReport,
+    ) -> Result<(), RoomError> {
+        self.record_state_hash_impl(invite_code, connection_id, report)
             .await
     }
 

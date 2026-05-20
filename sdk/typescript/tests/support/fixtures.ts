@@ -41,6 +41,12 @@ export function roomView({
 } = {}): RoomView {
   return {
     eventSeq,
+    frameClock: {
+      acceptedInputs: [],
+      canonicalFrame: 0,
+      nextReleaseFrame: 0,
+      releasedFrame: null,
+    },
     inviteCode: "ABCD-EF",
     maxPlayers: 2,
     pause: null,

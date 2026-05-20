@@ -23,8 +23,21 @@ export interface RoomView {
   readonly session: NetplaySessionDescriptor;
   readonly maxPlayers: number;
   readonly pause: SessionPauseView | null;
+  readonly frameClock: RoomFrameClockView;
   readonly status: RoomStatus;
   readonly players: readonly PlayerSlotView[];
+}
+
+export interface RoomFrameClockView {
+  readonly canonicalFrame: number;
+  readonly releasedFrame?: number | null;
+  readonly nextReleaseFrame: number;
+  readonly acceptedInputs: readonly PlayerFrameCursorView[];
+}
+
+export interface PlayerFrameCursorView {
+  readonly playerIndex: number;
+  readonly frame?: number | null;
 }
 
 export interface PlayerSlotView {
