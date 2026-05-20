@@ -10,7 +10,12 @@ use std::time::Duration;
 pub const MVP_ROOM_CAPACITY: u8 = 2;
 
 /// Maximum number of future frames accepted from a client.
-pub const MAX_FUTURE_FRAME_DISTANCE: u64 = 6;
+///
+/// Controller netplay clients may run with prediction and rollback, so a client
+/// can legitimately advance beyond the relay's canonical room frame while the
+/// other side's delayed input is still in flight. This limit is an abuse guard,
+/// not a lockstep pacing rule.
+pub const MAX_FUTURE_FRAME_DISTANCE: u64 = 240;
 
 /// Maximum create-room JSON request size.
 pub const MAX_CREATE_ROOM_BODY_BYTES: usize = 16 * 1024;

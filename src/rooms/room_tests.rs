@@ -274,17 +274,19 @@ fn player_cannot_send_input_for_other_slot() {
 }
 
 #[test]
-fn out_of_order_frame_is_rejected() {
+fn duplicate_and_old_frames_are_ignored() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = ready_room(host_connection, guest_connection);
     let limits = InputFrameLimits::default();
 
-    room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, 0), limits)
+    room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, 1), limits)
         .expect("first frame");
-    let result = room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, 0), limits);
+    let duplicate = room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, 1), limits);
+    let older = room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, 0), limits);
 
-    assert!(matches!(result, Err(RoomError::OutOfOrderFrame)));
+    assert!(matches!(duplicate, Ok(InputFrameAcceptance::Ignore)));
+    assert!(matches!(older, Ok(InputFrameAcceptance::Ignore)));
 }
 
 #[test]
@@ -302,6 +304,20 @@ fn future_frame_limit_is_enforced() {
     );
 
     assert!(matches!(result, Err(RoomError::FutureFrameTooLarge)));
+}
+
+#[test]
+fn default_future_frame_limit_allows_prediction_window() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+
+    room.accept_input_frame(
+        host_connection,
+        &input(PlayerIndex::ONE, 180),
+        InputFrameLimits::default(),
+    )
+    .expect("prediction-window frame");
 }
 
 #[test]

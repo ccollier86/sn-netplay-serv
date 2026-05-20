@@ -8,7 +8,7 @@ use crate::protocol::{decode_input_frame_batch, encode_input_frame_batch};
 use crate::rooms::{ConnectionId, RoomInputEvent};
 use crate::transport::WebSocketInputJoinRequest;
 use crate::transport::websocket_outbound::{
-    SocketSender, send_binary_message, send_static_error, send_upgrade_error,
+    SocketSender, send_binary_message, send_room_error, send_static_error, send_upgrade_error,
 };
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
@@ -106,31 +106,35 @@ async fn handle_incoming(
                 Ok(batch) => batch,
                 Err(_) => {
                     services.metrics.record_protocol_error();
-                    return send_static_error(
-                        sender,
-                        "invalidInputBatch",
-                        "Input batch is invalid.",
-                    )
-                    .await
-                    .is_ok();
+                    let _ =
+                        send_static_error(sender, "invalidInputBatch", "Input batch is invalid.")
+                            .await;
+                    return false;
                 }
             };
-            services
+            match services
                 .rooms
                 .relay_input_frame_batch(invite_code.clone(), connection_id, batch)
                 .await
-                .map(|_| true)
-                .unwrap_or_else(|_| false)
+            {
+                Ok(()) => true,
+                Err(error) => {
+                    let _ = send_room_error(sender, error).await;
+                    false
+                }
+            }
         }
         Some(Ok(Message::Close(_))) | None => false,
         Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => true,
-        Some(Ok(Message::Text(_))) => send_static_error(
-            sender,
-            "unsupportedMessage",
-            "Input socket only accepts binary input batches.",
-        )
-        .await
-        .is_ok(),
+        Some(Ok(Message::Text(_))) => {
+            let _ = send_static_error(
+                sender,
+                "unsupportedMessage",
+                "Input socket only accepts binary input batches.",
+            )
+            .await;
+            false
+        }
         Some(Err(_)) => false,
     }
 }

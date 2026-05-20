@@ -43,7 +43,7 @@ impl NetplayRoom {
         if let Some(last_frame) = self.last_input_frames.get(&input.player_index)
             && input.frame <= *last_frame
         {
-            return Err(RoomError::OutOfOrderFrame);
+            return Ok(InputFrameAcceptance::Ignore);
         }
 
         if input.frame > self.room_frame + limits.max_future_frame_distance {
