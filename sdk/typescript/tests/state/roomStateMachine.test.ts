@@ -222,7 +222,7 @@ describe("TypeScript netplay room state", () => {
       },
       type: "inputFrame",
     });
-    stateMachine.frameClock.markLocalFrame(31);
+    stateMachine.frameClock.markLocalFrame(80);
 
     expect(stateMachine.frameClock.snapshot()).toMatchObject({
       canonicalFrame: 20,

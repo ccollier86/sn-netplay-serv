@@ -2,8 +2,8 @@ import type { ServerFrameRelease } from "../protocol/inputBatch.ts";
 import type { InputFrame } from "../protocol/runtimePayloads.ts";
 import type { RoomFrameClockView, RoomView } from "../protocol/roomViews.ts";
 
-const defaultStallFrames = 12;
-const defaultCatchUpFrames = 4;
+const defaultStallFrames = 60;
+const defaultCatchUpFrames = 3;
 
 export interface FrameClockPolicy {
   readonly catchUpFrames: number;
@@ -77,7 +77,7 @@ export class FrameClockTracker {
       canonicalFrame: this.canonicalFrame,
       catchUp:
         localFrame !== null &&
-        this.serverFrame - localFrame > this.policy.catchUpFrames,
+        this.serverFrame - localFrame >= this.policy.catchUpFrames,
       localFrame,
       peerReadFrame: this.peerReadFrame,
       roomFrame: this.roomFrame,

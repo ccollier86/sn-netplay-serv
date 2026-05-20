@@ -129,7 +129,7 @@ class RoomStateMachineTest {
                 ),
             ),
         )
-        stateMachine.frameClock.markLocalFrame(31)
+        stateMachine.frameClock.markLocalFrame(80)
 
         val diagnostics = stateMachine.frameClock.snapshot()
         assertEquals(20, diagnostics.canonicalFrame)

@@ -6,8 +6,8 @@ import app.shadowboy.netplay.sdk.protocol.RoomView
 import app.shadowboy.netplay.sdk.protocol.ServerFrameRelease
 
 public data class FrameClockPolicy(
-    public val catchUpFrames: Long = 4,
-    public val stallFrames: Long = 12,
+    public val catchUpFrames: Long = 3,
+    public val stallFrames: Long = 60,
 )
 
 public data class FrameClockDiagnostics(
@@ -62,7 +62,7 @@ public class FrameClockTracker(
         val local = localFrame
         return FrameClockDiagnostics(
             canonicalFrame = canonicalFrame,
-            catchUp = local != null && serverFrame - local > policy.catchUpFrames,
+            catchUp = local != null && serverFrame - local >= policy.catchUpFrames,
             localFrame = local,
             peerReadFrame = peerReadFrame,
             roomFrame = roomFrame,
