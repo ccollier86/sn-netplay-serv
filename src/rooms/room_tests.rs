@@ -321,6 +321,29 @@ fn default_future_frame_limit_allows_prediction_window() {
 }
 
 #[test]
+fn room_frame_waits_for_every_connected_player() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+
+    room.accept_input_frame(
+        host_connection,
+        &input(PlayerIndex::ONE, 180),
+        InputFrameLimits::default(),
+    )
+    .expect("host prediction-window frame");
+    assert_eq!(room.room_frame, 0);
+
+    room.accept_input_frame(
+        guest_connection,
+        &input(PlayerIndex::TWO, 180),
+        InputFrameLimits::default(),
+    )
+    .expect("guest prediction-window frame");
+    assert_eq!(room.room_frame, 180);
+}
+
+#[test]
 fn link_compatibility_enters_syncing_state() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();

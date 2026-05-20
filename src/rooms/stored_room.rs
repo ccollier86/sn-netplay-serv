@@ -5,11 +5,11 @@
 //! messages or apply room-domain rules.
 
 use crate::protocol::{
-    InputFrame, InputFrameBatch, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
+    InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
 };
 use crate::rooms::{
-    ConnectionId, NetplayRoom, RoomDebugEvent, RoomDebugEventLog, RoomEvent, RoomInputEvent,
-    RoomView, current_timestamp_ms,
+    ConnectionId, InputFrameRelayBuffer, NetplayRoom, RoomDebugEvent, RoomDebugEventLog, RoomEvent,
+    RoomInputEvent, RoomView, current_timestamp_ms,
 };
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
@@ -22,6 +22,7 @@ pub(super) struct StoredRoom {
     pub(super) room: NetplayRoom,
     events: broadcast::Sender<RoomEvent>,
     input_events: broadcast::Sender<RoomInputEvent>,
+    input_relay_buffer: InputFrameRelayBuffer,
     event_seq: u64,
     debug_events: RoomDebugEventLog,
     created_at: Instant,
@@ -37,6 +38,7 @@ impl StoredRoom {
             room,
             events,
             input_events,
+            input_relay_buffer: InputFrameRelayBuffer::default(),
             event_seq: 0,
             debug_events: RoomDebugEventLog::default(),
             created_at: Instant::now(),
@@ -180,28 +182,30 @@ impl StoredRoom {
             .send(RoomEvent::SnapshotComplete { source, manifest });
     }
 
-    /// Emits a validated controller input frame.
-    pub(super) fn emit_input_frame(
-        &mut self,
-        now: Instant,
-        source: ConnectionId,
-        input: InputFrame,
-    ) {
-        let _ = now;
-        let _ = self.events.send(RoomEvent::InputFrame { source, input });
+    /// Buffers accepted controller input until the room frame reaches it.
+    pub(super) fn buffer_input_frame(&mut self, source: ConnectionId, input: InputFrame) {
+        self.input_relay_buffer.push(source, input);
     }
 
-    /// Emits validated controller input frames without recording debug spam.
-    pub(super) fn emit_input_frame_batch(
+    /// Emits ready controller input frames without recording debug spam.
+    pub(super) fn emit_ready_input_frames(
         &mut self,
         now: Instant,
-        source: ConnectionId,
-        batch: InputFrameBatch,
+        through_frame: u64,
+        room_epoch: u64,
+        session_epoch: u64,
     ) {
         let _ = now;
-        let _ = self
-            .input_events
-            .send(RoomInputEvent::InputFrameBatch { batch, source });
+
+        for ready_batch in
+            self.input_relay_buffer
+                .drain_ready(through_frame, room_epoch, session_epoch)
+        {
+            let _ = self.input_events.send(RoomInputEvent::InputFrameBatch {
+                batch: ready_batch.batch,
+                source: ready_batch.source,
+            });
+        }
     }
 
     /// Emits a validated link-cable packet.

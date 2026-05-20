@@ -424,6 +424,71 @@ async fn validated_input_frame_is_broadcast() {
 }
 
 #[tokio::test]
+async fn future_input_frame_waits_for_room_frame_before_broadcast() {
+    let (registry, invite, host_connection, guest_connection) = compatible_room().await;
+    complete_snapshot(&registry, &invite, host_connection).await;
+    registry
+        .mark_ready(invite.clone(), host_connection)
+        .await
+        .expect("host ready");
+    registry
+        .mark_ready(invite.clone(), guest_connection)
+        .await
+        .expect("guest ready");
+    let mut events = registry
+        .subscribe_input(invite.clone())
+        .await
+        .expect("input events");
+    let room_epoch = room_epoch(&registry, &invite).await;
+    let session_epoch = session_epoch(&registry, &invite).await;
+
+    registry
+        .relay_input_frame_batch(
+            invite.clone(),
+            host_connection,
+            InputFrameBatch {
+                room_epoch,
+                session_epoch,
+                player_index: PlayerIndex::ONE,
+                frames: vec![input(PlayerIndex::ONE, 5)],
+            },
+        )
+        .await
+        .expect("host future input");
+
+    assert!(matches!(
+        events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+
+    registry
+        .relay_input_frame_batch(
+            invite,
+            guest_connection,
+            InputFrameBatch {
+                room_epoch,
+                session_epoch,
+                player_index: PlayerIndex::TWO,
+                frames: vec![input(PlayerIndex::TWO, 5)],
+            },
+        )
+        .await
+        .expect("guest matching input");
+
+    let first_event = events.recv().await.expect("first input event");
+    let second_event = events.recv().await.expect("second input event");
+
+    assert!(matches!(
+        first_event,
+        crate::rooms::RoomInputEvent::InputFrameBatch { .. }
+    ));
+    assert!(matches!(
+        second_event,
+        crate::rooms::RoomInputEvent::InputFrameBatch { .. }
+    ));
+}
+
+#[tokio::test]
 async fn repeated_pause_request_updates_existing_pause() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
@@ -849,6 +914,14 @@ fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {
         cheats_hash: "cheats".to_string(),
         system_data_hash: None,
         save_data_mode: "netplay".to_string(),
+    }
+}
+
+fn input(player_index: PlayerIndex, frame: u64) -> InputFrame {
+    InputFrame {
+        frame,
+        payload: vec![0],
+        player_index,
     }
 }
 

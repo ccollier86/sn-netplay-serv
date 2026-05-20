@@ -33,7 +33,13 @@ impl InMemoryRoomRegistry {
 
         if acceptance == InputFrameAcceptance::Relay {
             let now = self.clock.now();
-            stored_room.emit_input_frame(now, connection_id, input);
+            stored_room.buffer_input_frame(connection_id, input);
+            stored_room.emit_ready_input_frames(
+                now,
+                stored_room.room.room_frame,
+                stored_room.room.room_epoch,
+                stored_room.room.session_epoch,
+            );
         }
 
         Ok(())
@@ -73,13 +79,14 @@ impl InMemoryRoomRegistry {
         if !accepted_frames.is_empty() {
             stored_room.room = next_room;
             let now = self.clock.now();
-            stored_room.emit_input_frame_batch(
+            for input in accepted_frames {
+                stored_room.buffer_input_frame(connection_id, input);
+            }
+            stored_room.emit_ready_input_frames(
                 now,
-                connection_id,
-                InputFrameBatch {
-                    frames: accepted_frames,
-                    ..batch
-                },
+                stored_room.room.room_frame,
+                stored_room.room.room_epoch,
+                stored_room.room.session_epoch,
             );
         }
 
