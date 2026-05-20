@@ -308,6 +308,26 @@ async fn handle_client_message(
             )
             .await
         }
+        ClientMessage::PlayerExited {
+            room_epoch,
+            session_epoch,
+            reason,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            apply_room_result(
+                sender,
+                services
+                    .rooms
+                    .player_exited(invite_code.clone(), connection_id, reason)
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
     }
 }
 

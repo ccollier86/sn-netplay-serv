@@ -203,6 +203,31 @@ impl InMemoryRoomRegistry {
         Ok(room)
     }
 
+    /// Ends a room because one player intentionally left.
+    pub(super) async fn player_exited_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        reason: String,
+    ) -> Result<RoomView, RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        let now = self.clock.now();
+        let player_index = stored_room.room.player_exited(connection_id, now)?;
+
+        stored_room.emit_player_exited(
+            now,
+            player_index.zero_based(),
+            normalize_exit_reason(reason),
+        );
+        let room = stored_room.view(now);
+        self.record_recent_events(stored_room.debug_events(1));
+
+        Ok(room)
+    }
+
     /// Attaches a binary input socket to an occupied player slot.
     pub(super) async fn connect_input_socket_impl(
         &self,
@@ -293,4 +318,14 @@ impl InMemoryRoomRegistry {
 
         removed_count
     }
+}
+
+fn normalize_exit_reason(reason: String) -> String {
+    let reason = reason.trim();
+
+    if reason.is_empty() {
+        return "userQuit".to_string();
+    }
+
+    reason.chars().take(80).collect()
 }

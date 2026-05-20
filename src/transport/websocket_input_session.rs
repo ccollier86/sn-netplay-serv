@@ -5,7 +5,7 @@
 
 use crate::http::AppServices;
 use crate::protocol::{decode_input_frame_batch, encode_input_frame_batch};
-use crate::rooms::{ConnectionId, RoomEvent};
+use crate::rooms::{ConnectionId, RoomInputEvent};
 use crate::transport::WebSocketInputJoinRequest;
 use crate::transport::websocket_outbound::{
     SocketSender, send_binary_message, send_static_error, send_upgrade_error,
@@ -21,7 +21,11 @@ pub async fn handle_websocket_input_session(
     request: WebSocketInputJoinRequest,
 ) {
     let connection_id = ConnectionId::new();
-    let mut events = match services.rooms.subscribe(request.invite_code.clone()).await {
+    let mut events = match services
+        .rooms
+        .subscribe_input(request.invite_code.clone())
+        .await
+    {
         Ok(events) => events,
         Err(error) => {
             send_upgrade_error(socket, error).await;
@@ -68,7 +72,7 @@ pub async fn handle_websocket_input_session(
 async fn input_session_loop(
     sender: &mut SocketSender,
     receiver: &mut SplitStream<WebSocket>,
-    events: &mut crate::rooms::RoomEventReceiver,
+    events: &mut crate::rooms::RoomInputEventReceiver,
     services: &AppServices,
     invite_code: &crate::rooms::InviteCode,
     connection_id: ConnectionId,
@@ -134,10 +138,10 @@ async fn handle_incoming(
 async fn handle_room_event(
     sender: &mut SocketSender,
     connection_id: ConnectionId,
-    event: Result<RoomEvent, tokio::sync::broadcast::error::RecvError>,
+    event: Result<RoomInputEvent, tokio::sync::broadcast::error::RecvError>,
 ) -> bool {
     match event {
-        Ok(RoomEvent::InputFrameBatch { source, batch }) => {
+        Ok(RoomInputEvent::InputFrameBatch { source, batch }) => {
             if source == connection_id {
                 return true;
             }
@@ -148,9 +152,7 @@ async fn handle_room_event(
             };
             send_binary_message(sender, payload).await.is_ok()
         }
-        Ok(RoomEvent::InputFrame { .. }) => true,
         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => false,
         Err(tokio::sync::broadcast::error::RecvError::Closed) => false,
-        _ => true,
     }
 }

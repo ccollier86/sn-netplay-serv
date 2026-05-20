@@ -39,7 +39,8 @@ export type ClientMessage =
       readonly requestId: string;
       readonly reason: SessionPauseReason;
       readonly sequence: number;
-    };
+    }
+  | EpochMessage<"playerExited"> & { readonly reason: string };
 
 export type ServerMessage =
   | RoomEpochMessage<"roomJoined"> & {
@@ -75,6 +76,11 @@ export type ServerMessage =
   | RoomEpochMessage<"recoveryStarted"> & { readonly room: RoomView }
   | RoomEpochMessage<"playerReconnected"> & {
       readonly playerIndex: number;
+      readonly room: RoomView;
+    }
+  | RoomEpochMessage<"playerExited"> & {
+      readonly playerIndex: number;
+      readonly reason: string;
       readonly room: RoomView;
     }
   | RoomEpochMessage<"recoveryResyncRequired"> & { readonly room: RoomView }

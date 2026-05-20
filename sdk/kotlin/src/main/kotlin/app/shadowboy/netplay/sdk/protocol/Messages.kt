@@ -102,6 +102,14 @@ public sealed interface ClientMessage {
         public val reason: SessionPauseReason,
         public val sequence: Long,
     ) : ClientMessage
+
+    @Serializable
+    @SerialName("playerExited")
+    public data class PlayerExited(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val reason: String,
+    ) : ClientMessage
 }
 
 @Serializable
@@ -172,6 +180,21 @@ public sealed interface ServerMessage {
         public val roomEpoch: Long,
         public val sessionEpoch: Long,
         public val playerIndex: Int,
+        public val room: RoomView,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long = eventSeq
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("playerExited")
+    public data class PlayerExited(
+        public val eventSeq: Long,
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val playerIndex: Int,
+        public val reason: String,
         public val room: RoomView,
     ) : ServerMessage {
         override val eventSeqOrNull: Long = eventSeq

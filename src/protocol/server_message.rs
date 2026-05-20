@@ -156,6 +156,21 @@ pub enum ServerMessage {
         /// Current room state.
         room: RoomView,
     },
+    /// A player intentionally quit the room.
+    PlayerExited {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Zero-based player index that quit.
+        player_index: u8,
+        /// Short client-provided reason for diagnostics and peer UI.
+        reason: String,
+        /// Current room state.
+        room: RoomView,
+    },
     /// Relay requires a compatibility check and state sync after recovery.
     RecoveryResyncRequired {
         /// Monotonic event sequence included with the room view.

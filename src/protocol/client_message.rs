@@ -130,4 +130,13 @@ pub enum ClientMessage {
         /// Reason being released.
         reason: SessionPauseReason,
     },
+    /// Client is intentionally leaving the active room.
+    PlayerExited {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+        /// Short client-provided reason for diagnostics and peer UI.
+        reason: String,
+    },
 }

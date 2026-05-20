@@ -45,12 +45,12 @@ pub use resume_token::{
 pub use room::NetplayRoom;
 pub use room_controller_netplay_ops::{SessionPauseReachedOutcome, SessionResumeOutcome};
 pub use room_debug_event::{RoomDebugEvent, RoomDebugEventLog, current_timestamp_ms};
-pub use room_event::RoomEvent;
+pub use room_event::{RoomEvent, RoomInputEvent};
 pub use room_expiration_task::spawn_room_expiration_task;
 pub use room_join::RoomJoin;
 pub use room_registry::InMemoryRoomRegistry;
 pub use room_registry_snapshot::RoomRegistrySnapshot;
-pub use room_registry_trait::{RoomEventReceiver, RoomRegistry};
+pub use room_registry_trait::{RoomEventReceiver, RoomInputEventReceiver, RoomRegistry};
 pub use room_status::RoomStatus;
 pub use room_view::{PlayerSlotView, RoomView};
 pub(crate) use session_pause_state::SessionPauseStateTracker;

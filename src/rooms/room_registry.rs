@@ -172,6 +172,16 @@ impl RoomRegistry for InMemoryRoomRegistry {
         self.disconnect_impl(invite_code, connection_id).await
     }
 
+    async fn player_exited(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        reason: String,
+    ) -> Result<RoomView, RoomError> {
+        self.player_exited_impl(invite_code, connection_id, reason)
+            .await
+    }
+
     async fn connect_input_socket(
         &self,
         invite_code: InviteCode,
@@ -208,6 +218,18 @@ impl RoomRegistry for InMemoryRoomRegistry {
             .ok_or(RoomError::NotFound)?;
 
         Ok(stored_room.subscribe())
+    }
+
+    async fn subscribe_input(
+        &self,
+        invite_code: InviteCode,
+    ) -> Result<crate::rooms::RoomInputEventReceiver, RoomError> {
+        let rooms = self.invite_codes.read().await;
+        let stored_room = rooms
+            .get(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+
+        Ok(stored_room.subscribe_input())
     }
 
     async fn set_compatibility(

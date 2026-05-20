@@ -44,6 +44,7 @@ export class RoomStateMachine {
       case "compatibilityRequested":
       case "recoveryStarted":
       case "playerReconnected":
+      case "playerExited":
       case "recoveryResyncRequired":
       case "startSession":
         this.updateRoom(message.room);

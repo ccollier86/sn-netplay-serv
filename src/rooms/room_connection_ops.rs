@@ -122,6 +122,34 @@ impl NetplayRoom {
         self.disconnect_with_recovery(connection_id, Instant::now(), Duration::from_secs(0))
     }
 
+    /// Ends the room because one player intentionally left.
+    pub fn player_exited(
+        &mut self,
+        connection_id: ConnectionId,
+        now: Instant,
+    ) -> Result<PlayerIndex, RoomError> {
+        let player_index = self
+            .player_index_for_connection(connection_id)
+            .ok_or(RoomError::UnknownConnection)?;
+
+        self.status = RoomStatus::Closed;
+        self.reset_sync_state();
+        self.players
+            .iter_mut()
+            .filter(|slot| !slot.is_empty())
+            .for_each(|slot| {
+                slot.connection_id = None;
+                slot.input_connection_id = None;
+                slot.last_seen_at = Some(now);
+                slot.reconnect_deadline = None;
+                slot.reconnect_room_epoch = None;
+                slot.status = PlayerStatus::Disconnected;
+                slot.runtime_state = PlayerRuntimeState::Disconnected;
+            });
+
+        Ok(player_index)
+    }
+
     /// Marks the connection disconnected and starts recovery when appropriate.
     pub fn disconnect_with_recovery(
         &mut self,

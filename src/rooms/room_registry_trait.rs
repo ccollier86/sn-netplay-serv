@@ -11,13 +11,15 @@ use crate::protocol::{
     SnapshotChunk, SnapshotManifest,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, PlayerIndex, RoomDebugEvent, RoomError, RoomEvent, RoomJoin,
-    RoomRegistrySnapshot, RoomView,
+    ConnectionId, InviteCode, PlayerIndex, RoomDebugEvent, RoomError, RoomEvent, RoomInputEvent,
+    RoomJoin, RoomRegistrySnapshot, RoomView,
 };
 use tokio::sync::broadcast;
 
 /// Receiver for room domain events.
 pub type RoomEventReceiver = broadcast::Receiver<RoomEvent>;
+/// Receiver for dedicated gameplay input events.
+pub type RoomInputEventReceiver = broadcast::Receiver<RoomInputEvent>;
 
 /// Room storage behavior needed by transports and routes.
 #[async_trait::async_trait]
@@ -71,6 +73,14 @@ pub trait RoomRegistry: Send + Sync {
         connection_id: ConnectionId,
     ) -> Result<RoomView, RoomError>;
 
+    /// Ends a room because one player intentionally left.
+    async fn player_exited(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        reason: String,
+    ) -> Result<RoomView, RoomError>;
+
     /// Attaches a binary input socket to an occupied player slot.
     async fn connect_input_socket(
         &self,
@@ -91,6 +101,12 @@ pub trait RoomRegistry: Send + Sync {
 
     /// Subscribes to domain events for one active room.
     async fn subscribe(&self, invite_code: InviteCode) -> Result<RoomEventReceiver, RoomError>;
+
+    /// Subscribes to gameplay input events for one active room.
+    async fn subscribe_input(
+        &self,
+        invite_code: InviteCode,
+    ) -> Result<RoomInputEventReceiver, RoomError>;
 
     /// Stores a compatibility fingerprint from one connected player.
     async fn set_compatibility(

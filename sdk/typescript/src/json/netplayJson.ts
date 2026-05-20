@@ -15,6 +15,7 @@ const serverMessageTypes = new Set([
   "compatibilityRequested",
   "recoveryStarted",
   "playerReconnected",
+  "playerExited",
   "recoveryResyncRequired",
   "heartbeatAck",
   "error",

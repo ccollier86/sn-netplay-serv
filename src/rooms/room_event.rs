@@ -45,13 +45,6 @@ pub enum RoomEvent {
         /// Validated input frame.
         input: InputFrame,
     },
-    /// Validated input frames should be relayed over binary input sockets.
-    InputFrameBatch {
-        /// Connection that supplied the input frames.
-        source: ConnectionId,
-        /// Validated input frame batch.
-        batch: InputFrameBatch,
-    },
     /// Link-cable packet should be relayed to other subscribers.
     LinkCablePacket {
         /// Connection that supplied the packet.
@@ -72,5 +65,26 @@ pub enum RoomEvent {
         source: ConnectionId,
         /// Validated snapshot manifest.
         manifest: SnapshotManifest,
+    },
+    /// One player intentionally left the room.
+    PlayerExited {
+        /// Zero-based player index that quit.
+        player_index: u8,
+        /// Short reason safe for peer UI and diagnostics.
+        reason: String,
+        /// Current room state after the exit.
+        room: RoomView,
+    },
+}
+
+/// Event emitted on the dedicated binary input relay channel.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RoomInputEvent {
+    /// Validated input frames should be relayed over binary input sockets.
+    InputFrameBatch {
+        /// Connection that supplied the input frames.
+        source: ConnectionId,
+        /// Validated input frame batch.
+        batch: InputFrameBatch,
     },
 }

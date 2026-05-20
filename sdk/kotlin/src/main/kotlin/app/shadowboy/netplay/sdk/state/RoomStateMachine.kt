@@ -30,6 +30,7 @@ public class RoomStateMachine(
             is ServerMessage.CompatibilityRequested -> updateRoom(message.room)
             is ServerMessage.RecoveryStarted -> updateRoom(message.room)
             is ServerMessage.PlayerReconnected -> updateRoom(message.room)
+            is ServerMessage.PlayerExited -> updateRoom(message.room)
             is ServerMessage.RecoveryResyncRequired -> updateRoom(message.room)
             is ServerMessage.StartSession -> updateRoom(message.room)
             is ServerMessage.SessionPauseScheduled -> {

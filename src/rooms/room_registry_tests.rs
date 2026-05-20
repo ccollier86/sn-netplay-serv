@@ -192,6 +192,27 @@ async fn host_disconnect_removes_closed_room() {
 }
 
 #[tokio::test]
+async fn player_exit_broadcasts_and_closes_room() {
+    let (registry, invite, _host_connection, guest_connection) = compatible_room().await;
+    let mut events = registry.subscribe(invite.clone()).await.expect("events");
+
+    let room = registry
+        .player_exited(invite.clone(), guest_connection, "userQuit".to_string())
+        .await
+        .expect("player exited");
+    let event = events.recv().await.expect("event");
+
+    assert_eq!(room.status, RoomStatus::Closed);
+    assert!(matches!(
+        event,
+        RoomEvent::PlayerExited {
+            player_index: 1,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
 async fn compatibility_mismatch_broadcasts_room_state() {
     let registry = registry();
     let host_connection = ConnectionId::new();
@@ -275,6 +296,32 @@ async fn host_snapshot_chunk_is_broadcast() {
 }
 
 #[tokio::test]
+async fn snapshot_chunks_do_not_publish_to_input_channel() {
+    let (registry, invite, host_connection, _guest_connection) = compatible_room().await;
+    let mut input_events = registry
+        .subscribe_input(invite.clone())
+        .await
+        .expect("input events");
+
+    registry
+        .relay_snapshot_chunk(
+            invite,
+            host_connection,
+            SnapshotChunk {
+                index: 0,
+                bytes: vec![1, 2, 3],
+            },
+        )
+        .await
+        .expect("snapshot chunk");
+
+    assert!(matches!(
+        input_events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
 async fn snapshot_complete_requires_matching_chunks() {
     let (registry, invite, host_connection, _guest_connection) = compatible_room().await;
 
@@ -343,7 +390,10 @@ async fn validated_input_frame_is_broadcast() {
         .mark_ready(invite.clone(), guest_connection)
         .await
         .expect("guest ready");
-    let mut events = registry.subscribe(invite.clone()).await.expect("events");
+    let mut events = registry
+        .subscribe_input(invite.clone())
+        .await
+        .expect("input events");
     let room_epoch = room_epoch(&registry, &invite).await;
     let session_epoch = session_epoch(&registry, &invite).await;
 
@@ -369,7 +419,7 @@ async fn validated_input_frame_is_broadcast() {
 
     assert!(matches!(
         event,
-        crate::rooms::RoomEvent::InputFrameBatch { .. }
+        crate::rooms::RoomInputEvent::InputFrameBatch { .. }
     ));
 }
 

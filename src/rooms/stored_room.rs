@@ -8,18 +8,20 @@ use crate::protocol::{
     InputFrame, InputFrameBatch, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
 };
 use crate::rooms::{
-    ConnectionId, NetplayRoom, RoomDebugEvent, RoomDebugEventLog, RoomEvent, RoomView,
-    current_timestamp_ms,
+    ConnectionId, NetplayRoom, RoomDebugEvent, RoomDebugEventLog, RoomEvent, RoomInputEvent,
+    RoomView, current_timestamp_ms,
 };
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
-const ROOM_EVENT_CHANNEL_CAPACITY: usize = 32;
+const ROOM_EVENT_CHANNEL_CAPACITY: usize = 512;
+const INPUT_EVENT_CHANNEL_CAPACITY: usize = 512;
 
 /// Room plus event channel stored by the in-memory registry.
 pub(super) struct StoredRoom {
     pub(super) room: NetplayRoom,
     events: broadcast::Sender<RoomEvent>,
+    input_events: broadcast::Sender<RoomInputEvent>,
     event_seq: u64,
     debug_events: RoomDebugEventLog,
     created_at: Instant,
@@ -29,10 +31,12 @@ impl StoredRoom {
     /// Creates a stored room with a bounded event channel.
     pub(super) fn new(room: NetplayRoom) -> Self {
         let (events, _) = broadcast::channel(ROOM_EVENT_CHANNEL_CAPACITY);
+        let (input_events, _) = broadcast::channel(INPUT_EVENT_CHANNEL_CAPACITY);
 
         Self {
             room,
             events,
+            input_events,
             event_seq: 0,
             debug_events: RoomDebugEventLog::default(),
             created_at: Instant::now(),
@@ -80,6 +84,11 @@ impl StoredRoom {
     /// Subscribes to room events.
     pub(super) fn subscribe(&self) -> broadcast::Receiver<RoomEvent> {
         self.events.subscribe()
+    }
+
+    /// Subscribes to gameplay input events only.
+    pub(super) fn subscribe_input(&self) -> broadcast::Receiver<RoomInputEvent> {
+        self.input_events.subscribe()
     }
 
     /// Returns a room view with the current event sequence.
@@ -137,6 +146,16 @@ impl StoredRoom {
         });
     }
 
+    /// Emits an intentional player-exit event.
+    pub(super) fn emit_player_exited(&mut self, now: Instant, player_index: u8, reason: String) {
+        let room = self.record_event(now, "playerExited", "player intentionally exited");
+        let _ = self.events.send(RoomEvent::PlayerExited {
+            player_index,
+            reason,
+            room,
+        });
+    }
+
     /// Emits a validated snapshot chunk.
     pub(super) fn emit_snapshot_chunk(
         &mut self,
@@ -181,8 +200,8 @@ impl StoredRoom {
     ) {
         let _ = now;
         let _ = self
-            .events
-            .send(RoomEvent::InputFrameBatch { batch, source });
+            .input_events
+            .send(RoomInputEvent::InputFrameBatch { batch, source });
     }
 
     /// Emits a validated link-cable packet.

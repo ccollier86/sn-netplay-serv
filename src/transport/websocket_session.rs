@@ -219,7 +219,19 @@ async fn handle_room_event(
             resume_at_frame,
             room,
         },
-        Ok(RoomEvent::InputFrame { .. }) | Ok(RoomEvent::InputFrameBatch { .. }) => {
+        Ok(RoomEvent::PlayerExited {
+            player_index,
+            reason,
+            room,
+        }) => ServerMessage::PlayerExited {
+            event_seq: room.event_seq,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            player_index,
+            reason,
+            room,
+        },
+        Ok(RoomEvent::InputFrame { .. }) => {
             return true;
         }
         Ok(RoomEvent::LinkCablePacket { source, packet }) => {
