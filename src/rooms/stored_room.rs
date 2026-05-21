@@ -165,7 +165,21 @@ impl StoredRoom {
         now: Instant,
         mismatch: &StateHashMismatchView,
     ) {
-        let detail = format!("state hash mismatch observed at frame {}", mismatch.frame);
+        let detail = if mismatch.nearby_matches.is_empty() {
+            format!("state hash mismatch observed at frame {}", mismatch.frame)
+        } else {
+            let first_match = &mismatch.nearby_matches[0];
+            format!(
+                "state hash mismatch observed at frame {} with {} nearby-frame match(es); first offset {} p{} frame {} matched p{} frame {}",
+                mismatch.frame,
+                mismatch.nearby_matches.len(),
+                first_match.frame_offset,
+                first_match.source_player_index.zero_based(),
+                first_match.source_frame,
+                first_match.matched_player_index.zero_based(),
+                first_match.matched_frame
+            )
+        };
         self.record_event(now, "stateHashMismatchDiagnostic", &detail);
     }
 

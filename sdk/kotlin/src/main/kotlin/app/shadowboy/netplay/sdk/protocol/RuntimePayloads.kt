@@ -42,7 +42,17 @@ public data class PlayerStateHashView(
 )
 
 @Serializable
+public data class NearbyStateHashMatchView(
+    public val sourcePlayerIndex: Int,
+    public val sourceFrame: Long,
+    public val matchedPlayerIndex: Int,
+    public val matchedFrame: Long,
+    public val frameOffset: Long,
+)
+
+@Serializable
 public data class StateHashMismatchView(
     public val frame: Long,
     public val hashes: List<PlayerStateHashView>,
+    public val nearbyMatches: List<NearbyStateHashMatchView> = emptyList(),
 )

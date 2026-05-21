@@ -479,6 +479,12 @@ fn state_hash_mismatch_is_reported_without_changing_room_state() {
         .expect("guest hash");
 
     assert!(mismatch.is_some());
+    assert_eq!(
+        mismatch
+            .as_ref()
+            .map(|mismatch| mismatch.nearby_matches.as_slice()),
+        Some([].as_slice())
+    );
 
     let view = room.view();
     assert_eq!(view.status, RoomStatus::Playing);
@@ -486,6 +492,35 @@ fn state_hash_mismatch_is_reported_without_changing_room_state() {
     assert_eq!(view.frame_clock.canonical_frame, 0);
     assert_eq!(view.players[0].status, PlayerStatus::Playing);
     assert_eq!(view.players[1].status, PlayerStatus::Playing);
+}
+
+#[test]
+fn state_hash_mismatch_reports_nearby_frame_matches() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+
+    room.accept_state_hash(guest_connection, state_hash(59, "a"))
+        .expect("guest nearby hash");
+    room.accept_state_hash(host_connection, state_hash(60, "a"))
+        .expect("host hash");
+    let mismatch = room
+        .accept_state_hash(guest_connection, state_hash(60, "b"))
+        .expect("guest hash")
+        .expect("mismatch");
+
+    assert_eq!(mismatch.nearby_matches.len(), 1);
+    assert_eq!(
+        mismatch.nearby_matches[0].source_player_index,
+        PlayerIndex::ONE
+    );
+    assert_eq!(mismatch.nearby_matches[0].source_frame, 60);
+    assert_eq!(
+        mismatch.nearby_matches[0].matched_player_index,
+        PlayerIndex::TWO
+    );
+    assert_eq!(mismatch.nearby_matches[0].matched_frame, 59);
+    assert_eq!(mismatch.nearby_matches[0].frame_offset, -1);
 }
 
 #[test]

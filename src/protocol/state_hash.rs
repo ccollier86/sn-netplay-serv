@@ -32,6 +32,22 @@ pub struct PlayerStateHashView {
     pub sha256: String,
 }
 
+/// Nearby-frame hash match found while diagnosing a mismatch.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NearbyStateHashMatchView {
+    /// Player whose hash was used as the source.
+    pub source_player_index: PlayerIndex,
+    /// Source frame that mismatched in the exact comparison.
+    pub source_frame: u64,
+    /// Other player whose nearby frame matched the source hash.
+    pub matched_player_index: PlayerIndex,
+    /// Nearby frame that matched the source hash.
+    pub matched_frame: u64,
+    /// Signed offset from the source frame to the matched frame.
+    pub frame_offset: i64,
+}
+
 /// Server view emitted when all reported hashes for one frame do not match.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,4 +56,6 @@ pub struct StateHashMismatchView {
     pub frame: u64,
     /// Reported hashes by player.
     pub hashes: Vec<PlayerStateHashView>,
+    /// Nearby-frame matches that indicate an off-by-one or off-by-two label.
+    pub nearby_matches: Vec<NearbyStateHashMatchView>,
 }

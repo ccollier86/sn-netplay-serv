@@ -31,7 +31,16 @@ export interface PlayerStateHashView {
   readonly sha256: string;
 }
 
+export interface NearbyStateHashMatchView {
+  readonly sourcePlayerIndex: number;
+  readonly sourceFrame: number;
+  readonly matchedPlayerIndex: number;
+  readonly matchedFrame: number;
+  readonly frameOffset: number;
+}
+
 export interface StateHashMismatchView {
   readonly frame: number;
   readonly hashes: readonly PlayerStateHashView[];
+  readonly nearbyMatches: readonly NearbyStateHashMatchView[];
 }

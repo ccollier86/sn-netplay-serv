@@ -3,8 +3,13 @@
 //! Clients periodically report state hashes for the same canonical frame. The
 //! relay compares reports only after every connected player reported that frame.
 
-use crate::protocol::{PlayerStateHashView, StateHashMismatchView, StateHashReport};
+use crate::protocol::{
+    NearbyStateHashMatchView, PlayerStateHashView, StateHashMismatchView, StateHashReport,
+};
 use crate::rooms::{ConnectionId, NetplayRoom, RoomError, RoomStatus};
+
+const STATE_HASH_RETAIN_FRAMES: u64 = 600;
+const STATE_HASH_NEARBY_MATCH_WINDOW: i64 = 2;
 
 impl NetplayRoom {
     /// Stores one deterministic state hash and returns a mismatch once all
@@ -48,6 +53,7 @@ impl NetplayRoom {
             .collect::<Vec<_>>();
 
         hashes.sort_by_key(|hash| hash.player_index.zero_based());
+        let nearby_matches = self.nearby_state_hash_matches(report.frame, &hashes);
         self.prune_state_hashes(report.frame);
 
         let Some(first_hash) = hashes.first().map(|hash| hash.sha256.as_str()) else {
@@ -60,11 +66,66 @@ impl NetplayRoom {
             Ok(Some(StateHashMismatchView {
                 frame: report.frame,
                 hashes,
+                nearby_matches,
             }))
         }
     }
+
+    fn nearby_state_hash_matches(
+        &self,
+        frame: u64,
+        hashes: &[PlayerStateHashView],
+    ) -> Vec<NearbyStateHashMatchView> {
+        let mut matches = Vec::new();
+
+        for source in hashes {
+            for target in hashes {
+                if source.player_index == target.player_index {
+                    continue;
+                }
+
+                for offset in -STATE_HASH_NEARBY_MATCH_WINDOW..=STATE_HASH_NEARBY_MATCH_WINDOW {
+                    if offset == 0 {
+                        continue;
+                    }
+
+                    let Some(matched_frame) = offset_frame(frame, offset) else {
+                        continue;
+                    };
+
+                    let Some(frame_hashes) = self.state_hashes.get(&matched_frame) else {
+                        continue;
+                    };
+
+                    if frame_hashes
+                        .get(&target.player_index)
+                        .is_some_and(|sha256| sha256 == &source.sha256)
+                    {
+                        matches.push(NearbyStateHashMatchView {
+                            source_player_index: source.player_index,
+                            source_frame: frame,
+                            matched_player_index: target.player_index,
+                            matched_frame,
+                            frame_offset: offset,
+                        });
+                    }
+                }
+            }
+        }
+
+        matches
+    }
+
     fn prune_state_hashes(&mut self, frame: u64) {
-        let retain_from = frame.saturating_sub(120);
+        let retain_from = frame.saturating_sub(STATE_HASH_RETAIN_FRAMES);
         self.state_hashes = self.state_hashes.split_off(&retain_from);
+    }
+}
+
+fn offset_frame(frame: u64, offset: i64) -> Option<u64> {
+    if offset.is_negative() {
+        frame.checked_sub(offset.unsigned_abs())
+    } else {
+        frame.checked_add(offset as u64)
     }
 }

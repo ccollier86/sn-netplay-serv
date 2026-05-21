@@ -55,4 +55,6 @@ pub use session_pause::{
     SessionPauseHolder, SessionPauseReason, SessionPauseState, SessionPauseView,
 };
 pub use snapshot::{SnapshotChunk, SnapshotLimits, SnapshotManifest};
-pub use state_hash::{PlayerStateHashView, StateHashMismatchView, StateHashReport};
+pub use state_hash::{
+    NearbyStateHashMatchView, PlayerStateHashView, StateHashMismatchView, StateHashReport,
+};
