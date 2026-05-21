@@ -379,7 +379,7 @@ async fn host_snapshot_complete_is_broadcast_after_valid_chunks() {
 }
 
 #[tokio::test]
-async fn validated_input_frame_is_broadcast() {
+async fn validated_input_frame_is_broadcast_after_all_players_reach_frame() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
@@ -415,18 +415,10 @@ async fn validated_input_frame_is_broadcast() {
         .await
         .expect("input frame");
 
-    assert_eq!(registry.release_next_controller_frames().await, 1);
-
-    let event = events.recv().await.expect("host input event");
+    assert_eq!(registry.release_next_controller_frames().await, 0);
     assert!(matches!(
-        event,
-        crate::rooms::RoomInputEvent::InputFrameBatch { .. }
-    ));
-
-    let event = events.recv().await.expect("server frame event");
-    assert!(matches!(
-        event,
-        crate::rooms::RoomInputEvent::ServerFrame { .. }
+        events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
     ));
 
     registry
@@ -447,12 +439,82 @@ async fn validated_input_frame_is_broadcast() {
         .await
         .expect("guest input frame");
 
-    let event = events.recv().await.expect("late guest input event");
+    assert_eq!(registry.release_next_controller_frames().await, 1);
 
+    let event = events.recv().await.expect("host input event");
     assert!(matches!(
         event,
         crate::rooms::RoomInputEvent::InputFrameBatch { .. }
     ));
+
+    let event = events.recv().await.expect("guest input event");
+    assert!(matches!(
+        event,
+        crate::rooms::RoomInputEvent::InputFrameBatch { .. }
+    ));
+
+    let event = events.recv().await.expect("server frame event");
+
+    assert!(matches!(
+        event,
+        crate::rooms::RoomInputEvent::ServerFrame { .. }
+    ));
+}
+
+#[tokio::test]
+async fn server_frame_clock_waits_for_slowest_player_input_cursor() {
+    let (registry, invite, host_connection, guest_connection) = compatible_room().await;
+    complete_snapshot(&registry, &invite, host_connection).await;
+    registry
+        .mark_ready(invite.clone(), host_connection, None)
+        .await
+        .expect("host ready");
+    registry
+        .mark_ready(invite.clone(), guest_connection, None)
+        .await
+        .expect("guest ready");
+    let room_epoch = room_epoch(&registry, &invite).await;
+    let session_epoch = session_epoch(&registry, &invite).await;
+
+    registry
+        .relay_input_frame_batch(
+            invite.clone(),
+            host_connection,
+            InputFrameBatch {
+                room_epoch,
+                session_epoch,
+                player_index: PlayerIndex::ONE,
+                frames: vec![input(PlayerIndex::ONE, 120)],
+            },
+        )
+        .await
+        .expect("host future input");
+
+    assert_eq!(registry.release_next_controller_frames().await, 0);
+
+    registry
+        .relay_input_frame_batch(
+            invite.clone(),
+            guest_connection,
+            InputFrameBatch {
+                room_epoch,
+                session_epoch,
+                player_index: PlayerIndex::TWO,
+                frames: vec![input(PlayerIndex::TWO, 0)],
+            },
+        )
+        .await
+        .expect("guest first input");
+
+    assert_eq!(registry.release_next_controller_frames().await, 1);
+    assert_eq!(registry.release_next_controller_frames().await, 0);
+
+    let room = registry
+        .room_view(invite)
+        .await
+        .expect("room should remain active");
+
+    assert!(matches!(room.frame_clock.released_frame, Some(0)));
 }
 
 #[tokio::test]

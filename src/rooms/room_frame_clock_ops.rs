@@ -16,6 +16,9 @@ impl NetplayRoom {
         self.apply_pending_input_delay_if_due();
 
         let frame = self.next_release_frame;
+        if !self.connected_players_have_input_for_frame(frame) {
+            return None;
+        }
 
         self.next_release_frame = self.next_release_frame.saturating_add(1);
         self.released_frame = Some(frame);
@@ -46,5 +49,16 @@ impl NetplayRoom {
                 .collect(),
             pending_input_delay_change: self.pending_input_delay_change.clone(),
         }
+    }
+
+    fn connected_players_have_input_for_frame(&self, frame: u64) -> bool {
+        let connected_players = self.connected_player_indices();
+
+        !connected_players.is_empty()
+            && connected_players.iter().all(|player_index| {
+                self.last_input_frames
+                    .get(player_index)
+                    .is_some_and(|input_frame| *input_frame >= frame)
+            })
     }
 }
