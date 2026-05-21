@@ -16,6 +16,8 @@ pub(crate) struct BufferedInputFrameBatch {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct BufferedInputFrame {
+    room_epoch: u64,
+    session_epoch: u64,
     source: ConnectionId,
     input: InputFrame,
 }
@@ -28,11 +30,22 @@ pub(crate) struct InputFrameRelayBuffer {
 
 impl InputFrameRelayBuffer {
     /// Stores one accepted frame for later canonical-frame release.
-    pub fn push(&mut self, source: ConnectionId, input: InputFrame) {
+    pub fn push(
+        &mut self,
+        source: ConnectionId,
+        room_epoch: u64,
+        session_epoch: u64,
+        input: InputFrame,
+    ) {
         self.frames_by_number
             .entry(input.frame)
             .or_default()
-            .push(BufferedInputFrame { source, input });
+            .push(BufferedInputFrame {
+                room_epoch,
+                session_epoch,
+                source,
+                input,
+            });
     }
 
     /// Drains exactly one released frame.
@@ -45,6 +58,10 @@ impl InputFrameRelayBuffer {
         let mut batches = Vec::new();
 
         for buffered in self.frames_by_number.remove(&frame).unwrap_or_default() {
+            if buffered.room_epoch != room_epoch || buffered.session_epoch != session_epoch {
+                continue;
+            }
+
             push_to_batch(
                 &mut batches,
                 buffered.source,
@@ -55,11 +72,6 @@ impl InputFrameRelayBuffer {
         }
 
         batches
-    }
-
-    /// Drops all buffered input that belongs to a previous sync epoch.
-    pub fn clear(&mut self) {
-        self.frames_by_number.clear();
     }
 }
 
@@ -101,8 +113,8 @@ mod tests {
         let mut buffer = InputFrameRelayBuffer::default();
         let source = ConnectionId::new();
 
-        buffer.push(source, input(PlayerIndex::ONE, 2));
-        buffer.push(source, input(PlayerIndex::ONE, 3));
+        buffer.push(source, 7, 9, input(PlayerIndex::ONE, 2));
+        buffer.push(source, 7, 9, input(PlayerIndex::ONE, 3));
 
         assert!(buffer.drain_frame(1, 7, 9).is_empty());
 
@@ -113,6 +125,21 @@ mod tests {
         assert_eq!(drained[0].batch.room_epoch, 7);
         assert_eq!(drained[0].batch.session_epoch, 9);
         assert_eq!(buffer.drain_frame(3, 7, 9)[0].batch.frames[0].frame, 3);
+    }
+
+    #[test]
+    fn drops_stale_epoch_frames() {
+        let mut buffer = InputFrameRelayBuffer::default();
+        let source = ConnectionId::new();
+
+        buffer.push(source, 7, 9, input(PlayerIndex::ONE, 2));
+        buffer.push(source, 8, 10, input(PlayerIndex::ONE, 2));
+
+        let drained = buffer.drain_frame(2, 8, 10);
+
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].batch.room_epoch, 8);
+        assert_eq!(drained[0].batch.session_epoch, 10);
     }
 
     fn input(player_index: PlayerIndex, frame: u64) -> InputFrame {

@@ -18,6 +18,11 @@ describe("TypeScript netplay protocol codec", () => {
     const payload = encodeClientMessage({
       latestEventSeq: 9,
       localFrame: 42,
+      network: {
+        jitterMs: 3,
+        roundTripMs: 44,
+        stallCount: 1,
+      },
       roomEpoch: 2,
       runtimeState: "playing",
       sessionEpoch: 5,
@@ -29,6 +34,11 @@ describe("TypeScript netplay protocol codec", () => {
     expect(json.roomEpoch).toBe(2);
     expect(json.sessionEpoch).toBe(5);
     expect(json.runtimeState).toBe("playing");
+    expect(json.network).toEqual({
+      jitterMs: 3,
+      roundTripMs: 44,
+      stallCount: 1,
+    });
   });
 
   test("decodes recovery resync server messages", () => {
@@ -45,6 +55,29 @@ describe("TypeScript netplay protocol codec", () => {
     expect(message.type).toBe("recoveryResyncRequired");
     if (message.type === "recoveryResyncRequired") {
       expect(message.room.status).toBe("checkingCompatibility");
+    }
+  });
+
+  test("decodes adaptive input delay changes", () => {
+    const message = decodeServerMessage(
+      JSON.stringify({
+        change: {
+          effectiveFrame: 240,
+          inputDelayFrames: 4,
+          previousInputDelayFrames: 3,
+          reason: "networkPressure",
+        },
+        eventSeq: 13,
+        room: roomView({ status: "playing" }),
+        roomEpoch: 4,
+        sessionEpoch: 7,
+        type: "inputDelayChanged",
+      }),
+    );
+
+    expect(message.type).toBe("inputDelayChanged");
+    if (message.type === "inputDelayChanged") {
+      expect(message.change.inputDelayFrames).toBe(4);
     }
   });
 

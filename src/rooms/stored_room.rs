@@ -5,8 +5,8 @@
 //! messages or apply room-domain rules.
 
 use crate::protocol::{
-    InputFrame, LinkCablePacket, ServerFrame, SessionPauseView, SnapshotChunk, SnapshotManifest,
-    StateHashMismatchView,
+    InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket, ServerFrame, SessionPauseView,
+    SnapshotChunk, SnapshotManifest, StateHashMismatchView,
 };
 use crate::rooms::{
     ConnectionId, InputFrameRelayBuffer, NetplayRoom, RoomDebugEvent, RoomDebugEventLog, RoomEvent,
@@ -159,16 +159,22 @@ impl StoredRoom {
         });
     }
 
-    /// Emits deterministic state hash mismatch diagnostics.
-    pub(super) fn emit_state_hash_mismatch(
+    /// Records a deterministic state-hash mismatch without forcing recovery.
+    pub(super) fn record_state_hash_mismatch_diagnostic(
         &mut self,
         now: Instant,
-        mismatch: StateHashMismatchView,
+        mismatch: &StateHashMismatchView,
     ) {
-        let room = self.record_event(now, "stateHashMismatch", "state hash mismatch detected");
+        let detail = format!("state hash mismatch observed at frame {}", mismatch.frame);
+        self.record_event(now, "stateHashMismatchDiagnostic", &detail);
+    }
+
+    /// Emits a scheduled adaptive input-delay update.
+    pub(super) fn emit_input_delay_changed(&mut self, now: Instant, change: InputDelayChange) {
+        let room = self.record_event(now, "inputDelayChanged", "adaptive input delay scheduled");
         let _ = self
             .events
-            .send(RoomEvent::StateHashMismatch { mismatch, room });
+            .send(RoomEvent::InputDelayChanged { change, room });
     }
 
     /// Emits a validated snapshot chunk.
@@ -195,14 +201,19 @@ impl StoredRoom {
             .send(RoomEvent::SnapshotComplete { source, manifest });
     }
 
-    /// Buffers accepted controller input until the room frame reaches it.
-    pub(super) fn buffer_input_frame(&mut self, source: ConnectionId, input: InputFrame) {
-        self.input_relay_buffer.push(source, input);
-    }
+    /// Relays accepted controller input when its server frame is available.
+    pub(super) fn relay_accepted_input_frame(&mut self, source: ConnectionId, input: InputFrame) {
+        if self
+            .room
+            .released_frame
+            .is_some_and(|released_frame| input.frame <= released_frame)
+        {
+            self.emit_input_frame_batch(source, input);
+            return;
+        }
 
-    /// Drops buffered input from a previous gameplay epoch.
-    pub(super) fn reset_input_relay_buffer(&mut self) {
-        self.input_relay_buffer.clear();
+        self.input_relay_buffer
+            .push(source, self.room.room_epoch, self.room.session_epoch, input);
     }
 
     /// Releases one canonical server frame and its ready input batches.
@@ -224,6 +235,20 @@ impl StoredRoom {
         });
 
         Some(frame)
+    }
+
+    fn emit_input_frame_batch(&self, source: ConnectionId, input: InputFrame) {
+        let player_index = input.player_index;
+        let batch = InputFrameBatch {
+            frames: vec![input],
+            player_index,
+            room_epoch: self.room.room_epoch,
+            session_epoch: self.room.session_epoch,
+        };
+
+        let _ = self
+            .input_events
+            .send(RoomInputEvent::InputFrameBatch { source, batch });
     }
 
     /// Emits a validated link-cable packet.

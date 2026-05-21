@@ -4,8 +4,9 @@
 //! happens in room modules before input or state is accepted.
 
 use crate::protocol::{
-    ClientRuntimeState, CompatibilityFingerprint, InputFrame, LinkCableCompatibility,
-    LinkCablePacket, SessionPauseReason, SnapshotChunk, SnapshotManifest, StateHashReport,
+    ClientNetworkQualityReport, ClientRuntimeState, CompatibilityFingerprint, InputFrame,
+    LinkCableCompatibility, LinkCablePacket, SessionPauseReason, SnapshotChunk, SnapshotManifest,
+    StateHashReport,
 };
 use serde::Deserialize;
 
@@ -43,6 +44,9 @@ pub enum ClientMessage {
         room_epoch: u64,
         /// Current session epoch observed by the client.
         session_epoch: u64,
+        /// Latest network/runtime health sample, when the client has one.
+        #[serde(default)]
+        network: Option<ClientNetworkQualityReport>,
     },
     /// One chunk of host save-state snapshot data.
     SnapshotChunk {
@@ -92,6 +96,9 @@ pub enum ClientMessage {
         local_frame: Option<u64>,
         /// Local emulator/netplay runtime state.
         runtime_state: ClientRuntimeState,
+        /// Latest network/runtime health sample, when the client has one.
+        #[serde(default)]
+        network: Option<ClientNetworkQualityReport>,
     },
     /// Request a room-wide pause at a relay-selected frame.
     RequestSessionPause {

@@ -1,5 +1,6 @@
 import type { ClientRuntimeState } from "../protocol/enums.ts";
 import type { ClientMessage, ServerMessage } from "../protocol/messages.ts";
+import type { ClientNetworkQualityReport } from "../protocol/networkQuality.ts";
 
 export type HeartbeatHealth = "fresh" | "stale" | "recoveryTimedOut";
 
@@ -45,12 +46,14 @@ export class HeartbeatTracker {
   public heartbeatMessage({
     latestEventSeq,
     localFrame = null,
+    network = null,
     roomEpoch,
     runtimeState,
     sessionEpoch,
   }: {
     readonly latestEventSeq: number;
     readonly localFrame?: number | null;
+    readonly network?: ClientNetworkQualityReport | null;
     readonly roomEpoch: number;
     readonly runtimeState: ClientRuntimeState;
     readonly sessionEpoch: number;
@@ -58,6 +61,7 @@ export class HeartbeatTracker {
     return {
       latestEventSeq,
       localFrame,
+      network,
       roomEpoch,
       runtimeState,
       sessionEpoch,

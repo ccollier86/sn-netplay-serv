@@ -5,7 +5,7 @@
 //! snapshot, and input relay rules.
 
 use crate::auth::VerifiedLicense;
-use crate::protocol::ClientRuntimeState;
+use crate::protocol::{ClientNetworkQualityReport, ClientRuntimeState};
 use crate::rooms::{
     ConnectionId, NetplayRoom, PlayerIndex, PlayerRole, PlayerRuntimeState, PlayerStatus,
     ResumeTokenHash, RoomError, RoomStatus,
@@ -112,6 +112,10 @@ impl NetplayRoom {
         slot.reconnect_deadline = None;
         slot.reconnect_room_epoch = None;
         slot.last_seen_at = Some(now);
+        slot.latest_local_frame = None;
+        slot.latest_local_frame_reported_at = None;
+        slot.latest_network_report = None;
+        slot.latest_network_reported_at = None;
         self.ready_players.remove(&slot.player_index);
 
         Ok(slot.player_index)
@@ -141,6 +145,10 @@ impl NetplayRoom {
                 slot.connection_id = None;
                 slot.input_connection_id = None;
                 slot.last_seen_at = Some(now);
+                slot.latest_local_frame = None;
+                slot.latest_local_frame_reported_at = None;
+                slot.latest_network_report = None;
+                slot.latest_network_reported_at = None;
                 slot.reconnect_deadline = None;
                 slot.reconnect_room_epoch = None;
                 slot.status = PlayerStatus::Disconnected;
@@ -242,6 +250,10 @@ impl NetplayRoom {
         slot.runtime_state = PlayerRuntimeState::Reconnecting;
         slot.input_socket_token_hash = Some(input_socket_token_hash);
         slot.last_seen_at = Some(now);
+        slot.latest_local_frame = None;
+        slot.latest_local_frame_reported_at = None;
+        slot.latest_network_report = None;
+        slot.latest_network_reported_at = None;
         slot.reconnect_deadline = None;
         slot.reconnect_room_epoch = None;
         self.reset_sync_for_checking_compatibility();
@@ -254,6 +266,8 @@ impl NetplayRoom {
         &mut self,
         connection_id: ConnectionId,
         now: Instant,
+        local_frame: Option<u64>,
+        network: Option<ClientNetworkQualityReport>,
         runtime_state: ClientRuntimeState,
     ) -> Result<(), RoomError> {
         let player_index = self
@@ -267,6 +281,14 @@ impl NetplayRoom {
             .find(|slot| slot.player_index == player_index)
         {
             slot.last_seen_at = Some(now);
+            if let Some(local_frame) = local_frame {
+                slot.latest_local_frame = Some(local_frame);
+                slot.latest_local_frame_reported_at = Some(now);
+            }
+            if let Some(network) = network {
+                slot.latest_network_report = Some(network);
+                slot.latest_network_reported_at = Some(now);
+            }
             slot.runtime_state = runtime_state;
         }
 
@@ -418,6 +440,10 @@ impl NetplayRoom {
             slot.reconnect_deadline = None;
             slot.reconnect_room_epoch = None;
             slot.input_connection_id = None;
+            slot.latest_local_frame = None;
+            slot.latest_local_frame_reported_at = None;
+            slot.latest_network_report = None;
+            slot.latest_network_reported_at = None;
             slot.runtime_state = PlayerRuntimeState::Disconnected;
             slot.status = if is_host {
                 PlayerStatus::Disconnected

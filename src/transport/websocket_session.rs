@@ -238,6 +238,13 @@ async fn handle_room_event(
             mismatch,
             room,
         },
+        Ok(RoomEvent::InputDelayChanged { change, room }) => ServerMessage::InputDelayChanged {
+            event_seq: room.event_seq,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            change,
+            room,
+        },
         Ok(RoomEvent::InputFrame { .. }) => {
             return true;
         }

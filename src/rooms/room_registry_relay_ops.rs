@@ -5,8 +5,8 @@
 
 use super::InMemoryRoomRegistry;
 use crate::protocol::{
-    ClientRuntimeState, InputFrame, InputFrameBatch, InputFrameLimits, LinkCablePacket,
-    LinkCablePacketLimits, SessionPauseReason, StateHashReport,
+    ClientNetworkQualityReport, ClientRuntimeState, InputFrame, InputFrameBatch, InputFrameLimits,
+    LinkCablePacket, LinkCablePacketLimits, SessionPauseReason, StateHashReport,
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, InviteCode, RoomError, RoomView,
@@ -32,7 +32,7 @@ impl InMemoryRoomRegistry {
         )?;
 
         if acceptance == InputFrameAcceptance::Relay {
-            stored_room.buffer_input_frame(connection_id, input);
+            stored_room.relay_accepted_input_frame(connection_id, input);
         }
 
         Ok(())
@@ -72,7 +72,7 @@ impl InMemoryRoomRegistry {
         if !accepted_frames.is_empty() {
             stored_room.room = next_room;
             for input in accepted_frames {
-                stored_room.buffer_input_frame(connection_id, input);
+                stored_room.relay_accepted_input_frame(connection_id, input);
             }
         }
 
@@ -103,7 +103,7 @@ impl InMemoryRoomRegistry {
         Ok(())
     }
 
-    /// Records a deterministic state hash and broadcasts mismatches.
+    /// Records a deterministic state hash and stores mismatch diagnostics.
     pub(super) async fn record_state_hash_impl(
         &self,
         invite_code: InviteCode,
@@ -118,9 +118,7 @@ impl InMemoryRoomRegistry {
 
         if let Some(mismatch) = mismatch {
             let now = self.clock.now();
-            stored_room.room.enter_state_hash_resync();
-            stored_room.reset_input_relay_buffer();
-            stored_room.emit_state_hash_mismatch(now, mismatch);
+            stored_room.record_state_hash_mismatch_diagnostic(now, &mismatch);
             self.record_recent_events(stored_room.debug_events(1));
         }
 
@@ -132,6 +130,8 @@ impl InMemoryRoomRegistry {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        local_frame: Option<u64>,
+        network: Option<ClientNetworkQualityReport>,
         runtime_state: ClientRuntimeState,
     ) -> Result<RoomView, RoomError> {
         let mut rooms = self.invite_codes.write().await;
@@ -140,9 +140,17 @@ impl InMemoryRoomRegistry {
             .ok_or(RoomError::NotFound)?;
         let now = self.clock.now();
 
-        stored_room
-            .room
-            .record_heartbeat(connection_id, now, runtime_state)?;
+        stored_room.room.record_heartbeat(
+            connection_id,
+            now,
+            local_frame,
+            network,
+            runtime_state,
+        )?;
+        if let Some(change) = stored_room.room.maybe_schedule_adaptive_input_delay(now) {
+            stored_room.emit_input_delay_changed(now, change);
+            self.record_recent_events(stored_room.debug_events(1));
+        }
 
         Ok(stored_room.view(now))
     }

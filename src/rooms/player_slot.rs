@@ -4,6 +4,7 @@
 //! expand past two players later without changing its shape.
 
 use crate::auth::VerifiedLicense;
+use crate::protocol::ClientNetworkQualityReport;
 use crate::rooms::{ConnectionId, PlayerIndex, ResumeTokenHash};
 use serde::Serialize;
 use std::time::Instant;
@@ -101,6 +102,14 @@ pub struct PlayerSlot {
     pub input_socket_token_hash: Option<ResumeTokenHash>,
     /// Last heartbeat time seen by the relay.
     pub last_seen_at: Option<Instant>,
+    /// Latest local runtime frame reported by this client.
+    pub latest_local_frame: Option<u64>,
+    /// Time the latest local runtime frame was reported.
+    pub latest_local_frame_reported_at: Option<Instant>,
+    /// Latest client-observed network/runtime health sample.
+    pub latest_network_report: Option<ClientNetworkQualityReport>,
+    /// Time the latest network/runtime health sample was reported.
+    pub latest_network_reported_at: Option<Instant>,
     /// Deadline for reclaiming this slot after transport loss.
     pub reconnect_deadline: Option<Instant>,
     /// Room epoch this client knew before recovery changed room state.
@@ -122,6 +131,10 @@ impl PlayerSlot {
             resume_token_hash: None,
             input_socket_token_hash: None,
             last_seen_at: None,
+            latest_local_frame: None,
+            latest_local_frame_reported_at: None,
+            latest_network_report: None,
+            latest_network_reported_at: None,
             reconnect_deadline: None,
             reconnect_room_epoch: None,
         }
@@ -147,6 +160,10 @@ impl PlayerSlot {
             resume_token_hash: Some(resume_token_hash),
             input_socket_token_hash: Some(input_socket_token_hash),
             last_seen_at: Some(now),
+            latest_local_frame: None,
+            latest_local_frame_reported_at: None,
+            latest_network_report: None,
+            latest_network_reported_at: None,
             reconnect_deadline: None,
             reconnect_room_epoch: None,
         }
@@ -170,6 +187,10 @@ impl PlayerSlot {
         self.resume_token_hash = Some(resume_token_hash);
         self.input_socket_token_hash = Some(input_socket_token_hash);
         self.last_seen_at = Some(now);
+        self.latest_local_frame = None;
+        self.latest_local_frame_reported_at = None;
+        self.latest_network_report = None;
+        self.latest_network_reported_at = None;
         self.reconnect_deadline = None;
         self.reconnect_room_epoch = None;
     }

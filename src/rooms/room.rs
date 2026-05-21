@@ -7,13 +7,13 @@
 use crate::auth::VerifiedLicense;
 use crate::limits::MVP_ROOM_CAPACITY;
 use crate::protocol::{
-    CompatibilityFingerprint, NetplayProtocolView, NetplaySessionDescriptor, NetplaySessionMode,
-    SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    ClientNetworkQualityReport, CompatibilityFingerprint, InputDelayChange, NetplayProtocolView,
+    NetplaySessionDescriptor, NetplaySessionMode, SnapshotChunk, SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, LinkCableRoomState, PlayerIndex, PlayerRole, PlayerRuntimeState,
-    PlayerSlot, PlayerSlotView, PlayerStatus, ResumeTokenHash, RoomError, RoomId, RoomStatus,
-    RoomView, SessionPauseStateTracker, SnapshotTransferState,
+    AdaptiveInputDelayPolicy, ConnectionId, InviteCode, LinkCableRoomState, PlayerIndex,
+    PlayerRole, PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus, ResumeTokenHash,
+    RoomError, RoomId, RoomStatus, RoomView, SessionPauseStateTracker, SnapshotTransferState,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
@@ -40,6 +40,8 @@ pub struct NetplayRoom {
     pub(super) room_frame: u64,
     pub(super) released_frame: Option<u64>,
     pub(super) next_release_frame: u64,
+    pub(super) pending_input_delay_change: Option<InputDelayChange>,
+    pub(super) input_delay_policy: AdaptiveInputDelayPolicy,
     pub(super) state_hashes: BTreeMap<u64, HashMap<PlayerIndex, String>>,
 }
 
@@ -107,6 +109,8 @@ impl NetplayRoom {
             room_frame: 0,
             released_frame: None,
             next_release_frame: 0,
+            pending_input_delay_change: None,
+            input_delay_policy: AdaptiveInputDelayPolicy::new(now),
             state_hashes: BTreeMap::new(),
         }
     }
@@ -189,7 +193,12 @@ impl NetplayRoom {
     }
 
     /// Marks a connected player ready and starts when every player is ready.
-    pub fn mark_ready(&mut self, connection_id: ConnectionId) -> Result<bool, RoomError> {
+    pub fn mark_ready(
+        &mut self,
+        connection_id: ConnectionId,
+        network: Option<ClientNetworkQualityReport>,
+        now: Instant,
+    ) -> Result<bool, RoomError> {
         if self.status != RoomStatus::SyncingState && self.status != RoomStatus::Ready {
             return Err(RoomError::RoomNotReady);
         }
@@ -210,6 +219,7 @@ impl NetplayRoom {
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
 
+        self.record_network_report(connection_id, None, network, now);
         self.ready_players.insert(player_index);
         self.set_player_status(player_index, PlayerStatus::Ready);
 
@@ -218,6 +228,7 @@ impl NetplayRoom {
             return Ok(false);
         }
 
+        self.apply_initial_adaptive_input_delay(now);
         self.status = RoomStatus::Playing;
         self.players
             .iter_mut()
@@ -425,6 +436,7 @@ impl NetplayRoom {
         self.room_frame = 0;
         self.released_frame = None;
         self.next_release_frame = 0;
+        self.pending_input_delay_change = None;
         self.state_hashes.clear();
     }
 

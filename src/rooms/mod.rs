@@ -4,6 +4,7 @@
 //! frame-input validation. They do not parse HTTP requests or call the license
 //! authority.
 
+mod adaptive_input_delay_policy;
 mod clock;
 mod errors;
 mod ids;
@@ -15,6 +16,7 @@ mod player_slot;
 mod recovery_config;
 mod resume_token;
 mod room;
+mod room_adaptive_input_delay_ops;
 mod room_connection_ops;
 mod room_controller_netplay_ops;
 mod room_debug_event;
@@ -35,6 +37,7 @@ mod session_pause_state;
 mod snapshot_transfer;
 mod stored_room;
 
+pub(crate) use adaptive_input_delay_policy::AdaptiveInputDelayPolicy;
 pub use clock::{Clock, SystemClock};
 pub use errors::RoomError;
 pub use ids::{ConnectionId, PlayerIndex, RoomId};

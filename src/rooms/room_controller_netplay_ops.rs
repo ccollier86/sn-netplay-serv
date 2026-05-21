@@ -52,7 +52,6 @@ impl NetplayRoom {
 
         self.last_input_frames
             .insert(input.player_index, input.frame);
-        self.recompute_room_frame();
 
         Ok(InputFrameAcceptance::Relay)
     }
@@ -277,26 +276,6 @@ impl NetplayRoom {
             InputFrameAcceptance::Relay
         } else {
             InputFrameAcceptance::Ignore
-        }
-    }
-
-    fn recompute_room_frame(&mut self) {
-        let connected_players = self.connected_player_indices();
-        if connected_players.is_empty() {
-            return;
-        }
-
-        if let Some(min_frame) = connected_players
-            .iter()
-            .map(|player_index| {
-                self.last_input_frames
-                    .get(player_index)
-                    .copied()
-                    .unwrap_or(self.room_frame)
-            })
-            .min()
-        {
-            self.room_frame = min_frame;
         }
     }
 }

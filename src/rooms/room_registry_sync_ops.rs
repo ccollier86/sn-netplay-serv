@@ -5,8 +5,8 @@
 
 use super::InMemoryRoomRegistry;
 use crate::protocol::{
-    CompatibilityFingerprint, LinkCableCompatibility, SnapshotChunk, SnapshotLimits,
-    SnapshotManifest,
+    ClientNetworkQualityReport, CompatibilityFingerprint, LinkCableCompatibility, SnapshotChunk,
+    SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::stored_room::StoredRoom;
 use crate::rooms::{ConnectionId, InviteCode, RoomError, RoomView};
@@ -83,13 +83,14 @@ impl InMemoryRoomRegistry {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        network: Option<ClientNetworkQualityReport>,
     ) -> Result<RoomView, RoomError> {
         let mut rooms = self.invite_codes.write().await;
         let stored_room = rooms
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
-        let started = stored_room.room.mark_ready(connection_id)?;
         let now = self.clock.now();
+        let started = stored_room.room.mark_ready(connection_id, network, now)?;
 
         if started {
             stored_room.emit_start(now, 0);

@@ -4,9 +4,7 @@
 //! relay compares reports only after every connected player reported that frame.
 
 use crate::protocol::{PlayerStateHashView, StateHashMismatchView, StateHashReport};
-use crate::rooms::{
-    ConnectionId, NetplayRoom, PlayerRuntimeState, PlayerStatus, RoomError, RoomStatus,
-};
+use crate::rooms::{ConnectionId, NetplayRoom, RoomError, RoomStatus};
 
 impl NetplayRoom {
     /// Stores one deterministic state hash and returns a mismatch once all
@@ -65,21 +63,6 @@ impl NetplayRoom {
             }))
         }
     }
-
-    /// Returns an active controller-netplay room to snapshot sync after desync.
-    pub(super) fn enter_state_hash_resync(&mut self) {
-        self.reset_sync_state();
-        self.bump_session_epoch();
-        self.status = RoomStatus::CheckingCompatibility;
-        self.players
-            .iter_mut()
-            .filter(|slot| !slot.is_empty() && slot.connection_id.is_some())
-            .for_each(|slot| {
-                slot.status = PlayerStatus::Connected;
-                slot.runtime_state = PlayerRuntimeState::Connected;
-            });
-    }
-
     fn prune_state_hashes(&mut self, frame: u64) {
         let retain_from = frame.saturating_sub(120);
         self.state_hashes = self.state_hashes.split_off(&retain_from);

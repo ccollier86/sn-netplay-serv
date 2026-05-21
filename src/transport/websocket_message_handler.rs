@@ -91,6 +91,7 @@ async fn handle_client_message(
         ClientMessage::Ready {
             room_epoch,
             session_epoch,
+            network,
         } => {
             apply_room_result(
                 sender,
@@ -101,7 +102,7 @@ async fn handle_client_message(
                 sender,
                 services
                     .rooms
-                    .mark_ready(invite_code.clone(), connection_id)
+                    .mark_ready(invite_code.clone(), connection_id, network)
                     .await
                     .map(|_| ()),
             )
@@ -189,6 +190,7 @@ async fn handle_client_message(
             latest_event_seq,
             local_frame,
             runtime_state,
+            network,
         } => {
             apply_room_result(
                 sender,
@@ -203,6 +205,7 @@ async fn handle_client_message(
                     latest_event_seq,
                     local_frame,
                     runtime_state,
+                    network,
                 )
                 .await
             {

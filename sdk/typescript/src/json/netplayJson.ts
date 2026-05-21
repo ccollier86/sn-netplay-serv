@@ -19,6 +19,7 @@ const serverMessageTypes = new Set([
   "recoveryResyncRequired",
   "serverFrame",
   "stateHashMismatch",
+  "inputDelayChanged",
   "heartbeatAck",
   "error",
 ]);

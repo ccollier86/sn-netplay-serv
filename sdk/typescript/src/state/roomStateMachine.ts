@@ -52,6 +52,7 @@ export class RoomStateMachine {
       case "playerExited":
       case "recoveryResyncRequired":
       case "stateHashMismatch":
+      case "inputDelayChanged":
       case "startSession":
         this.updateRoom(message.room);
         break;

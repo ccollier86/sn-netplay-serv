@@ -63,11 +63,11 @@ async fn link_compatibility_mismatch_broadcasts_room_state() {
 async fn validated_link_packet_is_broadcast() {
     let (registry, invite, host_connection, guest_connection) = compatible_link_room().await;
     registry
-        .mark_ready(invite.clone(), host_connection)
+        .mark_ready(invite.clone(), host_connection, None)
         .await
         .expect("host ready");
     registry
-        .mark_ready(invite.clone(), guest_connection)
+        .mark_ready(invite.clone(), guest_connection, None)
         .await
         .expect("guest ready");
     let mut events = registry.subscribe(invite.clone()).await.expect("events");
@@ -86,11 +86,11 @@ async fn validated_link_packet_is_broadcast() {
 async fn link_compatibility_after_start_does_not_roll_back_room() {
     let (registry, invite, host_connection, guest_connection) = compatible_link_room().await;
     registry
-        .mark_ready(invite.clone(), host_connection)
+        .mark_ready(invite.clone(), host_connection, None)
         .await
         .expect("host ready");
     registry
-        .mark_ready(invite.clone(), guest_connection)
+        .mark_ready(invite.clone(), guest_connection, None)
         .await
         .expect("guest ready");
 

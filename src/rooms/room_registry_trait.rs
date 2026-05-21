@@ -129,6 +129,7 @@ pub trait RoomRegistry: Send + Sync {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        network: Option<crate::protocol::ClientNetworkQualityReport>,
     ) -> Result<RoomView, RoomError>;
 
     /// Validates and broadcasts a host snapshot chunk.
@@ -187,6 +188,7 @@ pub trait RoomRegistry: Send + Sync {
         latest_event_seq: u64,
         local_frame: Option<u64>,
         runtime_state: ClientRuntimeState,
+        network: Option<crate::protocol::ClientNetworkQualityReport>,
     ) -> Result<RoomView, RoomError>;
 
     /// Requests a coordinated room pause.

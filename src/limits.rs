@@ -48,4 +48,8 @@ pub const ROOM_JOIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 pub const ROOM_EXPIRATION_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 /// How often controller-netplay rooms release one canonical server frame.
-pub const ROOM_FRAME_CLOCK_INTERVAL: Duration = Duration::from_millis(16);
+///
+/// The relay clock is the NOINPUT-style authority for controller netplay. Keep
+/// it at 60 Hz instead of 16 ms/62.5 Hz so clients do not slowly drift behind
+/// the server under normal NTSC cores.
+pub const ROOM_FRAME_CLOCK_INTERVAL: Duration = Duration::from_nanos(16_666_667);

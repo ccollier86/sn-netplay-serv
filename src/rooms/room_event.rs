@@ -4,8 +4,8 @@
 //! concepts inside the room domain model.
 
 use crate::protocol::{
-    InputFrame, InputFrameBatch, LinkCablePacket, ServerFrame, SessionPauseView, SnapshotChunk,
-    SnapshotManifest, StateHashMismatchView,
+    InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket, ServerFrame, SessionPauseView,
+    SnapshotChunk, SnapshotManifest, StateHashMismatchView,
 };
 use crate::rooms::{ConnectionId, RoomView};
 
@@ -80,6 +80,13 @@ pub enum RoomEvent {
     StateHashMismatch {
         /// Mismatch details.
         mismatch: StateHashMismatchView,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Relay scheduled an adaptive input-delay change.
+    InputDelayChanged {
+        /// Scheduled delay update.
+        change: InputDelayChange,
         /// Current room state.
         room: RoomView,
     },

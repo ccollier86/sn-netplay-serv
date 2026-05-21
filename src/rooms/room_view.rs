@@ -3,7 +3,9 @@
 //! These DTOs stay separate from room mutation logic so adding UI-facing fields
 //! does not bloat the domain state machine.
 
-use crate::protocol::{NetplayProtocolView, NetplaySessionDescriptor, SessionPauseView};
+use crate::protocol::{
+    InputDelayChange, NetplayProtocolView, NetplaySessionDescriptor, SessionPauseView,
+};
 use crate::rooms::{PlayerRole, PlayerStatus, RoomId, RoomStatus};
 use serde::Serialize;
 
@@ -41,14 +43,16 @@ pub struct RoomView {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomFrameClockView {
-    /// Latest frame for which every connected player has submitted input.
+    /// Latest relay-owned gameplay frame released as canonical.
     pub canonical_frame: u64,
     /// Last server frame released to input sockets, if gameplay has advanced.
     pub released_frame: Option<u64>,
-    /// Next frame the relay will release when the canonical cursor allows it.
+    /// Next frame the relay clock will release.
     pub next_release_frame: u64,
     /// Per-player accepted input cursors.
     pub accepted_inputs: Vec<PlayerFrameCursorView>,
+    /// Pending relay-owned input-delay change, if scheduled.
+    pub pending_input_delay_change: Option<InputDelayChange>,
 }
 
 /// Serializable per-player input cursor.

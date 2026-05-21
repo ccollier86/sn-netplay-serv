@@ -34,6 +34,7 @@ public class RoomStateMachine(
             is ServerMessage.PlayerExited -> updateRoom(message.room)
             is ServerMessage.RecoveryResyncRequired -> updateRoom(message.room)
             is ServerMessage.StateHashMismatch -> updateRoom(message.room)
+            is ServerMessage.InputDelayChanged -> updateRoom(message.room)
             is ServerMessage.StartSession -> updateRoom(message.room)
             is ServerMessage.SessionPauseScheduled -> {
                 pause.apply(message.pause)

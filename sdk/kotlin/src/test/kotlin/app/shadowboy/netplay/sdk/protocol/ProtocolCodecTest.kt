@@ -19,6 +19,11 @@ class ProtocolCodecTest {
                 latestEventSeq = 9,
                 localFrame = 42,
                 runtimeState = ClientRuntimeState.Playing,
+                network = ClientNetworkQualityReport(
+                    roundTripMs = 44,
+                    jitterMs = 3,
+                    stallCount = 1,
+                ),
             ),
         )
         val json = NetplayJson.format.parseToJsonElement(payload).jsonObject
@@ -26,6 +31,9 @@ class ProtocolCodecTest {
         assertEquals("heartbeat", json.string("type"))
         assertEquals("playing", json.string("runtimeState"))
         assertEquals("42", json["localFrame"]?.jsonPrimitive?.content)
+        assertEquals("44", json["network"]?.jsonObject?.get("roundTripMs")?.jsonPrimitive?.content)
+        assertEquals("3", json["network"]?.jsonObject?.get("jitterMs")?.jsonPrimitive?.content)
+        assertEquals("1", json["network"]?.jsonObject?.get("stallCount")?.jsonPrimitive?.content)
     }
 
     @Test
@@ -66,6 +74,32 @@ class ProtocolCodecTest {
         val reconnected = assertIs<ServerMessage.PlayerReconnected>(message)
         assertEquals(1, reconnected.playerIndex)
         assertEquals(RoomStatus.Recovering, reconnected.room.status)
+    }
+
+    @Test
+    fun `decodes adaptive input delay change server message`() {
+        val message = NetplayJson.decodeServerMessage(
+            """
+            {
+              "type": "inputDelayChanged",
+              "eventSeq": 15,
+              "roomEpoch": 6,
+              "sessionEpoch": 8,
+              "change": {
+                "effectiveFrame": 240,
+                "inputDelayFrames": 4,
+                "previousInputDelayFrames": 3,
+                "reason": "networkPressure"
+              },
+              "room": ${roomJson(status = "playing")}
+            }
+            """.trimIndent(),
+        )
+
+        val changed = assertIs<ServerMessage.InputDelayChanged>(message)
+        assertEquals(240, changed.change.effectiveFrame)
+        assertEquals(4, changed.change.inputDelayFrames)
+        assertEquals(InputDelayChangeReason.NetworkPressure, changed.change.reason)
     }
 
     @Test

@@ -6,10 +6,10 @@
 use super::{NetplayRoom, RoomStatus};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, InputFrameLimits, LinkCableCompatibility,
-    LinkCablePacket, LinkCablePacketLimits, NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor,
-    SessionPauseReason, SessionPauseState, SnapshotChunk, SnapshotLimits, SnapshotManifest,
-    StateHashReport,
+    ClientNetworkQualityReport, ClientRuntimeState, CompatibilityFingerprint, InputFrame,
+    InputFrameLimits, LinkCableCompatibility, LinkCablePacket, LinkCablePacketLimits,
+    NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor, SessionPauseReason, SessionPauseState,
+    SnapshotChunk, SnapshotLimits, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, InviteCode, PlayerIndex, PlayerStatus, RoomError,
@@ -165,7 +165,7 @@ fn controller_ready_requires_completed_host_snapshot() {
     let guest_connection = ConnectionId::new();
     let mut room = compatible_room(host_connection, guest_connection);
 
-    let result = room.mark_ready(host_connection);
+    let result = room.mark_ready(host_connection, None, std::time::Instant::now());
 
     assert!(matches!(result, Err(RoomError::RoomNotReady)));
     assert_eq!(room.view().status, RoomStatus::SyncingState);
@@ -179,9 +179,121 @@ fn ready_from_both_players_starts_gameplay() {
     complete_snapshot(&mut room, host_connection);
     attach_input_sockets(&mut room, host_connection, guest_connection);
 
-    assert!(!room.mark_ready(host_connection).expect("host ready"));
-    assert!(room.mark_ready(guest_connection).expect("guest ready"));
+    assert!(
+        !room
+            .mark_ready(host_connection, None, std::time::Instant::now())
+            .expect("host ready")
+    );
+    assert!(
+        room.mark_ready(guest_connection, None, std::time::Instant::now())
+            .expect("guest ready")
+    );
     assert_eq!(room.view().status, RoomStatus::Playing);
+}
+
+#[test]
+fn ready_applies_relay_selected_initial_input_delay_from_latency_samples() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = compatible_room(host_connection, guest_connection);
+    complete_snapshot(&mut room, host_connection);
+    attach_input_sockets(&mut room, host_connection, guest_connection);
+
+    assert!(
+        !room
+            .mark_ready(
+                host_connection,
+                Some(network_report(80, 10)),
+                std::time::Instant::now(),
+            )
+            .expect("host ready")
+    );
+    assert!(
+        room.mark_ready(guest_connection, None, std::time::Instant::now())
+            .expect("guest ready")
+    );
+
+    assert_eq!(room.view().session.controller.input_delay_frames, 4);
+}
+
+#[test]
+fn ready_does_not_lower_initial_input_delay_from_partial_samples() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = compatible_room(host_connection, guest_connection);
+    complete_snapshot(&mut room, host_connection);
+    attach_input_sockets(&mut room, host_connection, guest_connection);
+
+    assert!(
+        !room
+            .mark_ready(
+                host_connection,
+                Some(network_report(1, 0)),
+                std::time::Instant::now(),
+            )
+            .expect("host ready")
+    );
+    assert!(
+        room.mark_ready(guest_connection, None, std::time::Instant::now())
+            .expect("guest ready")
+    );
+
+    assert_eq!(room.view().session.controller.input_delay_frames, 3);
+}
+
+#[test]
+fn runtime_does_not_decrease_input_delay_from_stale_or_partial_samples() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = compatible_room(host_connection, guest_connection);
+    let started_at = std::time::Instant::now();
+
+    complete_snapshot(&mut room, host_connection);
+    attach_input_sockets(&mut room, host_connection, guest_connection);
+    assert!(
+        !room
+            .mark_ready(host_connection, Some(network_report(80, 10)), started_at,)
+            .expect("host ready")
+    );
+    assert!(
+        room.mark_ready(guest_connection, Some(network_report(80, 10)), started_at,)
+            .expect("guest ready")
+    );
+    assert_eq!(room.view().session.controller.input_delay_frames, 4);
+
+    let later = started_at + std::time::Duration::from_secs(40);
+    room.record_heartbeat(
+        host_connection,
+        later,
+        Some(120),
+        Some(network_report(1, 0)),
+        ClientRuntimeState::Playing,
+    )
+    .expect("host heartbeat");
+
+    assert!(room.maybe_schedule_adaptive_input_delay(later).is_none());
+    assert_eq!(room.view().session.controller.input_delay_frames, 4);
+}
+
+#[test]
+fn runtime_never_schedules_input_delay_increase_from_pressure() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(9);
+
+    room.record_heartbeat(
+        host_connection,
+        later,
+        Some(120),
+        Some(network_report(200, 20)),
+        ClientRuntimeState::Playing,
+    )
+    .expect("host heartbeat");
+
+    assert!(room.maybe_schedule_adaptive_input_delay(later).is_none());
+    assert_eq!(room.view().frame_clock.pending_input_delay_change, None);
+    assert_eq!(room.view().session.controller.input_delay_frames, 3);
 }
 
 #[test]
@@ -322,7 +434,7 @@ fn default_future_frame_limit_allows_prediction_window() {
 }
 
 #[test]
-fn room_frame_waits_for_every_connected_player() {
+fn accepted_input_does_not_advance_server_clock() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = ready_room(host_connection, guest_connection);
@@ -341,11 +453,17 @@ fn room_frame_waits_for_every_connected_player() {
         InputFrameLimits::default(),
     )
     .expect("guest prediction-window frame");
-    assert_eq!(room.room_frame, 180);
+    assert_eq!(room.room_frame, 0);
+
+    let released_frame = room
+        .release_next_server_frame()
+        .expect("server clock should release without waiting for every input");
+    assert_eq!(released_frame.frame, 0);
+    assert_eq!(room.room_frame, 0);
 }
 
 #[test]
-fn state_hash_mismatch_can_enter_snapshot_resync() {
+fn state_hash_mismatch_is_reported_without_changing_room_state() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = ready_room(host_connection, guest_connection);
@@ -361,18 +479,13 @@ fn state_hash_mismatch_can_enter_snapshot_resync() {
         .expect("guest hash");
 
     assert!(mismatch.is_some());
-    room.enter_state_hash_resync();
 
     let view = room.view();
-    assert_eq!(view.status, RoomStatus::CheckingCompatibility);
-    assert_eq!(view.session_epoch, session_epoch + 1);
+    assert_eq!(view.status, RoomStatus::Playing);
+    assert_eq!(view.session_epoch, session_epoch);
     assert_eq!(view.frame_clock.canonical_frame, 0);
-    assert_eq!(view.players[0].status, PlayerStatus::Connected);
-    assert_eq!(view.players[1].status, PlayerStatus::Connected);
-    assert!(matches!(
-        room.mark_ready(host_connection),
-        Err(RoomError::RoomNotReady)
-    ));
+    assert_eq!(view.players[0].status, PlayerStatus::Playing);
+    assert_eq!(view.players[1].status, PlayerStatus::Playing);
 }
 
 #[test]
@@ -424,8 +537,10 @@ fn link_packets_relay_only_after_link_room_is_playing() {
         Err(RoomError::NotPlaying)
     ));
 
-    room.mark_ready(host_connection).expect("host ready");
-    room.mark_ready(guest_connection).expect("guest ready");
+    room.mark_ready(host_connection, None, std::time::Instant::now())
+        .expect("host ready");
+    room.mark_ready(guest_connection, None, std::time::Instant::now())
+        .expect("guest ready");
 
     assert!(
         room.accept_link_cable_packet(host_connection, &packet, LinkCablePacketLimits::default(),)
@@ -576,15 +691,19 @@ fn ready_room(host_connection: ConnectionId, guest_connection: ConnectionId) -> 
     let mut room = compatible_room(host_connection, guest_connection);
     complete_snapshot(&mut room, host_connection);
     attach_input_sockets(&mut room, host_connection, guest_connection);
-    room.mark_ready(host_connection).expect("host ready");
-    room.mark_ready(guest_connection).expect("guest ready");
+    room.mark_ready(host_connection, None, std::time::Instant::now())
+        .expect("host ready");
+    room.mark_ready(guest_connection, None, std::time::Instant::now())
+        .expect("guest ready");
     room
 }
 
 fn ready_link_room(host_connection: ConnectionId, guest_connection: ConnectionId) -> NetplayRoom {
     let mut room = compatible_link_room(host_connection, guest_connection);
-    room.mark_ready(host_connection).expect("host ready");
-    room.mark_ready(guest_connection).expect("guest ready");
+    room.mark_ready(host_connection, None, std::time::Instant::now())
+        .expect("host ready");
+    room.mark_ready(guest_connection, None, std::time::Instant::now())
+        .expect("guest ready");
     room
 }
 
@@ -785,5 +904,13 @@ fn snapshot_manifest(bytes: &[u8]) -> SnapshotManifest {
     SnapshotManifest {
         total_bytes: bytes.len() as u64,
         sha256: format!("{:x}", Sha256::digest(bytes)),
+    }
+}
+
+fn network_report(round_trip_ms: u32, jitter_ms: u32) -> ClientNetworkQualityReport {
+    ClientNetworkQualityReport {
+        round_trip_ms: Some(round_trip_ms),
+        jitter_ms: Some(jitter_ms),
+        ..ClientNetworkQualityReport::default()
     }
 }

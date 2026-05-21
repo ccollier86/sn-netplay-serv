@@ -1,6 +1,8 @@
 import type { CompatibilityFingerprint, LinkCableCompatibility } from "./compatibility.ts";
 import type { ClientRuntimeState, SessionPauseReason } from "./enums.ts";
+import type { InputDelayChange } from "./inputDelay.ts";
 import type { RoomView, SessionPauseView } from "./roomViews.ts";
+import type { ClientNetworkQualityReport } from "./networkQuality.ts";
 import type {
   InputFrame,
   LinkCablePacket,
@@ -19,7 +21,9 @@ export type ClientMessage =
   | EpochMessage<"setLinkCableCompatibility"> & {
       readonly compatibility: LinkCableCompatibility;
     }
-  | EpochMessage<"ready">
+  | EpochMessage<"ready"> & {
+      readonly network?: ClientNetworkQualityReport | null;
+    }
   | EpochMessage<"snapshotChunk"> & { readonly chunk: SnapshotChunk }
   | EpochMessage<"snapshotComplete"> & { readonly manifest: SnapshotManifest }
   | EpochMessage<"inputFrame"> & { readonly input: InputFrame }
@@ -28,6 +32,7 @@ export type ClientMessage =
       readonly latestEventSeq: number;
       readonly localFrame?: number | null;
       readonly runtimeState: ClientRuntimeState;
+      readonly network?: ClientNetworkQualityReport | null;
     }
   | EpochMessage<"requestSessionPause"> & {
       readonly requestId: string;
@@ -91,6 +96,10 @@ export type ServerMessage =
   | RoomEpochMessage<"recoveryResyncRequired"> & { readonly room: RoomView }
   | RoomEpochMessage<"stateHashMismatch"> & {
       readonly mismatch: StateHashMismatchView;
+      readonly room: RoomView;
+    }
+  | RoomEpochMessage<"inputDelayChanged"> & {
+      readonly change: InputDelayChange;
       readonly room: RoomView;
     }
   | RoomEpochMessage<"heartbeatAck">

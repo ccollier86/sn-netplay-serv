@@ -261,8 +261,10 @@ impl RoomRegistry for InMemoryRoomRegistry {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        network: Option<crate::protocol::ClientNetworkQualityReport>,
     ) -> Result<RoomView, RoomError> {
-        self.mark_ready_impl(invite_code, connection_id).await
+        self.mark_ready_impl(invite_code, connection_id, network)
+            .await
     }
 
     async fn set_link_cable_compatibility(
@@ -342,9 +344,16 @@ impl RoomRegistry for InMemoryRoomRegistry {
         _latest_event_seq: u64,
         _local_frame: Option<u64>,
         runtime_state: ClientRuntimeState,
+        network: Option<crate::protocol::ClientNetworkQualityReport>,
     ) -> Result<RoomView, RoomError> {
-        self.record_heartbeat_impl(invite_code, connection_id, runtime_state)
-            .await
+        self.record_heartbeat_impl(
+            invite_code,
+            connection_id,
+            _local_frame,
+            network,
+            runtime_state,
+        )
+        .await
     }
 
     async fn request_session_pause(

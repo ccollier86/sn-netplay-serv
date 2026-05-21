@@ -7,6 +7,7 @@ import type {
   SessionPauseState,
 } from "./enums.ts";
 import type { NetplaySessionDescriptor } from "./descriptors.ts";
+import type { InputDelayChange } from "./inputDelay.ts";
 
 export interface NetplayProtocolView {
   readonly protocolVersion: number;
@@ -33,6 +34,7 @@ export interface RoomFrameClockView {
   readonly releasedFrame?: number | null;
   readonly nextReleaseFrame: number;
   readonly acceptedInputs: readonly PlayerFrameCursorView[];
+  readonly pendingInputDelayChange?: InputDelayChange | null;
 }
 
 export interface PlayerFrameCursorView {

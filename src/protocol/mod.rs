@@ -4,10 +4,12 @@
 //! They do not own room storage or transport socket lifetimes.
 
 mod client_message;
+mod client_network_quality;
 mod client_runtime_state;
 mod compatibility;
 mod descriptor_validation;
 mod input_batch;
+mod input_delay_change;
 mod input_frame;
 mod link_cable_compatibility;
 mod link_cable_descriptor;
@@ -23,11 +25,13 @@ mod snapshot;
 mod state_hash;
 
 pub use client_message::ClientMessage;
+pub use client_network_quality::ClientNetworkQualityReport;
 pub use client_runtime_state::ClientRuntimeState;
 pub use compatibility::{CompatibilityFingerprint, CompatibilityMismatch};
 pub use input_batch::{
     InputFrameBatch, InputFrameBatchCodecError, decode_input_frame_batch, encode_input_frame_batch,
 };
+pub use input_delay_change::{InputDelayChange, InputDelayChangeReason};
 pub use input_frame::{InputFrame, InputFrameLimits};
 pub use link_cable_compatibility::LinkCableCompatibility;
 pub use link_cable_descriptor::{LinkCableDescriptor, LinkCableTransport};
@@ -41,8 +45,9 @@ pub use server_frame::{
 };
 pub use server_message::ServerMessage;
 pub use session_descriptor::{
-    ControllerNetplayDescriptor, NetplayCoreDescriptor, NetplayGameDescriptor,
-    NetplaySessionDescriptor,
+    ControllerNetplayDescriptor, DEFAULT_CONTROLLER_INPUT_DELAY_FRAMES,
+    MAX_CONTROLLER_INPUT_DELAY_FRAMES, MIN_CONTROLLER_INPUT_DELAY_FRAMES, NetplayCoreDescriptor,
+    NetplayGameDescriptor, NetplaySessionDescriptor,
 };
 pub use session_descriptor_error::SessionDescriptorError;
 pub use session_mode::NetplaySessionMode;

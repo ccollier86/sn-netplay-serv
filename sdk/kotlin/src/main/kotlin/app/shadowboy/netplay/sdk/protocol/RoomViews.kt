@@ -30,6 +30,7 @@ public data class RoomFrameClockView(
     public val releasedFrame: Long? = null,
     public val nextReleaseFrame: Long = 0,
     public val acceptedInputs: List<PlayerFrameCursorView> = emptyList(),
+    public val pendingInputDelayChange: InputDelayChange? = null,
 )
 
 @Serializable

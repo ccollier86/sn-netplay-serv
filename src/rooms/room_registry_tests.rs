@@ -249,11 +249,11 @@ async fn ready_from_both_players_broadcasts_session_start() {
     let mut events = registry.subscribe(invite.clone()).await.expect("events");
 
     registry
-        .mark_ready(invite.clone(), host_connection)
+        .mark_ready(invite.clone(), host_connection, None)
         .await
         .expect("host ready");
     registry
-        .mark_ready(invite, guest_connection)
+        .mark_ready(invite, guest_connection, None)
         .await
         .expect("guest ready");
 
@@ -383,11 +383,11 @@ async fn validated_input_frame_is_broadcast() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
-        .mark_ready(invite.clone(), host_connection)
+        .mark_ready(invite.clone(), host_connection, None)
         .await
         .expect("host ready");
     registry
-        .mark_ready(invite.clone(), guest_connection)
+        .mark_ready(invite.clone(), guest_connection, None)
         .await
         .expect("guest ready");
     let mut events = registry
@@ -415,11 +415,23 @@ async fn validated_input_frame_is_broadcast() {
         .await
         .expect("input frame");
 
-    assert_eq!(registry.release_next_controller_frames().await, 0);
+    assert_eq!(registry.release_next_controller_frames().await, 1);
+
+    let event = events.recv().await.expect("host input event");
+    assert!(matches!(
+        event,
+        crate::rooms::RoomInputEvent::InputFrameBatch { .. }
+    ));
+
+    let event = events.recv().await.expect("server frame event");
+    assert!(matches!(
+        event,
+        crate::rooms::RoomInputEvent::ServerFrame { .. }
+    ));
 
     registry
         .relay_input_frame_batch(
-            invite,
+            invite.clone(),
             guest_connection,
             InputFrameBatch {
                 room_epoch,
@@ -435,9 +447,7 @@ async fn validated_input_frame_is_broadcast() {
         .await
         .expect("guest input frame");
 
-    assert_eq!(registry.release_next_controller_frames().await, 1);
-
-    let event = events.recv().await.expect("event");
+    let event = events.recv().await.expect("late guest input event");
 
     assert!(matches!(
         event,
@@ -450,11 +460,11 @@ async fn future_input_frame_waits_for_room_frame_before_broadcast() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
-        .mark_ready(invite.clone(), host_connection)
+        .mark_ready(invite.clone(), host_connection, None)
         .await
         .expect("host ready");
     registry
-        .mark_ready(invite.clone(), guest_connection)
+        .mark_ready(invite.clone(), guest_connection, None)
         .await
         .expect("guest ready");
     let mut events = registry
@@ -513,15 +523,15 @@ async fn future_input_frame_waits_for_room_frame_before_broadcast() {
 }
 
 #[tokio::test]
-async fn state_hash_mismatch_broadcasts_resync_room() {
+async fn state_hash_mismatch_is_diagnostic_without_resync() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
-        .mark_ready(invite.clone(), host_connection)
+        .mark_ready(invite.clone(), host_connection, None)
         .await
         .expect("host ready");
     registry
-        .mark_ready(invite.clone(), guest_connection)
+        .mark_ready(invite.clone(), guest_connection, None)
         .await
         .expect("guest ready");
     let session_epoch = session_epoch(&registry, &invite).await;
@@ -536,15 +546,27 @@ async fn state_hash_mismatch_broadcasts_resync_room() {
         .await
         .expect("guest hash");
 
-    let event = events.recv().await.expect("state hash mismatch");
-    let RoomEvent::StateHashMismatch { mismatch, room } = event else {
-        panic!("expected state hash mismatch event");
-    };
+    assert!(matches!(
+        events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
 
-    assert_eq!(mismatch.frame, 60);
-    assert_eq!(room.status, RoomStatus::CheckingCompatibility);
-    assert_eq!(room.session_epoch, session_epoch + 1);
+    let room = registry
+        .room_view(invite.clone())
+        .await
+        .expect("room remains active");
+    assert_eq!(room.status, RoomStatus::Playing);
+    assert_eq!(room.session_epoch, session_epoch);
     assert_eq!(room.frame_clock.canonical_frame, 0);
+
+    let debug_events = registry
+        .room_events(invite.clone(), 1)
+        .await
+        .expect("debug events");
+    assert_eq!(
+        debug_events.first().map(|event| event.kind.as_str()),
+        Some("stateHashMismatchDiagnostic")
+    );
 }
 
 #[tokio::test]
@@ -552,11 +574,11 @@ async fn repeated_pause_request_updates_existing_pause() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
-        .mark_ready(invite.clone(), host_connection)
+        .mark_ready(invite.clone(), host_connection, None)
         .await
         .expect("host ready");
     registry
-        .mark_ready(invite.clone(), guest_connection)
+        .mark_ready(invite.clone(), guest_connection, None)
         .await
         .expect("guest ready");
     let mut events = registry.subscribe(invite.clone()).await.expect("events");
@@ -876,11 +898,11 @@ async fn reconnectable_room() -> (
     .await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
-        .mark_ready(invite.clone(), host_connection)
+        .mark_ready(invite.clone(), host_connection, None)
         .await
         .expect("host ready");
     registry
-        .mark_ready(invite.clone(), guest_connection)
+        .mark_ready(invite.clone(), guest_connection, None)
         .await
         .expect("guest ready");
 

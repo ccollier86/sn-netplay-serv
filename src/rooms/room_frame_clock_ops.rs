@@ -13,22 +13,13 @@ impl NetplayRoom {
             return None;
         }
 
-        if self.next_release_frame > self.room_frame {
-            return None;
-        }
-
-        if !self.connected_player_indices().iter().all(|player_index| {
-            self.last_input_frames
-                .get(player_index)
-                .is_some_and(|frame| *frame >= self.next_release_frame)
-        }) {
-            return None;
-        }
+        self.apply_pending_input_delay_if_due();
 
         let frame = self.next_release_frame;
 
         self.next_release_frame = self.next_release_frame.saturating_add(1);
         self.released_frame = Some(frame);
+        self.room_frame = self.room_frame.max(frame);
 
         Some(ServerFrame {
             room_epoch: self.room_epoch,
@@ -53,6 +44,7 @@ impl NetplayRoom {
                     frame: self.last_input_frames.get(&slot.player_index).copied(),
                 })
                 .collect(),
+            pending_input_delay_change: self.pending_input_delay_change.clone(),
         }
     }
 }

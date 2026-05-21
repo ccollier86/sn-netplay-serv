@@ -30,6 +30,7 @@ public sealed interface ClientMessage {
     public data class Ready(
         public val roomEpoch: Long,
         public val sessionEpoch: Long,
+        public val network: ClientNetworkQualityReport? = null,
     ) : ClientMessage
 
     @Serializable
@@ -72,6 +73,7 @@ public sealed interface ClientMessage {
         public val latestEventSeq: Long,
         public val localFrame: Long? = null,
         public val runtimeState: ClientRuntimeState,
+        public val network: ClientNetworkQualityReport? = null,
     ) : ClientMessage
 
     @Serializable
@@ -230,6 +232,20 @@ public sealed interface ServerMessage {
         public val roomEpoch: Long,
         public val sessionEpoch: Long,
         public val mismatch: StateHashMismatchView,
+        public val room: RoomView,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long = eventSeq
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("inputDelayChanged")
+    public data class InputDelayChanged(
+        public val eventSeq: Long,
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val change: InputDelayChange,
         public val room: RoomView,
     ) : ServerMessage {
         override val eventSeqOrNull: Long = eventSeq

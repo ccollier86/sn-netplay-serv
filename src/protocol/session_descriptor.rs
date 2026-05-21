@@ -11,9 +11,9 @@ use crate::protocol::descriptor_validation::{
 use crate::protocol::{LinkCableDescriptor, NetplaySessionMode, SessionDescriptorError};
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_CONTROLLER_INPUT_DELAY_FRAMES: u8 = 3;
-const MIN_CONTROLLER_INPUT_DELAY_FRAMES: u8 = 1;
-const MAX_CONTROLLER_INPUT_DELAY_FRAMES: u8 = 8;
+pub const DEFAULT_CONTROLLER_INPUT_DELAY_FRAMES: u8 = 3;
+pub const MIN_CONTROLLER_INPUT_DELAY_FRAMES: u8 = 1;
+pub const MAX_CONTROLLER_INPUT_DELAY_FRAMES: u8 = 8;
 
 /// Netplay game/core descriptor supplied by the host when creating a room.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -158,7 +158,7 @@ impl NetplayCoreDescriptor {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ControllerNetplayDescriptor {
-    /// Input delay chosen by the host and echoed to guests.
+    /// Current input delay selected by the relay and echoed to clients.
     #[serde(default = "default_controller_input_delay_frames")]
     pub input_delay_frames: u8,
 }

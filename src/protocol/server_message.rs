@@ -4,8 +4,8 @@
 //! directly. They do not contain secrets or raw auth details.
 
 use crate::protocol::{
-    InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk, SnapshotManifest,
-    StateHashMismatchView,
+    InputDelayChange, InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk,
+    SnapshotManifest, StateHashMismatchView,
 };
 use crate::rooms::RoomView;
 use serde::Serialize;
@@ -193,6 +193,19 @@ pub enum ServerMessage {
         session_epoch: u64,
         /// Mismatch details.
         mismatch: StateHashMismatchView,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Relay scheduled an adaptive controller input-delay change.
+    InputDelayChanged {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Scheduled delay update.
+        change: InputDelayChange,
         /// Current room state.
         room: RoomView,
     },
