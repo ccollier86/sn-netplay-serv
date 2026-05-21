@@ -3,6 +3,7 @@
 //! Protocol modules define wire-compatible messages and validation helpers.
 //! They do not own room storage or transport socket lifetimes.
 
+mod client_kind;
 mod client_message;
 mod client_network_quality;
 mod client_runtime_state;
@@ -24,6 +25,7 @@ mod session_pause;
 mod snapshot;
 mod state_hash;
 
+pub use client_kind::NetplayClientKind;
 pub use client_message::ClientMessage;
 pub use client_network_quality::ClientNetworkQualityReport;
 pub use client_runtime_state::ClientRuntimeState;

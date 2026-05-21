@@ -4,6 +4,15 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+public enum class NetplayClientKind {
+    @SerialName("desktop")
+    Desktop,
+
+    @SerialName("android")
+    Android,
+}
+
+@Serializable
 public enum class NetplaySessionMode {
     @SerialName("controllerNetplay")
     ControllerNetplay,

@@ -119,6 +119,17 @@ Guest:
 
 ## Room View Additions
 
+`NetplaySessionDescriptor` now includes the app family that created the room:
+
+```kotlin
+val hostClientKind: NetplayClientKind?
+```
+
+The relay stamps this from authenticated request headers when the room is
+created. Clients should not trust their own request body for this value.
+Android-created rooms will come back as `NetplayClientKind.Android`; Desktop
+rooms will come back as `NetplayClientKind.Desktop`.
+
 `PlayerSlotView` now includes:
 
 ```kotlin
@@ -149,6 +160,8 @@ Current transition contract:
 ## Kotlin SDK Files Changed
 
 - `NetplayConstants.kt`: protocol v4 and input socket path builder.
+- `protocol/ProtocolEnums.kt`: `NetplayClientKind`.
+- `protocol/SessionDescriptors.kt`: `hostClientKind`.
 - `transport/NetplayWebSocket.kt`: `inputJoinRequest(...)`.
 - `protocol/Messages.kt`: `roomJoined.inputSocketToken`.
 - `protocol/RoomViews.kt`: `controlConnected`, `inputConnected`.

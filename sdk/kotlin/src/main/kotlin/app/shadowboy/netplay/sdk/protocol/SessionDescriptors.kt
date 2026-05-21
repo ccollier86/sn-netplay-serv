@@ -21,6 +21,7 @@ public data class RoomStatusResponse(
 
 @Serializable
 public data class NetplaySessionDescriptor(
+    public val hostClientKind: NetplayClientKind? = null,
     public val hostAppVersion: String? = null,
     public val mode: NetplaySessionMode = NetplaySessionMode.ControllerNetplay,
     public val game: NetplayGameDescriptor,

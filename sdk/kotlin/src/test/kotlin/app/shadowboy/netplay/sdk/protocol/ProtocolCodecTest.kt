@@ -114,6 +114,17 @@ class ProtocolCodecTest {
     }
 
     @Test
+    fun `encodes host client kind in room descriptors`() {
+        val payload = NetplayJson.format.encodeToString(
+            NetplaySessionDescriptor.serializer(),
+            testSessionDescriptor().copy(hostClientKind = NetplayClientKind.Android),
+        )
+        val json = NetplayJson.format.parseToJsonElement(payload).jsonObject
+
+        assertEquals("android", json.string("hostClientKind"))
+    }
+
+    @Test
     fun `round trips binary input batches`() {
         val codec = NetplayInputBatchCodec()
         val encoded = codec.encode(
@@ -148,6 +159,7 @@ class ProtocolCodecTest {
 
 fun testSessionDescriptor(): NetplaySessionDescriptor =
     NetplaySessionDescriptor(
+        hostClientKind = NetplayClientKind.Desktop,
         hostAppVersion = "0.2.10",
         game = NetplayGameDescriptor(
             systemId = "snes",

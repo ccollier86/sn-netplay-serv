@@ -151,6 +151,7 @@ async fn create_room_returns_invite_descriptor_and_protocol() {
         "a".repeat(64)
     );
     assert_eq!(value["room"]["session"]["core"]["coreId"], "dolphin");
+    assert_eq!(value["room"]["session"]["hostClientKind"], "desktop");
 }
 
 #[tokio::test]
@@ -168,8 +169,14 @@ async fn create_room_accepts_android_client_auth() {
         )
         .await
         .expect("response");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let value = serde_json::from_slice::<Value>(&body).expect("json");
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["room"]["session"]["hostClientKind"], "android");
 }
 
 #[tokio::test]

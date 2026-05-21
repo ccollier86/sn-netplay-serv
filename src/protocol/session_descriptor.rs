@@ -8,7 +8,9 @@ use crate::protocol::descriptor_validation::{
     validate_id, validate_optional_id, validate_optional_sha256, validate_optional_short_text,
     validate_sha256, validate_title,
 };
-use crate::protocol::{LinkCableDescriptor, NetplaySessionMode, SessionDescriptorError};
+use crate::protocol::{
+    LinkCableDescriptor, NetplayClientKind, NetplaySessionMode, SessionDescriptorError,
+};
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_CONTROLLER_INPUT_DELAY_FRAMES: u8 = 3;
@@ -19,6 +21,9 @@ pub const MAX_CONTROLLER_INPUT_DELAY_FRAMES: u8 = 8;
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetplaySessionDescriptor {
+    /// ShadowBoy app family that created the room.
+    #[serde(default)]
+    pub host_client_kind: Option<NetplayClientKind>,
     /// ShadowBoy Desktop version that created the room.
     #[serde(default)]
     pub host_app_version: Option<String>,
@@ -388,6 +393,7 @@ mod tests {
 
     fn descriptor_value() -> serde_json::Value {
         serde_json::json!({
+            "hostClientKind": "desktop",
             "hostAppVersion": "0.3.0",
             "game": {
                 "systemId": "gamecube",

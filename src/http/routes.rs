@@ -11,7 +11,9 @@ use crate::limits::{
     MAX_CREATE_ROOM_BODY_BYTES, MAX_WEBSOCKET_FRAME_BYTES, MAX_WEBSOCKET_MESSAGE_BYTES,
 };
 use crate::observability::MetricsSnapshot;
-use crate::protocol::{NetplaySessionDescriptor, validate_client_protocol_version};
+use crate::protocol::{
+    NetplayClientKind, NetplaySessionDescriptor, validate_client_protocol_version,
+};
 use crate::rate_limit::RateLimitAction;
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, RoomView};
 use crate::rooms::{RoomDebugEvent, RoomRegistrySnapshot};
@@ -85,10 +87,12 @@ pub async fn create_room(
     };
     let request = parse_create_room_request(&body)?;
     validate_client_protocol_version(request.desktop_protocol_version)?;
-    request.session.validate()?;
+    let mut session = request.session;
+    session.host_client_kind = Some(netplay_client_kind(license.client_kind));
+    session.validate()?;
     let room = services
         .rooms
-        .create_room(license, ConnectionId::new(), request.session)
+        .create_room(license, ConnectionId::new(), session)
         .await?;
 
     services.metrics.record_room_created();
@@ -209,6 +213,13 @@ fn parse_create_room_request(body: &[u8]) -> Result<CreateRoomRequest, HttpError
         code: "invalidCreateRoomRequest",
         message: "Create-room request JSON is invalid.",
     })
+}
+
+fn netplay_client_kind(client_kind: crate::auth::ClientKind) -> NetplayClientKind {
+    match client_kind {
+        crate::auth::ClientKind::Desktop => NetplayClientKind::Desktop,
+        crate::auth::ClientKind::Android => NetplayClientKind::Android,
+    }
 }
 
 /// Returns internal process metrics for authenticated operators.
