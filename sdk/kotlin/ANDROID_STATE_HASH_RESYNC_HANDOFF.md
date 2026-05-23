@@ -13,6 +13,14 @@ heartbeat `localFrame` spread, falls back to accepted input cursors, adds slack,
 and caps the window. Android should log these nearby matches, but repair still
 uses the exact `repairFrame` from the relay.
 
+Keep reported state-hash frames pinned separately from the normal rollback
+window. The normal gameplay rollback window can stay small, but a host must be
+able to serialize a reported `repairFrame` after delayed peer hash reports:
+
+```text
+STATE_HASH_REPAIR_RETAINED_FRAMES = 600 + 120 + 4
+```
+
 ## SDK-Owned Pieces
 
 Use the Kotlin SDK helpers instead of hand-rolling relay state:
@@ -135,8 +143,8 @@ When `roomStateMachine.state.resync != null`:
 2. Stop applying old input/server-frame work for the previous session epoch.
 3. Clear local prediction, rollback, and state-hash buffers.
 4. Resend compatibility for the new room/session epoch.
-5. Host serializes the retained state for the relay-provided `repairFrame`,
-   sends it, and loads that same state locally.
+5. Host serializes the pinned retained state for the relay-provided
+   `repairFrame`, sends it, and loads that same state locally.
 6. Guest receives and loads the snapshot.
 7. Send `ready` only after local runtime state is clean.
 8. Resume only after `ServerMessage.StartSession`.
