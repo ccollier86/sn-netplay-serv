@@ -172,16 +172,22 @@ export class RoomStateMachine {
   }
 
   public isRuntimeMessageCurrent(message: ServerMessage): boolean {
-    if (message.type !== "serverFrame") {
-      return this.isMessageCurrent(message);
+    switch (message.type) {
+      case "serverFrame":
+        return this.isExactRuntimeEpochCurrent(
+          message.frame.roomEpoch,
+          message.frame.sessionEpoch,
+        );
+      case "inputFrame":
+      case "snapshotChunk":
+      case "snapshotComplete":
+        return this.isExactRuntimeEpochCurrent(
+          message.roomEpoch,
+          message.sessionEpoch,
+        );
+      default:
+        return this.isMessageCurrent(message);
     }
-
-    if (this.state.roomEpoch === 0 && this.state.sessionEpoch === 0) {
-      return true;
-    }
-
-    return message.frame.roomEpoch === this.state.roomEpoch &&
-      message.frame.sessionEpoch === this.state.sessionEpoch;
   }
 
   public effectivePauseReason(): NetplayEffectivePauseReason | null {
@@ -245,6 +251,15 @@ export class RoomStateMachine {
         (this.state.sessionEpoch !== 0 && sessionEpoch > this.state.sessionEpoch),
       sessionEpoch,
     };
+  }
+
+  private isExactRuntimeEpochCurrent(roomEpoch: number, sessionEpoch: number): boolean {
+    if (this.state.roomEpoch === 0 && this.state.sessionEpoch === 0) {
+      return true;
+    }
+
+    return roomEpoch === this.state.roomEpoch &&
+      sessionEpoch === this.state.sessionEpoch;
   }
 }
 

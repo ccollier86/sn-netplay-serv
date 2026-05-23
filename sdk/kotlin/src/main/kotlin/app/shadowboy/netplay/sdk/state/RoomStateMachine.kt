@@ -138,18 +138,26 @@ public class RoomStateMachine(
             eventSeq >= state.latestEventSeq
     }
 
-    public fun isRuntimeMessageCurrent(message: ServerMessage): Boolean {
-        if (message !is ServerMessage.ServerFrameMessage) {
-            return isMessageCurrent(message)
+    public fun isRuntimeMessageCurrent(message: ServerMessage): Boolean =
+        when (message) {
+            is ServerMessage.ServerFrameMessage -> isExactRuntimeEpochCurrent(
+                message.frame.roomEpoch,
+                message.frame.sessionEpoch,
+            )
+            is ServerMessage.InputFrameMessage -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            is ServerMessage.SnapshotChunkMessage -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            is ServerMessage.SnapshotComplete -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            else -> isMessageCurrent(message)
         }
-
-        if (state.roomEpoch == 0L && state.sessionEpoch == 0L) {
-            return true
-        }
-
-        return message.frame.roomEpoch == state.roomEpoch &&
-            message.frame.sessionEpoch == state.sessionEpoch
-    }
 
     public fun effectivePauseReason(): NetplayEffectivePauseReason? {
         val currentResync = resync.currentResync
@@ -221,5 +229,13 @@ public class RoomStateMachine(
             runtimeResetRequired = state.runtimeResetRequired ||
                 (state.sessionEpoch != 0L && sessionEpoch > state.sessionEpoch),
         )
+    }
+
+    private fun isExactRuntimeEpochCurrent(roomEpoch: Long, sessionEpoch: Long): Boolean {
+        if (state.roomEpoch == 0L && state.sessionEpoch == 0L) {
+            return true
+        }
+
+        return roomEpoch == state.roomEpoch && sessionEpoch == state.sessionEpoch
     }
 }

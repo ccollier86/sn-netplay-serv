@@ -254,17 +254,35 @@ async fn handle_room_event(
             }
             ServerMessage::LinkCablePacket { packet }
         }
-        Ok(RoomEvent::SnapshotChunk { source, chunk }) => {
+        Ok(RoomEvent::SnapshotChunk {
+            source,
+            room_epoch,
+            session_epoch,
+            chunk,
+        }) => {
             if source == connection_id {
                 return true;
             }
-            ServerMessage::SnapshotChunk { chunk }
+            ServerMessage::SnapshotChunk {
+                room_epoch,
+                session_epoch,
+                chunk,
+            }
         }
-        Ok(RoomEvent::SnapshotComplete { source, manifest }) => {
+        Ok(RoomEvent::SnapshotComplete {
+            source,
+            room_epoch,
+            session_epoch,
+            manifest,
+        }) => {
             if source == connection_id {
                 return true;
             }
-            ServerMessage::SnapshotComplete { manifest }
+            ServerMessage::SnapshotComplete {
+                room_epoch,
+                session_epoch,
+                manifest,
+            }
         }
         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => ServerMessage::Error {
             code: "roomEventLagged".to_string(),

@@ -97,10 +97,12 @@ ServerMessage.InputFrameMessage(
 )
 ```
 
-`RoomStateMachine.apply(message)` now ignores stale input frames by epoch. Android
-should still avoid submitting ignored frames to the emulator runner; apply the
-message first, or call `roomStateMachine.isRuntimeMessageCurrent(message)` before
-touching emulator state.
+`RoomStateMachine.apply(message)` ignores stale input frames by epoch. Snapshot
+chunks and snapshot completion messages now also include `roomEpoch` and
+`sessionEpoch`, and they must match the current runtime epoch exactly. Android
+should still avoid submitting ignored runtime payloads to the emulator runner;
+apply the message first, or call `roomStateMachine.isRuntimeMessageCurrent(message)`
+before touching emulator state.
 
 ## Required Resync Flow
 

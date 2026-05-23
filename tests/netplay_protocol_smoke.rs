@@ -17,10 +17,17 @@ async fn two_clients_sync_snapshot_start_and_exchange_input() {
 
     host.send(chunk).await;
     let relayed_chunk = guest.expect_type("snapshotChunk").await;
+    assert!(relayed_chunk["roomEpoch"].is_number());
+    assert!(relayed_chunk["sessionEpoch"].is_number());
     assert_eq!(relayed_chunk["chunk"]["bytes"], json!([1, 2, 3, 4]));
 
     host.send(complete).await;
     let relayed_complete = guest.expect_type("snapshotComplete").await;
+    assert_eq!(relayed_complete["roomEpoch"], relayed_chunk["roomEpoch"]);
+    assert_eq!(
+        relayed_complete["sessionEpoch"],
+        relayed_chunk["sessionEpoch"]
+    );
     assert_eq!(relayed_complete["manifest"]["totalBytes"], 4);
 
     host.send(json!({ "type": "ready" })).await;

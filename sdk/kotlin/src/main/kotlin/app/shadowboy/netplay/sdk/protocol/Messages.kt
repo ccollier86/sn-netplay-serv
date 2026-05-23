@@ -352,18 +352,26 @@ public sealed interface ServerMessage {
 
     @Serializable
     @SerialName("snapshotChunk")
-    public data class SnapshotChunkMessage(public val chunk: SnapshotChunk) : ServerMessage {
+    public data class SnapshotChunkMessage(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val chunk: SnapshotChunk,
+    ) : ServerMessage {
         override val eventSeqOrNull: Long? = null
-        override val roomEpochOrNull: Long? = null
-        override val sessionEpochOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
     }
 
     @Serializable
     @SerialName("snapshotComplete")
-    public data class SnapshotComplete(public val manifest: SnapshotManifest) : ServerMessage {
+    public data class SnapshotComplete(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val manifest: SnapshotManifest,
+    ) : ServerMessage {
         override val eventSeqOrNull: Long? = null
-        override val roomEpochOrNull: Long? = null
-        override val sessionEpochOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
     }
 
     @Serializable

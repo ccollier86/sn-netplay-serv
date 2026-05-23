@@ -494,6 +494,39 @@ describe("TypeScript netplay room state", () => {
     expect(stateMachine.frameClock.snapshot().peerReadFrame).toBe(17);
   });
 
+  test("snapshot runtime messages require the exact active epoch", () => {
+    const stateMachine = new RoomStateMachine();
+    stateMachine.apply({
+      eventSeq: 5,
+      inputSocketToken: "input-token",
+      resumeToken: "token",
+      room: roomView({ eventSeq: 5, roomEpoch: 3, sessionEpoch: 4 }),
+      roomEpoch: 3,
+      sessionEpoch: 4,
+      type: "roomJoined",
+      yourPlayerIndex: 0,
+    });
+
+    expect(stateMachine.isRuntimeMessageCurrent({
+      chunk: { bytes: [1], index: 0 },
+      roomEpoch: 2,
+      sessionEpoch: 4,
+      type: "snapshotChunk",
+    })).toBe(false);
+    expect(stateMachine.isRuntimeMessageCurrent({
+      manifest: { sha256: "a".repeat(64), totalBytes: 1 },
+      roomEpoch: 3,
+      sessionEpoch: 5,
+      type: "snapshotComplete",
+    })).toBe(false);
+    expect(stateMachine.isRuntimeMessageCurrent({
+      chunk: { bytes: [1], index: 0 },
+      roomEpoch: 3,
+      sessionEpoch: 4,
+      type: "snapshotChunk",
+    })).toBe(true);
+  });
+
   test("diagnostics exposes effective pause and frame health", () => {
     const stateMachine = new RoomStateMachine();
     stateMachine.apply({

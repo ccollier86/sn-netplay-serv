@@ -261,8 +261,13 @@ impl StoredRoom {
         source: ConnectionId,
         chunk: SnapshotChunk,
     ) {
-        self.record_event(now, "snapshotChunk", "snapshot chunk relayed");
-        let _ = self.events.send(RoomEvent::SnapshotChunk { source, chunk });
+        let room = self.record_event(now, "snapshotChunk", "snapshot chunk relayed");
+        let _ = self.events.send(RoomEvent::SnapshotChunk {
+            source,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            chunk,
+        });
     }
 
     /// Emits a validated snapshot manifest.
@@ -272,10 +277,13 @@ impl StoredRoom {
         source: ConnectionId,
         manifest: SnapshotManifest,
     ) {
-        self.record_event(now, "snapshotComplete", "snapshot manifest relayed");
-        let _ = self
-            .events
-            .send(RoomEvent::SnapshotComplete { source, manifest });
+        let room = self.record_event(now, "snapshotComplete", "snapshot manifest relayed");
+        let _ = self.events.send(RoomEvent::SnapshotComplete {
+            source,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            manifest,
+        });
     }
 
     /// Relays accepted controller input when its server frame is available.

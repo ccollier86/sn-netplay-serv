@@ -11,11 +11,15 @@ import app.shadowboy.netplay.sdk.protocol.ServerFrameRelease
 import app.shadowboy.netplay.sdk.protocol.SessionPauseReason
 import app.shadowboy.netplay.sdk.protocol.SessionPauseState
 import app.shadowboy.netplay.sdk.protocol.SessionPauseView
+import app.shadowboy.netplay.sdk.protocol.SnapshotChunk
+import app.shadowboy.netplay.sdk.protocol.SnapshotManifest
 import app.shadowboy.netplay.sdk.protocol.StateHashMismatchView
 import app.shadowboy.netplay.sdk.protocol.roomJson
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 class RoomStateMachineTest {
@@ -398,6 +402,50 @@ class RoomStateMachineTest {
             ),
         )
         assertEquals(17, stateMachine.frameClock.snapshot().peerReadFrame)
+    }
+
+    @Test
+    fun `snapshot runtime messages require the exact active epoch`() {
+        val stateMachine = RoomStateMachine()
+        stateMachine.apply(
+            ServerMessage.RoomJoined(
+                eventSeq = 5,
+                roomEpoch = 3,
+                sessionEpoch = 4,
+                yourPlayerIndex = 0,
+                resumeToken = "token",
+                inputSocketToken = "input-token",
+                room = room(status = "waitingForGuest", eventSeq = 5, roomEpoch = 3, sessionEpoch = 4),
+            ),
+        )
+
+        assertFalse(
+            stateMachine.isRuntimeMessageCurrent(
+                ServerMessage.SnapshotChunkMessage(
+                    roomEpoch = 2,
+                    sessionEpoch = 4,
+                    chunk = SnapshotChunk(index = 0, bytes = listOf(1)),
+                ),
+            ),
+        )
+        assertFalse(
+            stateMachine.isRuntimeMessageCurrent(
+                ServerMessage.SnapshotComplete(
+                    roomEpoch = 3,
+                    sessionEpoch = 5,
+                    manifest = SnapshotManifest(totalBytes = 1, sha256 = "a".repeat(64)),
+                ),
+            ),
+        )
+        assertTrue(
+            stateMachine.isRuntimeMessageCurrent(
+                ServerMessage.SnapshotChunkMessage(
+                    roomEpoch = 3,
+                    sessionEpoch = 4,
+                    chunk = SnapshotChunk(index = 0, bytes = listOf(1)),
+                ),
+            ),
+        )
     }
 
     @Test

@@ -67,8 +67,8 @@ export type ServerMessage =
   | EpochMessage<"inputFrame"> & { readonly input: InputFrame }
   | { readonly type: "serverFrame"; readonly frame: ServerFrameRelease }
   | { readonly type: "linkCablePacket"; readonly packet: LinkCablePacket }
-  | { readonly type: "snapshotChunk"; readonly chunk: SnapshotChunk }
-  | { readonly type: "snapshotComplete"; readonly manifest: SnapshotManifest }
+  | EpochMessage<"snapshotChunk"> & { readonly chunk: SnapshotChunk }
+  | EpochMessage<"snapshotComplete"> & { readonly manifest: SnapshotManifest }
   | RoomEpochMessage<"sessionPauseScheduled"> & {
       readonly pause: SessionPauseView;
       readonly room: RoomView;

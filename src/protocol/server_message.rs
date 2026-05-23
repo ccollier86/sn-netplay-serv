@@ -77,11 +77,19 @@ pub enum ServerMessage {
     },
     /// Snapshot chunk relayed from the host.
     SnapshotChunk {
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
         /// Snapshot chunk payload.
         chunk: SnapshotChunk,
     },
     /// Snapshot transfer completion manifest relayed from host.
     SnapshotComplete {
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
         /// Snapshot manifest.
         manifest: SnapshotManifest,
     },

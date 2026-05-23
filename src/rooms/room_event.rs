@@ -57,6 +57,10 @@ pub enum RoomEvent {
     SnapshotChunk {
         /// Connection that supplied the snapshot chunk.
         source: ConnectionId,
+        /// Room epoch the snapshot belongs to.
+        room_epoch: u64,
+        /// Session epoch the snapshot belongs to.
+        session_epoch: u64,
         /// Validated snapshot chunk.
         chunk: SnapshotChunk,
     },
@@ -64,6 +68,10 @@ pub enum RoomEvent {
     SnapshotComplete {
         /// Connection that supplied the snapshot manifest.
         source: ConnectionId,
+        /// Room epoch the snapshot belongs to.
+        room_epoch: u64,
+        /// Session epoch the snapshot belongs to.
+        session_epoch: u64,
         /// Validated snapshot manifest.
         manifest: SnapshotManifest,
     },

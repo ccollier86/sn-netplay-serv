@@ -21,6 +21,17 @@ transport, auth, emulator integration, and UI.
 Apps still own emulator-specific work: pausing the core, serializing/loading
 save states, computing state hashes, and displaying progress.
 
+## Local Test Command
+
+The local JDK used for this SDK is:
+
+```bash
+JAVA_HOME=/home/catalyst-2/.local/jdk-21
+```
+
+There is no `gradlew` wrapper checked into this SDK folder. Use the installed
+Gradle distribution with that `JAVA_HOME`:
+
 ```bash
 JAVA_HOME=/home/catalyst-2/.local/jdk-21 /home/catalyst-2/.gradle/wrapper/dists/gradle-8.14.3-bin/cv11ve7ro1n3o1j4so8xd9n66/gradle-8.14.3/bin/gradle test
 ```
