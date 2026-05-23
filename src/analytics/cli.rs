@@ -1,6 +1,7 @@
 //! Command-line entry point for netplay analytics tools.
 
 use crate::analytics::config::AnalyticsConfig;
+use crate::analytics::live::{LiveDiagnosticsClient, LiveDiagnosticsConfig};
 use crate::analytics::query::{AnalyticsDb, SessionKey};
 use crate::analytics::report::{build_fleet_report, build_session_reports, print_report};
 use crate::config::PostgresTelemetryConfig;
@@ -19,22 +20,27 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let config = AnalyticsConfig::from_env()?;
-    let db = AnalyticsDb::connect(config.clone()).await?;
-
     match command {
+        "live" => {
+            run_live(&args).await?;
+        }
         "schema" => {
+            let db = connect_db().await?;
             db.apply_schema().await?;
             println!("analytics schema applied");
         }
         "probe" => {
+            let config = AnalyticsConfig::from_env()?;
+            let db = AnalyticsDb::connect(config.clone()).await?;
             run_probe(config, &db).await?;
         }
         "purge-probes" => {
+            let db = connect_db().await?;
             db.delete_probe_rows().await?;
             println!("analytics probe rows removed");
         }
         "sessions" => {
+            let db = connect_db().await?;
             let limit = option_usize(&args, "--limit").unwrap_or(25);
             for session in db.recent_sessions(limit).await? {
                 println!(
@@ -47,6 +53,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         "report" => {
+            let db = connect_db().await?;
             let limit = option_usize(&args, "--limit").unwrap_or(25);
             let sessions = db.recent_sessions(limit).await?;
             let events = db.events_for_sessions(&sessions).await?;
@@ -57,6 +64,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             print_report(&fleet_report, &session_reports);
         }
         "raw" => {
+            let db = connect_db().await?;
             run_raw(&db, &args).await?;
         }
         _ => {
@@ -64,6 +72,39 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    Ok(())
+}
+
+async fn connect_db() -> Result<AnalyticsDb, Box<dyn std::error::Error>> {
+    let config = AnalyticsConfig::from_env()?;
+    Ok(AnalyticsDb::connect(config).await?)
+}
+
+async fn run_live(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let config = LiveDiagnosticsConfig::from_env()?;
+    let client = LiveDiagnosticsClient::new(config)?;
+    let payload = match args.get(1).map(String::as_str) {
+        Some("metrics") => client.metrics().await?,
+        Some("rooms") => client.rooms().await?,
+        Some("room") => {
+            let invite_code = required_option(args, "--invite")?;
+            client.room(&invite_code).await?
+        }
+        Some("events") => {
+            let limit = option_usize(args, "--limit").unwrap_or(100);
+            if let Some(invite_code) = option_string(args, "--invite") {
+                client.room_events(&invite_code, limit).await?
+            } else {
+                client.recent_events(limit).await?
+            }
+        }
+        _ => {
+            print_help();
+            return Ok(());
+        }
+    };
+
+    println!("{}", serde_json::to_string_pretty(&payload)?);
     Ok(())
 }
 
@@ -156,8 +197,19 @@ fn option_string(args: &[String], name: &str) -> Option<String> {
         .map(|window| window[1].clone())
 }
 
+fn required_option(
+    args: &[String],
+    name: &'static str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    option_string(args, name).ok_or_else(|| format!("{name} is required").into())
+}
+
 fn print_help() {
     println!("ShadowBoy netplay analytics");
+    println!("  live metrics");
+    println!("  live rooms");
+    println!("  live room --invite AB23-CD");
+    println!("  live events [--invite AB23-CD] [--limit 100]");
     println!("  schema");
     println!("  probe");
     println!("  purge-probes");

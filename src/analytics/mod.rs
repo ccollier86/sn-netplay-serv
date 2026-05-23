@@ -2,6 +2,7 @@
 
 mod cli;
 mod config;
+mod live;
 mod query;
 mod report;
 

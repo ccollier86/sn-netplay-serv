@@ -124,6 +124,10 @@ Analytics tools:
 scripts/netplay-analytics.sh schema
 scripts/netplay-analytics.sh probe
 scripts/netplay-analytics.sh purge-probes
+scripts/netplay-analytics.sh live metrics
+scripts/netplay-analytics.sh live rooms
+scripts/netplay-analytics.sh live room --invite AB23-CD
+scripts/netplay-analytics.sh live events [--invite AB23-CD] [--limit 100]
 scripts/netplay-analytics.sh sessions --limit 25
 scripts/netplay-analytics.sh report --limit 25
 scripts/netplay-analytics.sh raw recent --limit 5
@@ -137,6 +141,9 @@ epochs are not hidden. `probe` writes one synthetic event and runtime sample
 through the same Postgres batch writer used by production telemetry, then
 removes probe rows so normal reports stay clean. Use it after schema or
 credential changes to verify the write path before testing live rooms.
+The wrapper sources the local `.env` file when present. Live commands use
+`SB_NETPLAY_ADMIN_TOKEN` and `SB_NETPLAY_LIVE_URL` if set, otherwise they default
+to `https://netplay.shadowboy.app`.
 
 Remote debugging endpoints:
 
