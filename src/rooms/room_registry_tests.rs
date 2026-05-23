@@ -380,7 +380,7 @@ async fn host_snapshot_complete_is_broadcast_after_valid_chunks() {
 }
 
 #[tokio::test]
-async fn validated_input_frame_is_broadcast_after_all_players_reach_frame() {
+async fn host_input_releases_server_frame_before_guest_input_arrives() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
@@ -416,10 +416,18 @@ async fn validated_input_frame_is_broadcast_after_all_players_reach_frame() {
         .await
         .expect("input frame");
 
-    assert_eq!(registry.release_next_controller_frames().await, 0);
+    assert_eq!(registry.release_next_controller_frames().await, 1);
+
+    let event = events.recv().await.expect("host input event");
     assert!(matches!(
-        events.try_recv(),
-        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        event,
+        crate::rooms::RoomInputEvent::InputFrameBatch { .. }
+    ));
+
+    let event = events.recv().await.expect("server frame event");
+    assert!(matches!(
+        event,
+        crate::rooms::RoomInputEvent::ServerFrame { .. }
     ));
 
     registry
@@ -440,30 +448,15 @@ async fn validated_input_frame_is_broadcast_after_all_players_reach_frame() {
         .await
         .expect("guest input frame");
 
-    assert_eq!(registry.release_next_controller_frames().await, 1);
-
-    let event = events.recv().await.expect("host input event");
+    let event = events.recv().await.expect("late guest input event");
     assert!(matches!(
         event,
         crate::rooms::RoomInputEvent::InputFrameBatch { .. }
-    ));
-
-    let event = events.recv().await.expect("guest input event");
-    assert!(matches!(
-        event,
-        crate::rooms::RoomInputEvent::InputFrameBatch { .. }
-    ));
-
-    let event = events.recv().await.expect("server frame event");
-
-    assert!(matches!(
-        event,
-        crate::rooms::RoomInputEvent::ServerFrame { .. }
     ));
 }
 
 #[tokio::test]
-async fn server_frame_clock_waits_for_slowest_player_input_cursor() {
+async fn server_frame_clock_follows_host_input_cursor() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
@@ -485,28 +478,13 @@ async fn server_frame_clock_waits_for_slowest_player_input_cursor() {
                 room_epoch,
                 session_epoch,
                 player_index: PlayerIndex::ONE,
-                frames: vec![input(PlayerIndex::ONE, 120)],
+                frames: vec![input(PlayerIndex::ONE, 0), input(PlayerIndex::ONE, 1)],
             },
         )
         .await
-        .expect("host future input");
+        .expect("host input");
 
-    assert_eq!(registry.release_next_controller_frames().await, 0);
-
-    registry
-        .relay_input_frame_batch(
-            invite.clone(),
-            guest_connection,
-            InputFrameBatch {
-                room_epoch,
-                session_epoch,
-                player_index: PlayerIndex::TWO,
-                frames: vec![input(PlayerIndex::TWO, 0)],
-            },
-        )
-        .await
-        .expect("guest first input");
-
+    assert_eq!(registry.release_next_controller_frames().await, 1);
     assert_eq!(registry.release_next_controller_frames().await, 1);
     assert_eq!(registry.release_next_controller_frames().await, 0);
 
@@ -515,11 +493,11 @@ async fn server_frame_clock_waits_for_slowest_player_input_cursor() {
         .await
         .expect("room should remain active");
 
-    assert!(matches!(room.frame_clock.released_frame, Some(0)));
+    assert!(matches!(room.frame_clock.released_frame, Some(1)));
 }
 
 #[tokio::test]
-async fn future_input_frame_waits_for_room_frame_before_broadcast() {
+async fn future_host_input_waits_for_released_frame_before_broadcast() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
@@ -545,44 +523,48 @@ async fn future_input_frame_waits_for_room_frame_before_broadcast() {
                 room_epoch,
                 session_epoch,
                 player_index: PlayerIndex::ONE,
-                frames: vec![input(PlayerIndex::ONE, 5)],
+                frames: (0..=3)
+                    .map(|frame| input(PlayerIndex::ONE, frame))
+                    .collect(),
             },
         )
         .await
         .expect("host future input");
+
+    registry
+        .relay_input_frame_batch(
+            invite.clone(),
+            host_connection,
+            InputFrameBatch {
+                room_epoch,
+                session_epoch,
+                player_index: PlayerIndex::ONE,
+                frames: (4..=5)
+                    .map(|frame| input(PlayerIndex::ONE, frame))
+                    .collect(),
+            },
+        )
+        .await
+        .expect("more host future input");
 
     assert!(matches!(
         events.try_recv(),
         Err(tokio::sync::broadcast::error::TryRecvError::Empty)
     ));
 
-    registry
-        .relay_input_frame_batch(
-            invite,
-            guest_connection,
-            InputFrameBatch {
-                room_epoch,
-                session_epoch,
-                player_index: PlayerIndex::TWO,
-                frames: vec![input(PlayerIndex::TWO, 5)],
-            },
-        )
-        .await
-        .expect("guest matching input");
-
     for _ in 0..=5 {
         registry.release_next_controller_frames().await;
     }
 
-    let mut input_batch_count = 0;
-    while input_batch_count < 2 {
+    let mut host_input_batch_count = 0;
+    while host_input_batch_count < 6 {
         let event = events.recv().await.expect("input event");
         if matches!(event, crate::rooms::RoomInputEvent::InputFrameBatch { .. }) {
-            input_batch_count += 1;
+            host_input_batch_count += 1;
         }
     }
 
-    assert_eq!(input_batch_count, 2);
+    assert_eq!(host_input_batch_count, 6);
 }
 
 #[tokio::test]

@@ -393,8 +393,10 @@ fn duplicate_and_old_frames_are_ignored() {
     let mut room = ready_room(host_connection, guest_connection);
     let limits = InputFrameLimits::default();
 
-    room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, 1), limits)
+    room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, 0), limits)
         .expect("first frame");
+    room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, 1), limits)
+        .expect("second frame");
     let duplicate = room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, 1), limits);
     let older = room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, 0), limits);
 
@@ -403,34 +405,37 @@ fn duplicate_and_old_frames_are_ignored() {
 }
 
 #[test]
-fn future_frame_limit_is_enforced() {
+fn skipped_future_frame_is_rejected_as_out_of_order() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = ready_room(host_connection, guest_connection);
 
     let result = room.accept_input_frame(
         host_connection,
-        &input(PlayerIndex::ONE, 99),
-        InputFrameLimits {
-            max_future_frame_distance: 3,
-        },
+        &input(PlayerIndex::ONE, 2),
+        InputFrameLimits::default(),
     );
 
-    assert!(matches!(result, Err(RoomError::FutureFrameTooLarge)));
+    assert!(matches!(result, Err(RoomError::OutOfOrderFrame)));
 }
 
 #[test]
-fn default_future_frame_limit_allows_prediction_window() {
+fn future_frame_limit_is_enforced_for_contiguous_input() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = ready_room(host_connection, guest_connection);
+    let limits = InputFrameLimits {
+        max_future_frame_distance: 3,
+    };
 
-    room.accept_input_frame(
-        host_connection,
-        &input(PlayerIndex::ONE, 180),
-        InputFrameLimits::default(),
-    )
-    .expect("prediction-window frame");
+    for frame in 0..=3 {
+        room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, frame), limits)
+            .expect("contiguous input within future limit");
+    }
+
+    let result = room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, 4), limits);
+
+    assert!(matches!(result, Err(RoomError::FutureFrameTooLarge)));
 }
 
 #[test]
@@ -441,25 +446,35 @@ fn accepted_input_does_not_advance_server_clock() {
 
     room.accept_input_frame(
         host_connection,
-        &input(PlayerIndex::ONE, 180),
+        &input(PlayerIndex::ONE, 0),
         InputFrameLimits::default(),
     )
-    .expect("host prediction-window frame");
+    .expect("host first frame");
     assert_eq!(room.room_frame, 0);
+    assert_eq!(room.released_frame, None);
+}
+
+#[test]
+fn server_frame_clock_follows_host_cursor() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
 
     room.accept_input_frame(
-        guest_connection,
-        &input(PlayerIndex::TWO, 180),
+        host_connection,
+        &input(PlayerIndex::ONE, 0),
         InputFrameLimits::default(),
     )
-    .expect("guest prediction-window frame");
-    assert_eq!(room.room_frame, 0);
+    .expect("host input");
 
     let released_frame = room
         .release_next_server_frame()
-        .expect("server clock should release without waiting for every input");
+        .expect("host frame releases");
     assert_eq!(released_frame.frame, 0);
     assert_eq!(room.room_frame, 0);
+    assert_eq!(room.released_frame, Some(0));
+
+    assert!(room.release_next_server_frame().is_none());
 }
 
 #[test]
@@ -713,14 +728,20 @@ fn coordinated_pause_allows_in_flight_delayed_input_without_error() {
     let pause = room
         .request_session_pause(host_connection, SessionPauseReason::Menu, 10)
         .expect("pause scheduled");
+    let limits = InputFrameLimits {
+        max_future_frame_distance: 32,
+    };
+
+    for frame in 0..pause.pause_at_frame + 3 {
+        room.accept_input_frame(host_connection, &input(PlayerIndex::ONE, frame), limits)
+            .expect("earlier in-flight input accepted");
+    }
 
     assert_eq!(
         room.accept_input_frame(
             host_connection,
             &input(PlayerIndex::ONE, pause.pause_at_frame + 3),
-            InputFrameLimits {
-                max_future_frame_distance: 32,
-            },
+            limits,
         )
         .expect("in-flight input accepted"),
         InputFrameAcceptance::Relay
@@ -729,9 +750,7 @@ fn coordinated_pause_allows_in_flight_delayed_input_without_error() {
         room.accept_input_frame(
             guest_connection,
             &input(PlayerIndex::TWO, pause.pause_at_frame + 4),
-            InputFrameLimits {
-                max_future_frame_distance: 32,
-            },
+            limits,
         )
         .expect("post-window input ignored"),
         InputFrameAcceptance::Ignore

@@ -37,8 +37,8 @@ async fn two_clients_sync_snapshot_start_and_exchange_input() {
     assert_eq!(host_start["startFrame"], 0);
     assert_eq!(guest_start["startFrame"], 0);
 
-    host.send_input_frame(1, vec![1, 0, 0, 0]).await;
-    guest.send_input_frame(1, vec![0, 1, 0, 0]).await;
+    host.send_input_frame(0, vec![1, 0, 0, 0]).await;
+    guest.send_input_frame(0, vec![0, 1, 0, 0]).await;
 
     let guest_input = guest.expect_input_from(0).await;
     assert_eq!(guest_input["input"]["playerIndex"], 0);

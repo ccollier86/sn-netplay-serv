@@ -189,6 +189,7 @@ impl NetplayRoom {
         self.compatibility.remove(&player_index);
         self.ready_players.remove(&player_index);
         self.last_input_frames.remove(&player_index);
+        self.next_input_frames.remove(&player_index);
 
         if recoverable {
             self.mark_slot_reconnecting(player_index, now, reconnect_grace, reconnect_room_epoch);
@@ -325,6 +326,7 @@ impl NetplayRoom {
             self.compatibility.remove(&player_index);
             self.ready_players.remove(&player_index);
             self.last_input_frames.remove(&player_index);
+            self.next_input_frames.remove(&player_index);
             if let Some(slot) = self
                 .players
                 .iter_mut()

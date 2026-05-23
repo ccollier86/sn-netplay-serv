@@ -71,6 +71,7 @@ impl NetplayRoom {
         slot.input_connection_id = None;
         slot.last_seen_at = Some(now);
         self.last_input_frames.remove(&player_index);
+        self.next_input_frames.remove(&player_index);
 
         if recoverable {
             self.enter_recovery_state(reconnect_room_epoch);

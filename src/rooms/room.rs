@@ -32,6 +32,7 @@ pub struct NetplayRoom {
     pub(super) compatibility: HashMap<PlayerIndex, CompatibilityFingerprint>,
     pub(super) ready_players: HashSet<PlayerIndex>,
     pub(super) last_input_frames: HashMap<PlayerIndex, u64>,
+    pub(super) next_input_frames: HashMap<PlayerIndex, u64>,
     pub(super) link_cable_state: LinkCableRoomState,
     host_snapshot_completed: bool,
     pub(super) next_pause_sequence: u64,
@@ -102,6 +103,7 @@ impl NetplayRoom {
             compatibility: HashMap::new(),
             ready_players: HashSet::new(),
             last_input_frames: HashMap::new(),
+            next_input_frames: HashMap::new(),
             link_cable_state: LinkCableRoomState::default(),
             host_snapshot_completed: false,
             next_pause_sequence: 1,
@@ -431,6 +433,7 @@ impl NetplayRoom {
         self.compatibility.clear();
         self.ready_players.clear();
         self.last_input_frames.clear();
+        self.next_input_frames.clear();
         self.link_cable_state.reset();
         self.host_snapshot_completed = false;
         self.pause_state = None;

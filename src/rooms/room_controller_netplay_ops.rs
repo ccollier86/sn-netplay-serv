@@ -8,8 +8,8 @@ use crate::protocol::{
     SessionPauseView,
 };
 use crate::rooms::{
-    ConnectionId, InputFrameAcceptance, NetplayRoom, PlayerRuntimeState, PlayerStatus, RoomError,
-    RoomStatus, SessionPauseStateTracker,
+    ConnectionId, InputFrameAcceptance, NetplayRoom, PlayerIndex, PlayerRuntimeState, PlayerStatus,
+    RoomError, RoomStatus, SessionPauseStateTracker,
 };
 
 const SESSION_PAUSE_LEAD_FRAMES: u64 = 8;
@@ -40,10 +40,14 @@ impl NetplayRoom {
             return Ok(InputFrameAcceptance::Ignore);
         }
 
-        if let Some(last_frame) = self.last_input_frames.get(&input.player_index)
-            && input.frame <= *last_frame
-        {
+        let next_frame = self.next_input_frame_for_player(input.player_index);
+
+        if input.frame < next_frame {
             return Ok(InputFrameAcceptance::Ignore);
+        }
+
+        if input.frame > next_frame {
+            return Err(RoomError::OutOfOrderFrame);
         }
 
         if input.frame > self.room_frame + limits.max_future_frame_distance {
@@ -52,6 +56,8 @@ impl NetplayRoom {
 
         self.last_input_frames
             .insert(input.player_index, input.frame);
+        self.next_input_frames
+            .insert(input.player_index, input.frame.saturating_add(1));
 
         Ok(InputFrameAcceptance::Relay)
     }
@@ -277,6 +283,13 @@ impl NetplayRoom {
         } else {
             InputFrameAcceptance::Ignore
         }
+    }
+
+    fn next_input_frame_for_player(&self, player_index: PlayerIndex) -> u64 {
+        self.next_input_frames
+            .get(&player_index)
+            .copied()
+            .unwrap_or(0)
     }
 }
 
