@@ -45,9 +45,16 @@ SB_NETPLAY_RECONNECT_GRACE_SECONDS=90
 SB_NETPLAY_HEARTBEAT_STALE_SECONDS=15
 SB_NETPLAY_HEARTBEAT_DISCONNECT_SECONDS=30
 SB_NETPLAY_ROOM_IDLE_SECONDS=300
+SB_NETPLAY_POSTGRES_URL=postgres://postgres:<password>@metrics.shadowboy.app:5433/postgres?sslmode=require
+SB_NETPLAY_POSTGRES_EVENTS_TABLE=netplay_room_events
+SB_NETPLAY_POSTGRES_PERFORMANCE_TABLE=netplay_performance_samples
 ```
 
 Store these values in Coolify's environment/secret UI, not in git.
+
+`SB_NETPLAY_POSTGRES_URL` is optional for gameplay but recommended for long-term
+diagnostics. When present, the server checks and installs the analytics schema
+at startup and logs whether Postgres telemetry is ready.
 
 Use `coolify.env.local` as the paste source on this machine. It is ignored by
 git. `coolify.env.example` is the tracked template.

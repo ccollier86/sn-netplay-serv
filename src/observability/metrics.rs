@@ -28,6 +28,10 @@ pub trait MetricsRecorder: Send + Sync {
     fn record_rate_limited(&self);
     /// Records a license/auth failure.
     fn record_auth_rejected(&self);
+    /// Records telemetry records dropped before reaching the durable queue.
+    fn record_telemetry_dropped(&self, count: u64);
+    /// Records telemetry records lost because the durable write failed.
+    fn record_telemetry_write_failed(&self, count: u64);
     /// Returns a point-in-time metrics snapshot.
     fn snapshot(&self) -> MetricsSnapshot;
 }
@@ -45,6 +49,8 @@ pub struct InMemoryMetrics {
     protocol_errors_total: AtomicU64,
     rate_limited_total: AtomicU64,
     auth_rejected_total: AtomicU64,
+    telemetry_dropped_total: AtomicU64,
+    telemetry_write_failed_total: AtomicU64,
 }
 
 impl InMemoryMetrics {
@@ -95,6 +101,16 @@ impl MetricsRecorder for InMemoryMetrics {
         self.auth_rejected_total.fetch_add(1, Ordering::Relaxed);
     }
 
+    fn record_telemetry_dropped(&self, count: u64) {
+        self.telemetry_dropped_total
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
+    fn record_telemetry_write_failed(&self, count: u64) {
+        self.telemetry_write_failed_total
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
     fn snapshot(&self) -> MetricsSnapshot {
         MetricsSnapshot {
             rooms_created_total: self.rooms_created_total.load(Ordering::Relaxed),
@@ -107,6 +123,8 @@ impl MetricsRecorder for InMemoryMetrics {
             protocol_errors_total: self.protocol_errors_total.load(Ordering::Relaxed),
             rate_limited_total: self.rate_limited_total.load(Ordering::Relaxed),
             auth_rejected_total: self.auth_rejected_total.load(Ordering::Relaxed),
+            telemetry_dropped_total: self.telemetry_dropped_total.load(Ordering::Relaxed),
+            telemetry_write_failed_total: self.telemetry_write_failed_total.load(Ordering::Relaxed),
         }
     }
 }
@@ -135,6 +153,10 @@ pub struct MetricsSnapshot {
     pub rate_limited_total: u64,
     /// Total license/auth failures.
     pub auth_rejected_total: u64,
+    /// Total telemetry records dropped because the nonblocking queue was full or closed.
+    pub telemetry_dropped_total: u64,
+    /// Total telemetry records discarded after a durable write failure.
+    pub telemetry_write_failed_total: u64,
 }
 
 #[cfg(test)]
@@ -149,11 +171,15 @@ mod tests {
         metrics.record_websocket_joined();
         metrics.record_rate_limited();
         metrics.record_auth_rejected();
+        metrics.record_telemetry_dropped(2);
+        metrics.record_telemetry_write_failed(3);
 
         let snapshot = metrics.snapshot();
         assert_eq!(snapshot.rooms_created_total, 1);
         assert_eq!(snapshot.websocket_joins_total, 1);
         assert_eq!(snapshot.rate_limited_total, 1);
         assert_eq!(snapshot.auth_rejected_total, 1);
+        assert_eq!(snapshot.telemetry_dropped_total, 2);
+        assert_eq!(snapshot.telemetry_write_failed_total, 3);
     }
 }

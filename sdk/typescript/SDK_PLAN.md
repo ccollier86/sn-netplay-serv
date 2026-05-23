@@ -13,6 +13,11 @@ storage, or UI.
 - JSON encoding/decoding with server-compatible field names and message tags.
 - Reconnect token state and reconnect WebSocket query construction.
 - Heartbeat state, stale detection, and recovery timeout detection.
+- Runtime telemetry helpers for heartbeat RTT, jitter, local frame, stalls,
+  catch-up frames, late inputs, and audio underruns.
+- State-hash report cadence, validation, and duplicate-frame suppression.
+- State-resync lifecycle helpers for pause, snapshot, compatibility, ready, and
+  diagnostics flow.
 - Coordinated pause/resume request ids, holders, acknowledgements, and resume.
 - Room/player state machine driven by relay messages.
 - Compatibility fingerprints, session descriptors, and client-side validation.
@@ -22,6 +27,7 @@ storage, or UI.
 
 - No Electron windows, IPC, menus, or renderer state.
 - No emulator runner commands or save-state byte translation.
+- No state hashing implementation; the app supplies serialized-state hashes.
 - No ROM scanning or library persistence.
 - No premium/license UI.
 - No bundled HTTP/WebSocket implementation; adapters provide transport.

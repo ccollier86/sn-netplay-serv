@@ -63,6 +63,10 @@ pub enum ServerMessage {
     },
     /// Input accepted and relayed from a player.
     InputFrame {
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
         /// Authoritative input frame.
         input: InputFrame,
     },

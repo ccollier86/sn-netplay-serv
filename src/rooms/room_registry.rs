@@ -11,9 +11,10 @@ use crate::protocol::{
     SnapshotChunk, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
-    Clock, ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeTokenGenerator,
-    RoomDebugEvent, RoomDebugEventLog, RoomError, RoomEventReceiver, RoomJoin, RoomRecoveryConfig,
-    RoomRegistry, RoomRegistrySnapshot, RoomView, SystemClock, UuidResumeTokenGenerator,
+    Clock, ConnectionId, InviteCode, InviteCodeGenerator, NoopRoomDebugEventSink, PlayerIndex,
+    ResumeTokenGenerator, RoomDebugEvent, RoomDebugEventLog, RoomDebugEventSink, RoomError,
+    RoomEventReceiver, RoomJoin, RoomPerformanceSample, RoomRecoveryConfig, RoomRegistry,
+    RoomRegistrySnapshot, RoomView, SystemClock, UuidResumeTokenGenerator,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -37,6 +38,7 @@ pub struct InMemoryRoomRegistry {
     clock: Arc<dyn Clock>,
     recovery_config: RoomRecoveryConfig,
     recent_events: Mutex<RoomDebugEventLog>,
+    event_sink: Arc<dyn RoomDebugEventSink>,
 }
 
 impl InMemoryRoomRegistry {
@@ -57,6 +59,23 @@ impl InMemoryRoomRegistry {
         clock: Arc<dyn Clock>,
         recovery_config: RoomRecoveryConfig,
     ) -> Self {
+        Self::with_dependencies_and_event_sink(
+            invite_code_generator,
+            resume_token_generator,
+            clock,
+            recovery_config,
+            Arc::new(NoopRoomDebugEventSink),
+        )
+    }
+
+    /// Creates a registry with an external nonblocking event sink.
+    pub fn with_dependencies_and_event_sink(
+        invite_code_generator: Arc<dyn InviteCodeGenerator>,
+        resume_token_generator: Arc<dyn ResumeTokenGenerator>,
+        clock: Arc<dyn Clock>,
+        recovery_config: RoomRecoveryConfig,
+        event_sink: Arc<dyn RoomDebugEventSink>,
+    ) -> Self {
         Self {
             invite_codes: RwLock::new(HashMap::new()),
             invite_code_generator,
@@ -64,6 +83,7 @@ impl InMemoryRoomRegistry {
             clock,
             recovery_config,
             recent_events: Mutex::new(RoomDebugEventLog::default()),
+            event_sink,
         }
     }
 
@@ -73,8 +93,13 @@ impl InMemoryRoomRegistry {
         };
 
         for event in events {
+            self.event_sink.record(event.clone());
             recent_events.push(event);
         }
+    }
+
+    pub(super) fn record_performance_sample(&self, sample: RoomPerformanceSample) {
+        self.event_sink.record_performance_sample(sample);
     }
 
     /// Removes rooms still waiting for a guest after `join_timeout`.

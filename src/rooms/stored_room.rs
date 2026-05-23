@@ -5,12 +5,13 @@
 //! messages or apply room-domain rules.
 
 use crate::protocol::{
-    InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket, ServerFrame, SessionPauseView,
-    SnapshotChunk, SnapshotManifest, StateHashMismatchView,
+    ClientNetworkQualityReport, ClientRuntimeState, InputDelayChange, InputFrame, InputFrameBatch,
+    LinkCablePacket, ServerFrame, SessionPauseView, SnapshotChunk, SnapshotManifest,
+    StateHashMismatchView,
 };
 use crate::rooms::{
     ConnectionId, InputFrameRelayBuffer, NetplayRoom, RoomDebugEvent, RoomDebugEventLog, RoomEvent,
-    RoomInputEvent, RoomView, current_timestamp_ms,
+    RoomInputEvent, RoomPerformanceSample, RoomView, current_timestamp_ms,
 };
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
@@ -99,6 +100,49 @@ impl StoredRoom {
         self.room.view_for_event(self.event_seq, now)
     }
 
+    /// Builds a sanitized performance sample for one heartbeat.
+    pub(super) fn performance_sample(
+        &self,
+        _now: Instant,
+        connection_id: ConnectionId,
+        local_frame: Option<u64>,
+        network: Option<ClientNetworkQualityReport>,
+        runtime_state: ClientRuntimeState,
+    ) -> Option<RoomPerformanceSample> {
+        let player_index = self.room.player_index_for_connection(connection_id)?;
+        let accepted_input_frame = self.room.last_input_frames.get(&player_index).copied();
+        let frame_delta = local_frame.map(|frame| {
+            let frame = i128::from(frame);
+            let canonical_frame = i128::from(self.room.room_frame);
+
+            i64::try_from(frame - canonical_frame).unwrap_or({
+                if frame < canonical_frame {
+                    i64::MIN
+                } else {
+                    i64::MAX
+                }
+            })
+        });
+
+        Some(RoomPerformanceSample {
+            timestamp_ms: current_timestamp_ms(),
+            room_id: self.room.room_id(),
+            invite_code: self.room.invite_code().display(),
+            event_seq: self.event_seq,
+            room_epoch: self.room.room_epoch,
+            session_epoch: self.room.session_epoch,
+            player_index: player_index.zero_based(),
+            runtime_state,
+            local_frame,
+            canonical_frame: self.room.room_frame,
+            released_frame: self.room.released_frame,
+            next_release_frame: self.room.next_release_frame,
+            accepted_input_frame,
+            frame_delta,
+            network,
+        })
+    }
+
     /// Returns recent sanitized events for this room.
     pub(super) fn debug_events(&self, limit: usize) -> Vec<RoomDebugEvent> {
         self.debug_events.tail(limit)
@@ -159,28 +203,47 @@ impl StoredRoom {
         });
     }
 
+    /// Records that all connected players reported identical state for a frame.
+    pub(super) fn record_state_hash_match(&mut self, now: Instant, frame: u64) {
+        self.record_event(
+            now,
+            "stateHashMatched",
+            &format!("state hash matched at frame {frame}"),
+        );
+    }
+
     /// Records a deterministic state-hash mismatch without forcing recovery.
     pub(super) fn record_state_hash_mismatch_diagnostic(
         &mut self,
         now: Instant,
         mismatch: &StateHashMismatchView,
     ) {
-        let detail = if mismatch.nearby_matches.is_empty() {
-            format!("state hash mismatch observed at frame {}", mismatch.frame)
-        } else {
-            let first_match = &mismatch.nearby_matches[0];
-            format!(
-                "state hash mismatch observed at frame {} with {} nearby-frame match(es); first offset {} p{} frame {} matched p{} frame {}",
-                mismatch.frame,
-                mismatch.nearby_matches.len(),
-                first_match.frame_offset,
-                first_match.source_player_index.zero_based(),
-                first_match.source_frame,
-                first_match.matched_player_index.zero_based(),
-                first_match.matched_frame
-            )
-        };
+        let detail = state_hash_mismatch_detail("state hash mismatch observed", mismatch);
         self.record_event(now, "stateHashMismatchDiagnostic", &detail);
+    }
+
+    /// Records a nearby-frame hash match that should not trigger recovery.
+    pub(super) fn record_state_hash_frame_skew_diagnostic(
+        &mut self,
+        now: Instant,
+        mismatch: &StateHashMismatchView,
+    ) {
+        let detail = state_hash_mismatch_detail("state hash nearby-frame match observed", mismatch);
+        self.record_event(now, "stateHashFrameSkewDiagnostic", &detail);
+    }
+
+    /// Emits a resync requirement after persistent true state-hash mismatch.
+    pub(super) fn emit_state_hash_mismatch(
+        &mut self,
+        now: Instant,
+        mismatch: StateHashMismatchView,
+    ) {
+        let detail =
+            state_hash_mismatch_detail("state hash resync required after mismatch", &mismatch);
+        let room = self.record_event(now, "stateHashResyncRequired", &detail);
+        let _ = self
+            .events
+            .send(RoomEvent::StateHashMismatch { mismatch, room });
     }
 
     /// Emits a scheduled adaptive input-delay update.
@@ -293,4 +356,22 @@ impl StoredRoom {
         });
         room
     }
+}
+
+fn state_hash_mismatch_detail(prefix: &str, mismatch: &StateHashMismatchView) -> String {
+    if mismatch.nearby_matches.is_empty() {
+        return format!("{prefix} at frame {}", mismatch.frame);
+    }
+
+    let first_match = &mismatch.nearby_matches[0];
+    format!(
+        "{prefix} at frame {} with {} nearby-frame match(es); first offset {} p{} frame {} matched p{} frame {}",
+        mismatch.frame,
+        mismatch.nearby_matches.len(),
+        first_match.frame_offset,
+        first_match.source_player_index.zero_based(),
+        first_match.source_frame,
+        first_match.matched_player_index.zero_based(),
+        first_match.matched_frame
+    )
 }

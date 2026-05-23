@@ -4,7 +4,7 @@
 //! include access tokens, resume tokens, raw input bytes, snapshot bytes, or
 //! other client secrets.
 
-use crate::rooms::RoomId;
+use crate::rooms::{RoomId, RoomPerformanceSample};
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -38,6 +38,24 @@ pub struct RoomDebugEvent {
 pub struct RoomDebugEventLog {
     capacity: usize,
     events: VecDeque<RoomDebugEvent>,
+}
+
+/// Nonblocking sink for durable room-event telemetry.
+pub trait RoomDebugEventSink: Send + Sync {
+    /// Records one sanitized event without waiting on external storage.
+    fn record(&self, event: RoomDebugEvent);
+    /// Records one heartbeat/runtime sample without waiting on external storage.
+    fn record_performance_sample(&self, sample: RoomPerformanceSample);
+}
+
+/// Sink used when durable telemetry is disabled.
+#[derive(Debug, Default)]
+pub struct NoopRoomDebugEventSink;
+
+impl RoomDebugEventSink for NoopRoomDebugEventSink {
+    fn record(&self, _event: RoomDebugEvent) {}
+
+    fn record_performance_sample(&self, _sample: RoomPerformanceSample) {}
 }
 
 impl Default for RoomDebugEventLog {

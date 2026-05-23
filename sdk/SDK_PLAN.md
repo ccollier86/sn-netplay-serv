@@ -13,6 +13,11 @@ hand-writing relay calls.
 - Typed WebSocket paths, messages, and JSON codecs.
 - Reconnect ticket handling with player slot, room epoch, and resume token.
 - Heartbeat health and recovery timeout state.
+- Runtime telemetry helpers for heartbeat RTT, jitter, local frame, stalls,
+  catch-up frames, late inputs, and audio underruns.
+- State-hash report cadence, validation, and duplicate-frame suppression.
+- State-resync lifecycle helpers for pause, snapshot, compatibility, ready, and
+  diagnostics flow.
 - Coordinated pause/resume request and acknowledgement helpers.
 - Room/player state machine driven only by relay messages.
 - Controller and link-cable session descriptors.
@@ -23,6 +28,7 @@ hand-writing relay calls.
 
 - No emulator core API calls.
 - No save-state byte conversion.
+- No state hashing implementation; apps supply serialized-state hashes.
 - No Android, Desktop, or web UI.
 - No ROM scanning, storage, or file permissions.
 - No license purchase UI or entitlement decisions.

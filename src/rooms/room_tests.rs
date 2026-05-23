@@ -13,7 +13,7 @@ use crate::protocol::{
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, InviteCode, PlayerIndex, PlayerStatus, RoomError,
-    SessionResumeOutcome,
+    SessionResumeOutcome, StateHashEvaluation,
 };
 use sha2::{Digest, Sha256};
 
@@ -463,28 +463,27 @@ fn accepted_input_does_not_advance_server_clock() {
 }
 
 #[test]
-fn state_hash_mismatch_is_reported_without_changing_room_state() {
+fn first_state_hash_mismatch_is_diagnostic_without_changing_room_state() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = ready_room(host_connection, guest_connection);
+    let now = std::time::Instant::now();
     let session_epoch = room.view().session_epoch;
 
-    assert!(
-        room.accept_state_hash(host_connection, state_hash(60, "a"))
-            .expect("host hash")
-            .is_none()
-    );
-    let mismatch = room
-        .accept_state_hash(guest_connection, state_hash(60, "b"))
+    assert!(matches!(
+        room.accept_state_hash(host_connection, state_hash(60, "a"), now)
+            .expect("host hash"),
+        StateHashEvaluation::Pending
+    ));
+    let evaluation = room
+        .accept_state_hash(guest_connection, state_hash(60, "b"), now)
         .expect("guest hash");
 
-    assert!(mismatch.is_some());
-    assert_eq!(
-        mismatch
-            .as_ref()
-            .map(|mismatch| mismatch.nearby_matches.as_slice()),
-        Some([].as_slice())
-    );
+    let StateHashEvaluation::TrueMismatch(mismatch) = evaluation else {
+        panic!("expected true mismatch");
+    };
+
+    assert_eq!(mismatch.nearby_matches.as_slice(), [].as_slice());
 
     let view = room.view();
     assert_eq!(view.status, RoomStatus::Playing);
@@ -499,15 +498,19 @@ fn state_hash_mismatch_reports_nearby_frame_matches() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = ready_room(host_connection, guest_connection);
+    let now = std::time::Instant::now();
 
-    room.accept_state_hash(guest_connection, state_hash(59, "a"))
+    room.accept_state_hash(guest_connection, state_hash(59, "a"), now)
         .expect("guest nearby hash");
-    room.accept_state_hash(host_connection, state_hash(60, "a"))
+    room.accept_state_hash(host_connection, state_hash(60, "a"), now)
         .expect("host hash");
-    let mismatch = room
-        .accept_state_hash(guest_connection, state_hash(60, "b"))
-        .expect("guest hash")
-        .expect("mismatch");
+    let evaluation = room
+        .accept_state_hash(guest_connection, state_hash(60, "b"), now)
+        .expect("guest hash");
+
+    let StateHashEvaluation::FrameSkew(mismatch) = evaluation else {
+        panic!("expected nearby-frame skew");
+    };
 
     assert_eq!(mismatch.nearby_matches.len(), 1);
     assert_eq!(
@@ -521,6 +524,81 @@ fn state_hash_mismatch_reports_nearby_frame_matches() {
     );
     assert_eq!(mismatch.nearby_matches[0].matched_frame, 59);
     assert_eq!(mismatch.nearby_matches[0].frame_offset, -1);
+}
+
+#[test]
+fn state_hash_window_uses_live_local_frame_spread() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+    let now = std::time::Instant::now();
+
+    room.record_heartbeat(
+        host_connection,
+        now,
+        Some(60),
+        None,
+        ClientRuntimeState::Playing,
+    )
+    .expect("host heartbeat");
+    room.record_heartbeat(
+        guest_connection,
+        now,
+        Some(75),
+        None,
+        ClientRuntimeState::Playing,
+    )
+    .expect("guest heartbeat");
+
+    room.accept_state_hash(guest_connection, state_hash(75, "a"), now)
+        .expect("guest nearby hash");
+    room.accept_state_hash(host_connection, state_hash(60, "a"), now)
+        .expect("host hash");
+    let evaluation = room
+        .accept_state_hash(guest_connection, state_hash(60, "b"), now)
+        .expect("guest hash");
+
+    let StateHashEvaluation::FrameSkew(mismatch) = evaluation else {
+        panic!("expected dynamic nearby-frame skew");
+    };
+
+    assert_eq!(mismatch.nearby_matches.len(), 1);
+    assert_eq!(mismatch.nearby_matches[0].matched_frame, 75);
+    assert_eq!(mismatch.nearby_matches[0].frame_offset, 15);
+}
+
+#[test]
+fn repeated_true_state_hash_mismatch_enters_resync() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+    let now = std::time::Instant::now();
+    let session_epoch = room.view().session_epoch;
+
+    for (frame, host_hash, guest_hash) in [(60, "a", "b"), (120, "c", "d")] {
+        room.accept_state_hash(host_connection, state_hash(frame, host_hash), now)
+            .expect("host hash");
+        assert!(matches!(
+            room.accept_state_hash(guest_connection, state_hash(frame, guest_hash), now)
+                .expect("guest hash"),
+            StateHashEvaluation::TrueMismatch(_)
+        ));
+    }
+
+    room.accept_state_hash(host_connection, state_hash(180, "e"), now)
+        .expect("host hash");
+    assert!(matches!(
+        room.accept_state_hash(guest_connection, state_hash(180, "f"), now)
+            .expect("guest hash"),
+        StateHashEvaluation::ResyncRequired(_)
+    ));
+
+    let view = room.view();
+    assert_eq!(view.status, RoomStatus::CheckingCompatibility);
+    assert_eq!(view.session_epoch, session_epoch + 1);
+    assert_eq!(view.frame_clock.canonical_frame, 0);
+    assert_eq!(view.players[0].status, PlayerStatus::Connected);
+    assert_eq!(view.players[1].status, PlayerStatus::Connected);
 }
 
 #[test]

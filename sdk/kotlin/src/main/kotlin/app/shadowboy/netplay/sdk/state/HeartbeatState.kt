@@ -1,6 +1,7 @@
 package app.shadowboy.netplay.sdk.state
 
 import app.shadowboy.netplay.sdk.protocol.ClientMessage
+import app.shadowboy.netplay.sdk.protocol.ClientNetworkQualityReport
 import app.shadowboy.netplay.sdk.protocol.ClientRuntimeState
 import app.shadowboy.netplay.sdk.protocol.ServerMessage
 import kotlin.time.Duration
@@ -21,8 +22,10 @@ public class HeartbeatTracker(
     private val policy: HeartbeatPolicy = HeartbeatPolicy(),
 ) {
     private var lastAckMillis: Long? = null
+    private var lastAckEventSeq: Long? = null
 
     public fun markAck(message: ServerMessage.HeartbeatAck, nowMillis: Long) {
+        lastAckEventSeq = message.eventSeq
         lastAckMillis = nowMillis
     }
 
@@ -37,18 +40,34 @@ public class HeartbeatTracker(
         }
     }
 
+    public fun lastAck(): HeartbeatAckState =
+        HeartbeatAckState(
+            eventSeq = lastAckEventSeq,
+            receivedAtMs = lastAckMillis,
+        )
+
     public fun heartbeatMessage(
         roomEpoch: Long,
         sessionEpoch: Long,
         latestEventSeq: Long,
         localFrame: Long?,
         runtimeState: ClientRuntimeState,
+        network: ClientNetworkQualityReport? = null,
+        telemetry: RuntimeTelemetryTracker? = null,
     ): ClientMessage.Heartbeat =
-        ClientMessage.Heartbeat(
-            roomEpoch = roomEpoch,
-            sessionEpoch = sessionEpoch,
-            latestEventSeq = latestEventSeq,
-            localFrame = localFrame,
-            runtimeState = runtimeState,
-        )
+        telemetry?.consume().let { telemetrySnapshot ->
+            ClientMessage.Heartbeat(
+                roomEpoch = roomEpoch,
+                sessionEpoch = sessionEpoch,
+                latestEventSeq = latestEventSeq,
+                localFrame = localFrame ?: telemetrySnapshot?.localFrame,
+                runtimeState = runtimeState,
+                network = network ?: telemetrySnapshot?.network,
+            )
+        }
 }
+
+public data class HeartbeatAckState(
+    public val eventSeq: Long?,
+    public val receivedAtMs: Long?,
+)

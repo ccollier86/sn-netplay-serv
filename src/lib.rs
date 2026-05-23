@@ -4,6 +4,7 @@
 //! HTTP routing, protocol types, and room coordination. The binary entry point
 //! is intentionally thin.
 
+pub mod analytics;
 pub mod auth;
 pub mod config;
 pub mod http;

@@ -27,6 +27,7 @@ mod room_frame_clock_task;
 mod room_input_connection_ops;
 mod room_join;
 mod room_link_cable_ops;
+mod room_performance_sample;
 mod room_registry;
 mod room_registry_snapshot;
 mod room_registry_trait;
@@ -52,14 +53,19 @@ pub use resume_token::{
 };
 pub use room::NetplayRoom;
 pub use room_controller_netplay_ops::{SessionPauseReachedOutcome, SessionResumeOutcome};
-pub use room_debug_event::{RoomDebugEvent, RoomDebugEventLog, current_timestamp_ms};
+pub use room_debug_event::{
+    NoopRoomDebugEventSink, RoomDebugEvent, RoomDebugEventLog, RoomDebugEventSink,
+    current_timestamp_ms,
+};
 pub use room_event::{RoomEvent, RoomInputEvent};
 pub use room_expiration_task::spawn_room_expiration_task;
 pub use room_frame_clock_task::spawn_room_frame_clock_task;
 pub use room_join::RoomJoin;
+pub use room_performance_sample::RoomPerformanceSample;
 pub use room_registry::InMemoryRoomRegistry;
 pub use room_registry_snapshot::RoomRegistrySnapshot;
 pub use room_registry_trait::{RoomEventReceiver, RoomInputEventReceiver, RoomRegistry};
+pub(crate) use room_state_hash_ops::StateHashEvaluation;
 pub use room_status::RoomStatus;
 pub use room_view::{PlayerFrameCursorView, PlayerSlotView, RoomFrameClockView, RoomView};
 pub(crate) use session_pause_state::SessionPauseStateTracker;

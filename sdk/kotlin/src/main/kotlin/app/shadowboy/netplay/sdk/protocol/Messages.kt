@@ -324,10 +324,14 @@ public sealed interface ServerMessage {
 
     @Serializable
     @SerialName("inputFrame")
-    public data class InputFrameMessage(public val input: InputFrame) : ServerMessage {
+    public data class InputFrameMessage(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val input: InputFrame,
+    ) : ServerMessage {
         override val eventSeqOrNull: Long? = null
-        override val roomEpochOrNull: Long? = null
-        override val sessionEpochOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
     }
 
     @Serializable

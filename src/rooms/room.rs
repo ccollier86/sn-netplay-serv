@@ -43,6 +43,7 @@ pub struct NetplayRoom {
     pub(super) pending_input_delay_change: Option<InputDelayChange>,
     pub(super) input_delay_policy: AdaptiveInputDelayPolicy,
     pub(super) state_hashes: BTreeMap<u64, HashMap<PlayerIndex, String>>,
+    pub(super) state_hash_true_mismatch_streak: u8,
 }
 
 impl NetplayRoom {
@@ -112,6 +113,7 @@ impl NetplayRoom {
             pending_input_delay_change: None,
             input_delay_policy: AdaptiveInputDelayPolicy::new(now),
             state_hashes: BTreeMap::new(),
+            state_hash_true_mismatch_streak: 0,
         }
     }
 
@@ -438,6 +440,7 @@ impl NetplayRoom {
         self.next_release_frame = 0;
         self.pending_input_delay_change = None;
         self.state_hashes.clear();
+        self.state_hash_true_mismatch_streak = 0;
     }
 
     pub(super) fn bump_room_epoch(&mut self) {

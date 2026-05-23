@@ -77,6 +77,13 @@ SB_NETPLAY_RECONNECT_GRACE_SECONDS=90
 SB_NETPLAY_HEARTBEAT_STALE_SECONDS=15
 SB_NETPLAY_HEARTBEAT_DISCONNECT_SECONDS=30
 SB_NETPLAY_ROOM_IDLE_SECONDS=300
+SB_NETPLAY_TELEMETRY_QUEUE_CAPACITY=20000
+SB_NETPLAY_TELEMETRY_BATCH_SIZE=250
+SB_NETPLAY_TELEMETRY_FLUSH_MS=1000
+# Optional durable analytics. Uses Postgres for sanitized room/session metrics.
+SB_NETPLAY_POSTGRES_URL=postgres://postgres:<password>@metrics.shadowboy.app:5433/postgres?sslmode=require
+SB_NETPLAY_POSTGRES_EVENTS_TABLE=netplay_room_events
+SB_NETPLAY_POSTGRES_PERFORMANCE_TABLE=netplay_performance_samples
 ```
 
 `SB_NETPLAY_BIND_ADDR` is optional and defaults to `127.0.0.1:8077`.
@@ -97,6 +104,39 @@ room routing or shared state.
 The server also does not sync ROM files. It stores and returns game/core
 descriptors so Desktop can find a matching local ROM by hash or guide the user
 to import their own copy.
+
+Durable telemetry is optional. Live rooms remain in process; sanitized room
+events are copied into a bounded async queue and drained to Postgres in batches.
+If the queue is full or Postgres becomes unavailable after startup, telemetry is
+dropped without blocking gameplay. The next batch will reconnect automatically.
+Dropped and failed telemetry counts are visible from `/internal/metrics`. The
+DSN is a single secret-bearing env value; do not commit it.
+
+When `SB_NETPLAY_POSTGRES_URL` is configured, startup connects to Postgres,
+creates/verifies the analytics schema, and logs whether the schema is ready
+before accepting rooms. `sslmode=require` encrypts transport without validating
+the certificate chain, matching libpq behavior. Use `sslmode=verify-full` once
+the metrics endpoint has a publicly trusted certificate chain.
+
+Analytics tools:
+
+```bash
+scripts/netplay-analytics.sh schema
+scripts/netplay-analytics.sh probe
+scripts/netplay-analytics.sh purge-probes
+scripts/netplay-analytics.sh sessions --limit 25
+scripts/netplay-analytics.sh report --limit 25
+scripts/netplay-analytics.sh raw recent --limit 5
+scripts/netplay-analytics.sh raw session --room <room_uuid> [--epoch <session_epoch>] [--limit 25]
+```
+
+Reports aggregate each session first, then roll up the selected session set, so
+`--limit 25` reflects 25 sessions instead of one raw event-weighted average. Raw
+room lookup without `--epoch` returns recent epochs for that room so resync
+epochs are not hidden. `probe` writes one synthetic event and runtime sample
+through the same Postgres batch writer used by production telemetry, then
+removes probe rows so normal reports stay clean. Use it after schema or
+credential changes to verify the write path before testing live rooms.
 
 Remote debugging endpoints:
 

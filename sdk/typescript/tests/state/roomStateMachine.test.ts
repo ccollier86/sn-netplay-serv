@@ -3,7 +3,9 @@ import {
   HeartbeatTracker,
   NetplayInputFrameBatcher,
   PauseCoordinator,
+  RuntimeTelemetryTracker,
   RoomStateMachine,
+  StateHashReporter,
   type ServerMessage,
 } from "../../src/index.ts";
 import { roomView } from "../support/fixtures.ts";
@@ -60,7 +62,118 @@ describe("TypeScript netplay room state", () => {
     expect(state.assignedPlayerIndex).toBe(0);
     expect(state.latestEventSeq).toBe(10);
     expect(state.room?.status).toBe("checkingCompatibility");
+    expect(state.resync).toMatchObject({
+      eventSeq: 10,
+      phase: "requested",
+      reason: "recovery",
+      role: "host",
+      roomEpoch: 5,
+      sessionEpoch: 9,
+      mustSendSnapshot: true,
+    });
+    expect(stateMachine.resync.shouldPauseEmulation()).toBe(true);
+    expect(stateMachine.resync.shouldClearPredictionBuffers()).toBe(true);
     expect(stateMachine.reconnectTokens.current()?.roomEpoch).toBe(5);
+  });
+
+  test("state hash mismatch enters resync until session restarts", () => {
+    const stateMachine = new RoomStateMachine();
+    stateMachine.apply({
+      eventSeq: 1,
+      inputSocketToken: "input-token",
+      resumeToken: "token",
+      room: roomView({ eventSeq: 1, roomEpoch: 2, sessionEpoch: 3 }),
+      roomEpoch: 2,
+      sessionEpoch: 3,
+      type: "roomJoined",
+      yourPlayerIndex: 0,
+    });
+
+    const mismatch = {
+      frame: 120,
+      hashes: [
+        { playerIndex: 0, sha256: "a".repeat(64) },
+        { playerIndex: 1, sha256: "b".repeat(64) },
+      ],
+      nearbyMatches: [],
+    };
+    const resyncing = stateMachine.apply({
+      eventSeq: 11,
+      mismatch,
+      room: roomView({
+        eventSeq: 11,
+        roomEpoch: 2,
+        sessionEpoch: 4,
+        status: "checkingCompatibility",
+      }),
+      roomEpoch: 2,
+      sessionEpoch: 4,
+      type: "stateHashMismatch",
+    });
+
+    expect(resyncing.resync).toMatchObject({
+      eventSeq: 11,
+      mismatch,
+      phase: "requested",
+      reason: "stateHashMismatch",
+      roomEpoch: 2,
+      sessionEpoch: 4,
+    });
+
+    const started = stateMachine.apply({
+      eventSeq: 12,
+      room: roomView({
+        eventSeq: 12,
+        roomEpoch: 2,
+        sessionEpoch: 4,
+        status: "playing",
+      }),
+      roomEpoch: 2,
+      sessionEpoch: 4,
+      startFrame: 0,
+      type: "startSession",
+    });
+
+    expect(started.resync).toBeNull();
+  });
+
+  test("resync coordinator exposes snapshot decisions", () => {
+    const stateMachine = new RoomStateMachine();
+    stateMachine.apply({
+      eventSeq: 1,
+      inputSocketToken: "input-token",
+      resumeToken: "token",
+      room: roomView({ eventSeq: 1, roomEpoch: 2, sessionEpoch: 3 }),
+      roomEpoch: 2,
+      sessionEpoch: 3,
+      type: "roomJoined",
+      yourPlayerIndex: 0,
+    });
+    stateMachine.apply({
+      eventSeq: 11,
+      mismatch: {
+        frame: 120,
+        hashes: [
+          { playerIndex: 0, sha256: "a".repeat(64) },
+          { playerIndex: 1, sha256: "b".repeat(64) },
+        ],
+        nearbyMatches: [],
+      },
+      room: roomView({
+        eventSeq: 11,
+        roomEpoch: 2,
+        sessionEpoch: 4,
+        status: "checkingCompatibility",
+      }),
+      roomEpoch: 2,
+      sessionEpoch: 4,
+      type: "stateHashMismatch",
+    });
+
+    stateMachine.resync.markSnapshotNeeded(1_000);
+
+    expect(stateMachine.resync.shouldSendHostSnapshot()).toBe(true);
+    expect(stateMachine.resync.shouldWaitForSnapshot()).toBe(false);
   });
 
   test("reset clears room, reconnect, and pause state", () => {
@@ -98,6 +211,7 @@ describe("TypeScript netplay room state", () => {
     expect(stateMachine.state.room).toBeNull();
     expect(stateMachine.state.assignedPlayerIndex).toBeNull();
     expect(stateMachine.pause.currentPause).toBeNull();
+    expect(stateMachine.resync.currentResync).toBeNull();
     expect(stateMachine.reconnectTokens.current()).toBeNull();
   });
 
@@ -128,6 +242,58 @@ describe("TypeScript netplay room state", () => {
         sessionEpoch: 3,
       }).runtimeState,
     ).toBe("playing");
+  });
+
+  test("heartbeat can consume runtime telemetry safely", () => {
+    const tracker = new HeartbeatTracker();
+    const telemetry = new RuntimeTelemetryTracker();
+
+    telemetry.markLocalFrame(90);
+    telemetry.recordRoundTrip(40);
+    telemetry.recordRoundTrip(48);
+    telemetry.recordStall();
+    telemetry.recordCatchUpFrames(2);
+
+    const heartbeat = tracker.heartbeatMessage({
+      latestEventSeq: 4,
+      roomEpoch: 2,
+      runtimeState: "playing",
+      sessionEpoch: 3,
+      telemetry,
+    });
+
+    expect(heartbeat.localFrame).toBe(90);
+    expect(heartbeat.network).toMatchObject({
+      catchUpFrames: 2,
+      roundTripMs: 48,
+      stallCount: 1,
+    });
+    expect(telemetry.snapshot().network.stallCount).toBe(0);
+  });
+
+  test("state hash reporter normalizes hashes and deduplicates frames", () => {
+    const reporter = new StateHashReporter({ reportEveryFrames: 30 });
+
+    expect(reporter.shouldReport(0)).toBe(true);
+    reporter.stateHashMessage({
+      frame: 0,
+      roomEpoch: 2,
+      sessionEpoch: 3,
+      sha256: "a".repeat(64),
+    });
+    expect(reporter.shouldReport(29)).toBe(false);
+    expect(reporter.shouldReport(30)).toBe(true);
+    expect(
+      reporter.stateHashMessage({
+        frame: 30,
+        roomEpoch: 2,
+        sessionEpoch: 3,
+        sha256: "A".repeat(64),
+      }).report.sha256,
+    ).toBe("a".repeat(64));
+    expect(reporter.shouldReport(30)).toBe(false);
+    expect(reporter.shouldReport(59)).toBe(false);
+    expect(reporter.shouldReport(61)).toBe(true);
   });
 
   test("pause coordinator creates and clears pause messages", () => {
@@ -220,6 +386,8 @@ describe("TypeScript netplay room state", () => {
         payload: [1],
         playerIndex: 1,
       },
+      roomEpoch: 1,
+      sessionEpoch: 1,
       type: "inputFrame",
     });
     stateMachine.frameClock.markLocalFrame(80);
@@ -229,6 +397,138 @@ describe("TypeScript netplay room state", () => {
       peerReadFrame: 16,
       serverFrame: 18,
       stalled: true,
+    });
+  });
+
+  test("stale epoch room messages are ignored", () => {
+    const stateMachine = new RoomStateMachine();
+    stateMachine.apply({
+      eventSeq: 5,
+      inputSocketToken: "input-token",
+      resumeToken: "token",
+      room: roomView({ eventSeq: 5, roomEpoch: 3, sessionEpoch: 4 }),
+      roomEpoch: 3,
+      sessionEpoch: 4,
+      type: "roomJoined",
+      yourPlayerIndex: 0,
+    });
+
+    stateMachine.apply({
+      eventSeq: 2,
+      room: roomView({ eventSeq: 2, roomEpoch: 2, sessionEpoch: 3 }),
+      roomEpoch: 2,
+      sessionEpoch: 3,
+      type: "roomStateChanged",
+    });
+
+    expect(stateMachine.state.latestEventSeq).toBe(5);
+    expect(stateMachine.state.roomEpoch).toBe(3);
+  });
+
+  test("stale same-epoch room messages are ignored", () => {
+    const stateMachine = new RoomStateMachine();
+    stateMachine.apply({
+      eventSeq: 5,
+      inputSocketToken: "input-token",
+      resumeToken: "token",
+      room: roomView({ eventSeq: 5, roomEpoch: 3, sessionEpoch: 4 }),
+      roomEpoch: 3,
+      sessionEpoch: 4,
+      type: "roomJoined",
+      yourPlayerIndex: 0,
+    });
+
+    stateMachine.apply({
+      eventSeq: 7,
+      room: roomView({ eventSeq: 7, roomEpoch: 3, sessionEpoch: 4 }),
+      roomEpoch: 3,
+      sessionEpoch: 4,
+      type: "roomStateChanged",
+    });
+    stateMachine.apply({
+      eventSeq: 6,
+      room: roomView({ eventSeq: 6, roomEpoch: 3, sessionEpoch: 4 }),
+      roomEpoch: 3,
+      sessionEpoch: 4,
+      type: "roomStateChanged",
+    });
+
+    expect(stateMachine.state.latestEventSeq).toBe(7);
+  });
+
+  test("stale input frames are ignored by epoch", () => {
+    const stateMachine = new RoomStateMachine();
+    stateMachine.apply({
+      eventSeq: 5,
+      inputSocketToken: "input-token",
+      resumeToken: "token",
+      room: roomView({ eventSeq: 5, roomEpoch: 3, sessionEpoch: 4 }),
+      roomEpoch: 3,
+      sessionEpoch: 4,
+      type: "roomJoined",
+      yourPlayerIndex: 0,
+    });
+
+    stateMachine.apply({
+      input: {
+        frame: 16,
+        payload: [1],
+        playerIndex: 1,
+      },
+      roomEpoch: 2,
+      sessionEpoch: 4,
+      type: "inputFrame",
+    });
+    expect(stateMachine.frameClock.snapshot().peerReadFrame).toBeNull();
+
+    stateMachine.apply({
+      input: {
+        frame: 17,
+        payload: [1],
+        playerIndex: 1,
+      },
+      roomEpoch: 3,
+      sessionEpoch: 4,
+      type: "inputFrame",
+    });
+    expect(stateMachine.frameClock.snapshot().peerReadFrame).toBe(17);
+  });
+
+  test("diagnostics exposes effective pause and frame health", () => {
+    const stateMachine = new RoomStateMachine();
+    stateMachine.apply({
+      eventSeq: 1,
+      inputSocketToken: "input-token",
+      resumeToken: "token",
+      room: roomView({ eventSeq: 1, roomEpoch: 2, sessionEpoch: 3 }),
+      roomEpoch: 2,
+      sessionEpoch: 3,
+      type: "roomJoined",
+      yourPlayerIndex: 0,
+    });
+    stateMachine.apply({
+      eventSeq: 2,
+      pause: {
+        acknowledgedPlayerIndexes: [],
+        holders: [],
+        pauseAtFrame: 50,
+        pausedAtFrame: null,
+        reason: "menu",
+        requestedByPlayerIndex: 1,
+        sequence: 1,
+        state: "pausing",
+      },
+      room: roomView({ eventSeq: 2, roomEpoch: 2, sessionEpoch: 3 }),
+      roomEpoch: 2,
+      sessionEpoch: 3,
+      type: "sessionPauseScheduled",
+    });
+
+    expect(stateMachine.diagnostics(1_000)).toMatchObject({
+      assignedPlayerIndex: 0,
+      effectivePauseReason: "peer",
+      heartbeat: "fresh",
+      reconnectTicketAvailable: true,
     });
   });
 });

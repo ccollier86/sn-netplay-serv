@@ -64,7 +64,7 @@ export type ServerMessage =
       readonly startFrame: number;
       readonly room: RoomView;
     }
-  | { readonly type: "inputFrame"; readonly input: InputFrame }
+  | EpochMessage<"inputFrame"> & { readonly input: InputFrame }
   | { readonly type: "serverFrame"; readonly frame: ServerFrameRelease }
   | { readonly type: "linkCablePacket"; readonly packet: LinkCablePacket }
   | { readonly type: "snapshotChunk"; readonly chunk: SnapshotChunk }

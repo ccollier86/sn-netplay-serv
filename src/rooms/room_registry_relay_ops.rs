@@ -10,7 +10,7 @@ use crate::protocol::{
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, InviteCode, RoomError, RoomView,
-    SessionPauseReachedOutcome, SessionResumeOutcome,
+    SessionPauseReachedOutcome, SessionResumeOutcome, StateHashEvaluation,
 };
 
 impl InMemoryRoomRegistry {
@@ -103,7 +103,7 @@ impl InMemoryRoomRegistry {
         Ok(())
     }
 
-    /// Records a deterministic state hash and stores mismatch diagnostics.
+    /// Records a deterministic state hash and triggers resync on true drift.
     pub(super) async fn record_state_hash_impl(
         &self,
         invite_code: InviteCode,
@@ -114,12 +114,29 @@ impl InMemoryRoomRegistry {
         let stored_room = rooms
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
-        let mismatch = stored_room.room.accept_state_hash(connection_id, report)?;
+        let now = self.clock.now();
+        let evaluation = stored_room
+            .room
+            .accept_state_hash(connection_id, report, now)?;
 
-        if let Some(mismatch) = mismatch {
-            let now = self.clock.now();
-            stored_room.record_state_hash_mismatch_diagnostic(now, &mismatch);
-            self.record_recent_events(stored_room.debug_events(1));
+        match evaluation {
+            StateHashEvaluation::Pending => {}
+            StateHashEvaluation::Matched(frame) => {
+                stored_room.record_state_hash_match(now, frame);
+                self.record_recent_events(stored_room.debug_events(1));
+            }
+            StateHashEvaluation::FrameSkew(mismatch) => {
+                stored_room.record_state_hash_frame_skew_diagnostic(now, &mismatch);
+                self.record_recent_events(stored_room.debug_events(1));
+            }
+            StateHashEvaluation::TrueMismatch(mismatch) => {
+                stored_room.record_state_hash_mismatch_diagnostic(now, &mismatch);
+                self.record_recent_events(stored_room.debug_events(1));
+            }
+            StateHashEvaluation::ResyncRequired(mismatch) => {
+                stored_room.emit_state_hash_mismatch(now, mismatch);
+                self.record_recent_events(stored_room.debug_events(1));
+            }
         }
 
         Ok(())
@@ -144,9 +161,14 @@ impl InMemoryRoomRegistry {
             connection_id,
             now,
             local_frame,
-            network,
+            network.clone(),
             runtime_state,
         )?;
+        if let Some(sample) =
+            stored_room.performance_sample(now, connection_id, local_frame, network, runtime_state)
+        {
+            self.record_performance_sample(sample);
+        }
         if let Some(change) = stored_room.room.maybe_schedule_adaptive_input_delay(now) {
             stored_room.emit_input_delay_changed(now, change);
             self.record_recent_events(stored_room.debug_events(1));

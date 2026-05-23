@@ -4,6 +4,7 @@
 //! logic where mixups would create protocol bugs.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use uuid::Uuid;
 
 /// Internal room identifier.
@@ -16,11 +17,22 @@ impl RoomId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// Returns the raw UUID used by storage and wire diagnostics.
+    pub fn as_uuid(self) -> Uuid {
+        self.0
+    }
 }
 
 impl Default for RoomId {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl fmt::Display for RoomId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
     }
 }
 

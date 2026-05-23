@@ -1,6 +1,7 @@
 import type { ClientRuntimeState } from "../protocol/enums.ts";
 import type { ClientMessage, ServerMessage } from "../protocol/messages.ts";
 import type { ClientNetworkQualityReport } from "../protocol/networkQuality.ts";
+import type { RuntimeTelemetryTracker } from "./runtimeTelemetry.ts";
 
 export type HeartbeatHealth = "fresh" | "stale" | "recoveryTimedOut";
 
@@ -16,6 +17,7 @@ export const defaultHeartbeatPolicy: HeartbeatPolicy = {
 
 export class HeartbeatTracker {
   private lastAckMs: number | null = null;
+  private lastAckEventSeq: number | null = null;
   private readonly policy: HeartbeatPolicy;
 
   public constructor(policy: HeartbeatPolicy = defaultHeartbeatPolicy) {
@@ -23,7 +25,7 @@ export class HeartbeatTracker {
   }
 
   public markAck(message: Extract<ServerMessage, { readonly type: "heartbeatAck" }>, nowMs: number): void {
-    void message;
+    this.lastAckEventSeq = message.eventSeq;
     this.lastAckMs = nowMs;
   }
 
@@ -43,6 +45,13 @@ export class HeartbeatTracker {
     return "fresh";
   }
 
+  public lastAck(): { readonly eventSeq: number | null; readonly receivedAtMs: number | null } {
+    return {
+      eventSeq: this.lastAckEventSeq,
+      receivedAtMs: this.lastAckMs,
+    };
+  }
+
   public heartbeatMessage({
     latestEventSeq,
     localFrame = null,
@@ -50,6 +59,7 @@ export class HeartbeatTracker {
     roomEpoch,
     runtimeState,
     sessionEpoch,
+    telemetry = null,
   }: {
     readonly latestEventSeq: number;
     readonly localFrame?: number | null;
@@ -57,11 +67,14 @@ export class HeartbeatTracker {
     readonly roomEpoch: number;
     readonly runtimeState: ClientRuntimeState;
     readonly sessionEpoch: number;
+    readonly telemetry?: RuntimeTelemetryTracker | null;
   }): Extract<ClientMessage, { readonly type: "heartbeat" }> {
+    const telemetrySnapshot = telemetry?.consume() ?? null;
+
     return {
       latestEventSeq,
-      localFrame,
-      network,
+      localFrame: localFrame ?? telemetrySnapshot?.localFrame ?? null,
+      network: network ?? telemetrySnapshot?.network ?? null,
       roomEpoch,
       runtimeState,
       sessionEpoch,

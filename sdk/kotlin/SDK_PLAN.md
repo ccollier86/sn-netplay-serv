@@ -15,6 +15,11 @@ input sampling, and UI.
 - JSON encoding/decoding with server-compatible field names and message tags.
 - Reconnect token state and reconnect WebSocket query construction.
 - Heartbeat state, stale detection, and recovery timeout detection.
+- Runtime telemetry helpers for heartbeat RTT, jitter, local frame, stalls,
+  catch-up frames, late inputs, and audio underruns.
+- State-hash report cadence, validation, and duplicate-frame suppression.
+- State-resync lifecycle helpers for pause, snapshot, compatibility, ready, and
+  diagnostics flow.
 - Coordinated pause/resume request ids, holders, acknowledgements, and resume.
 - Room/player state machine driven by relay messages.
 - Compatibility fingerprints, session descriptors, and client-side validation.
@@ -24,6 +29,7 @@ input sampling, and UI.
 
 - No Android views, lifecycle classes, services, or permissions.
 - No emulator core APIs or save-state byte translation.
+- No state hashing implementation; Android supplies serialized-state hashes.
 - No ROM scanning or file access.
 - No premium/license UI.
 - No bundled HTTP/WebSocket implementation; adapters provide transport.
@@ -33,5 +39,5 @@ input sampling, and UI.
 Until this repo has its own Gradle wrapper, verify with:
 
 ```bash
-JAVA_HOME=/home/catalyst-2/.local/jdk-21 /home/catalyst-2/projects/gba-emulator/gradlew -p /home/catalyst-2/projects/sb-desktop/sb-netplay-serv/sdk/kotlin test
+JAVA_HOME=/home/catalyst-2/.local/jdk-21 /home/catalyst-2/.gradle/wrapper/dists/gradle-8.14.3-bin/cv11ve7ro1n3o1j4so8xd9n66/gradle-8.14.3/bin/gradle test
 ```

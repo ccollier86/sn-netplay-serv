@@ -6,8 +6,9 @@
 use super::{InMemoryRoomRegistry, RoomRegistry};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    CompatibilityFingerprint, InputFrame, InputFrameBatch, NETPLAY_PROTOCOL_VERSION,
-    NetplaySessionDescriptor, SessionPauseReason, SnapshotChunk, SnapshotManifest, StateHashReport,
+    ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
+    NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor, SessionPauseReason, SnapshotChunk,
+    SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, PlayerRuntimeState, PlayerStatus,
@@ -628,6 +629,231 @@ async fn state_hash_mismatch_is_diagnostic_without_resync() {
     assert_eq!(
         debug_events.first().map(|event| event.kind.as_str()),
         Some("stateHashMismatchDiagnostic")
+    );
+}
+
+#[tokio::test]
+async fn matching_state_hash_is_recorded_for_telemetry() {
+    let (registry, invite, host_connection, guest_connection) = compatible_room().await;
+    complete_snapshot(&registry, &invite, host_connection).await;
+    registry
+        .mark_ready(invite.clone(), host_connection, None)
+        .await
+        .expect("host ready");
+    registry
+        .mark_ready(invite.clone(), guest_connection, None)
+        .await
+        .expect("guest ready");
+    let mut events = registry.subscribe(invite.clone()).await.expect("events");
+
+    registry
+        .record_state_hash(invite.clone(), host_connection, state_hash(60, "a"))
+        .await
+        .expect("host hash");
+    registry
+        .record_state_hash(invite.clone(), guest_connection, state_hash(60, "a"))
+        .await
+        .expect("guest hash");
+
+    assert!(matches!(
+        events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+
+    let debug_events = registry
+        .room_events(invite.clone(), 1)
+        .await
+        .expect("debug events");
+    assert_eq!(
+        debug_events.first().map(|event| event.kind.as_str()),
+        Some("stateHashMatched")
+    );
+    assert!(
+        debug_events
+            .first()
+            .is_some_and(|event| event.detail.contains("frame 60"))
+    );
+}
+
+#[tokio::test]
+async fn nearby_state_hash_match_does_not_trigger_resync() {
+    let (registry, invite, host_connection, guest_connection) = compatible_room().await;
+    complete_snapshot(&registry, &invite, host_connection).await;
+    registry
+        .mark_ready(invite.clone(), host_connection, None)
+        .await
+        .expect("host ready");
+    registry
+        .mark_ready(invite.clone(), guest_connection, None)
+        .await
+        .expect("guest ready");
+    let session_epoch = session_epoch(&registry, &invite).await;
+    let mut events = registry.subscribe(invite.clone()).await.expect("events");
+
+    registry
+        .record_state_hash(invite.clone(), guest_connection, state_hash(55, "a"))
+        .await
+        .expect("guest nearby hash");
+    registry
+        .record_state_hash(invite.clone(), host_connection, state_hash(60, "a"))
+        .await
+        .expect("host hash");
+    registry
+        .record_state_hash(invite.clone(), guest_connection, state_hash(60, "b"))
+        .await
+        .expect("guest hash");
+
+    assert!(matches!(
+        events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+
+    let room = registry
+        .room_view(invite.clone())
+        .await
+        .expect("room remains active");
+    assert_eq!(room.status, RoomStatus::Playing);
+    assert_eq!(room.session_epoch, session_epoch);
+
+    let debug_events = registry
+        .room_events(invite.clone(), 1)
+        .await
+        .expect("debug events");
+    assert_eq!(
+        debug_events.first().map(|event| event.kind.as_str()),
+        Some("stateHashFrameSkewDiagnostic")
+    );
+    assert!(
+        debug_events
+            .first()
+            .is_some_and(|event| event.detail.contains("nearby-frame match"))
+    );
+}
+
+#[tokio::test]
+async fn dynamic_state_hash_window_uses_reported_local_frame_spread() {
+    let (registry, invite, host_connection, guest_connection) = compatible_room().await;
+    complete_snapshot(&registry, &invite, host_connection).await;
+    registry
+        .mark_ready(invite.clone(), host_connection, None)
+        .await
+        .expect("host ready");
+    registry
+        .mark_ready(invite.clone(), guest_connection, None)
+        .await
+        .expect("guest ready");
+    let session_epoch = session_epoch(&registry, &invite).await;
+
+    registry
+        .record_heartbeat(
+            invite.clone(),
+            host_connection,
+            0,
+            Some(60),
+            ClientRuntimeState::Playing,
+            None,
+        )
+        .await
+        .expect("host heartbeat");
+    registry
+        .record_heartbeat(
+            invite.clone(),
+            guest_connection,
+            0,
+            Some(75),
+            ClientRuntimeState::Playing,
+            None,
+        )
+        .await
+        .expect("guest heartbeat");
+
+    registry
+        .record_state_hash(invite.clone(), guest_connection, state_hash(75, "a"))
+        .await
+        .expect("guest nearby hash");
+    registry
+        .record_state_hash(invite.clone(), host_connection, state_hash(60, "a"))
+        .await
+        .expect("host hash");
+    registry
+        .record_state_hash(invite.clone(), guest_connection, state_hash(60, "b"))
+        .await
+        .expect("guest hash");
+
+    let room = registry
+        .room_view(invite.clone())
+        .await
+        .expect("room remains active");
+    assert_eq!(room.status, RoomStatus::Playing);
+    assert_eq!(room.session_epoch, session_epoch);
+
+    let debug_events = registry
+        .room_events(invite.clone(), 1)
+        .await
+        .expect("debug events");
+    assert_eq!(
+        debug_events.first().map(|event| event.kind.as_str()),
+        Some("stateHashFrameSkewDiagnostic")
+    );
+    assert!(
+        debug_events
+            .first()
+            .is_some_and(|event| event.detail.contains("first offset 15"))
+    );
+}
+
+#[tokio::test]
+async fn repeated_state_hash_mismatch_requires_snapshot_resync() {
+    let (registry, invite, host_connection, guest_connection) = compatible_room().await;
+    complete_snapshot(&registry, &invite, host_connection).await;
+    registry
+        .mark_ready(invite.clone(), host_connection, None)
+        .await
+        .expect("host ready");
+    registry
+        .mark_ready(invite.clone(), guest_connection, None)
+        .await
+        .expect("guest ready");
+    let session_epoch = session_epoch(&registry, &invite).await;
+    let mut events = registry.subscribe(invite.clone()).await.expect("events");
+
+    for (frame, host_hash, guest_hash) in [(60, "a", "b"), (120, "c", "d"), (180, "e", "f")] {
+        registry
+            .record_state_hash(
+                invite.clone(),
+                host_connection,
+                state_hash(frame, host_hash),
+            )
+            .await
+            .expect("host hash");
+        registry
+            .record_state_hash(
+                invite.clone(),
+                guest_connection,
+                state_hash(frame, guest_hash),
+            )
+            .await
+            .expect("guest hash");
+    }
+
+    let event = events.recv().await.expect("state hash event");
+    let RoomEvent::StateHashMismatch { mismatch, room } = event else {
+        panic!("expected state hash mismatch event");
+    };
+
+    assert_eq!(mismatch.frame, 180);
+    assert_eq!(room.status, RoomStatus::CheckingCompatibility);
+    assert_eq!(room.session_epoch, session_epoch + 1);
+    assert_eq!(room.players[0].status, PlayerStatus::Connected);
+    assert_eq!(room.players[1].status, PlayerStatus::Connected);
+
+    let debug_events = registry
+        .room_events(invite.clone(), 1)
+        .await
+        .expect("debug events");
+    assert_eq!(
+        debug_events.first().map(|event| event.kind.as_str()),
+        Some("stateHashResyncRequired")
     );
 }
 

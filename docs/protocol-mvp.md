@@ -343,6 +343,41 @@ When every connected player is ready, the relay broadcasts:
 }
 ```
 
+## State Hash Drift Repair
+
+During controller netplay, clients periodically send deterministic state hashes
+for the frame they just reached:
+
+```json
+{
+  "type": "stateHash",
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
+  "report": {
+    "frame": 6000,
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  }
+}
+```
+
+The relay keeps a bounded per-room hash buffer. It first compares exact frame
+reports. If exact-frame hashes differ, it also searches nearby frames in the
+hash buffer so a client at frame 6000 can still be considered aligned with a
+peer at frame 6005 when the serialized state hash matches.
+
+The nearby-frame window is dynamic. The relay sizes it from fresh heartbeat
+`localFrame` spread, with accepted input-frame cursors as a fallback, then adds
+a small slack margin. The window is bounded so normal frame skew is recognized
+without letting very old hashes hide a real deterministic desync.
+
+Nearby-frame matches are diagnostics only and do not force recovery. If the
+relay sees repeated true mismatches with no nearby-frame match, it bumps the
+session epoch, moves the room back to compatibility checking, and broadcasts
+`stateHashMismatch`. Clients must pause their active netplay runtime, resend
+compatibility for the new session epoch, then run the normal host snapshot sync.
+The host sends a fresh current save state; guests load it and send `ready`.
+When both players are ready, the relay emits a new `startSession`.
+
 ## Input And Link Packets
 
 Controller input:
@@ -498,3 +533,79 @@ GET /internal/recent-events?limit=100
 Event logs are sanitized. They include room ids, invite codes, event sequence,
 epochs, kind, and detail, but not access tokens, resume tokens, ROM data,
 snapshot bytes, or input payloads.
+
+## Durable Telemetry
+
+The relay can copy sanitized room events into Postgres for long-term netplay
+analysis. This is intentionally separate from live room state:
+
+- rooms, frame release, input relay, pause, and sync remain in process
+- event capture is a bounded nonblocking queue write
+- queue overflow drops telemetry instead of growing memory and increments
+  `/internal/metrics.telemetryDroppedTotal`
+- Postgres writes run in a background task and failures do not affect rooms
+
+The Postgres event table receives one row per sanitized room event:
+
+```sql
+CREATE TABLE IF NOT EXISTS netplay_room_events (
+  timestamp_ms BIGINT NOT NULL,
+  room_id UUID NOT NULL,
+  invite_code TEXT NOT NULL,
+  event_seq BIGINT NOT NULL,
+  room_epoch BIGINT NOT NULL,
+  session_epoch BIGINT NOT NULL,
+  kind TEXT NOT NULL,
+  detail TEXT NOT NULL
+);
+```
+
+The performance sample table receives one row per heartbeat/runtime sample:
+
+```sql
+CREATE TABLE IF NOT EXISTS netplay_performance_samples (
+  timestamp_ms BIGINT NOT NULL,
+  room_id UUID NOT NULL,
+  invite_code TEXT NOT NULL,
+  event_seq BIGINT NOT NULL,
+  room_epoch BIGINT NOT NULL,
+  session_epoch BIGINT NOT NULL,
+  player_index SMALLINT NOT NULL,
+  runtime_state TEXT NOT NULL,
+  local_frame BIGINT,
+  canonical_frame BIGINT NOT NULL,
+  released_frame BIGINT,
+  next_release_frame BIGINT NOT NULL,
+  accepted_input_frame BIGINT,
+  frame_delta BIGINT,
+  round_trip_ms INTEGER,
+  jitter_ms INTEGER,
+  prediction_frames INTEGER,
+  stall_count INTEGER,
+  catch_up_frames INTEGER,
+  late_input_frames INTEGER,
+  audio_underruns INTEGER
+);
+```
+
+Use the Postgres DSN in `SB_NETPLAY_POSTGRES_URL`:
+
+```text
+SB_NETPLAY_POSTGRES_URL=postgres://user:password@host:5432/database?sslmode=require
+```
+
+The relay keeps the password out of debug output. `sslmode=require` encrypts
+transport without certificate-chain validation. Use `sslmode=verify-full` when
+the metrics endpoint has a publicly trusted certificate chain.
+
+Use `scripts/netplay-analytics.sh probe` after schema or credential changes to
+verify the same Postgres writer used by the relay can persist one event and one
+runtime sample. The command removes probe rows after a successful write so
+normal reports stay clean. Use `scripts/netplay-analytics.sh report --limit 25`
+for the normal operator view. The report summarizes each session independently
+before computing multi-session averages and totals, including state-hash
+matches, state-hash mismatches, resyncs, frame deltas, stalls, catch-up frames,
+late inputs, and audio underruns. Use `raw recent` or `raw session` only when
+the summarized report points to a room that needs deeper inspection. `raw
+session --room <room_uuid>` returns recent epochs for that room; add `--epoch`
+only when you need one specific resync epoch.
