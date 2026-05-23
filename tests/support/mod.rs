@@ -429,6 +429,8 @@ pub fn snapshot_payload(bytes: &[u8]) -> (Value, Value) {
         json!({
             "type": "snapshotChunk",
             "chunk": {
+                "snapshotId": "snapshot-1",
+                "repairFrame": 0,
                 "index": 0,
                 "bytes": bytes
             }
@@ -436,6 +438,8 @@ pub fn snapshot_payload(bytes: &[u8]) -> (Value, Value) {
         json!({
             "type": "snapshotComplete",
             "manifest": {
+                "snapshotId": "snapshot-1",
+                "repairFrame": 0,
                 "totalBytes": bytes.len(),
                 "sha256": format!("{:x}", Sha256::digest(bytes))
             }

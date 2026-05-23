@@ -38,6 +38,7 @@ pub struct NetplayRoom {
     pub(super) next_pause_sequence: u64,
     pub(super) pause_state: Option<SessionPauseStateTracker>,
     snapshot_transfer: Option<SnapshotTransferState>,
+    pub(super) sync_start_frame: u64,
     pub(super) room_frame: u64,
     pub(super) released_frame: Option<u64>,
     pub(super) next_release_frame: u64,
@@ -109,6 +110,7 @@ impl NetplayRoom {
             next_pause_sequence: 1,
             pause_state: None,
             snapshot_transfer: None,
+            sync_start_frame: 0,
             room_frame: 0,
             released_frame: None,
             next_release_frame: 0,
@@ -245,6 +247,11 @@ impl NetplayRoom {
         Ok(true)
     }
 
+    /// Returns the canonical frame that the current sync phase will start from.
+    pub(super) fn sync_start_frame(&self) -> u64 {
+        self.sync_start_frame
+    }
+
     /// Validates host snapshot chunk relay.
     pub fn accept_snapshot_chunk(
         &mut self,
@@ -253,6 +260,7 @@ impl NetplayRoom {
         limits: SnapshotLimits,
     ) -> Result<(), RoomError> {
         self.validate_host_snapshot_sender(connection_id)?;
+        self.validate_snapshot_repair_frame(chunk.repair_frame)?;
         if self.host_snapshot_completed {
             return Err(RoomError::SnapshotInvalid);
         }
@@ -269,6 +277,7 @@ impl NetplayRoom {
         limits: SnapshotLimits,
     ) -> Result<(), RoomError> {
         self.validate_host_snapshot_sender(connection_id)?;
+        self.validate_snapshot_repair_frame(manifest.repair_frame)?;
         let transfer = self
             .snapshot_transfer
             .as_ref()
@@ -389,6 +398,14 @@ impl NetplayRoom {
         }
     }
 
+    fn validate_snapshot_repair_frame(&self, repair_frame: u64) -> Result<(), RoomError> {
+        if repair_frame == self.sync_start_frame {
+            Ok(())
+        } else {
+            Err(RoomError::SnapshotInvalid)
+        }
+    }
+
     pub(super) fn connected_player_indices(&self) -> Vec<PlayerIndex> {
         self.players
             .iter()
@@ -430,6 +447,10 @@ impl NetplayRoom {
     }
 
     pub(super) fn reset_sync_state(&mut self) {
+        self.reset_sync_state_to(0);
+    }
+
+    pub(super) fn reset_sync_state_to(&mut self, start_frame: u64) {
         self.compatibility.clear();
         self.ready_players.clear();
         self.last_input_frames.clear();
@@ -438,9 +459,10 @@ impl NetplayRoom {
         self.host_snapshot_completed = false;
         self.pause_state = None;
         self.snapshot_transfer = None;
-        self.room_frame = 0;
+        self.sync_start_frame = start_frame;
+        self.room_frame = start_frame;
         self.released_frame = None;
-        self.next_release_frame = 0;
+        self.next_release_frame = start_frame;
         self.pending_input_delay_change = None;
         self.state_hashes.clear();
         self.state_hash_true_mismatch_streak = 0;

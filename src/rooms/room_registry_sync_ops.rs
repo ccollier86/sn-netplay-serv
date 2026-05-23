@@ -93,7 +93,7 @@ impl InMemoryRoomRegistry {
         let started = stored_room.room.mark_ready(connection_id, network, now)?;
 
         if started {
-            stored_room.emit_start(now, 0);
+            stored_room.emit_start(now, stored_room.room.sync_start_frame());
         } else {
             stored_room.emit_state(now, "playerReady", "player marked ready");
         }

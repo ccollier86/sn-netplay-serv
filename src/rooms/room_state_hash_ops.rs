@@ -16,7 +16,7 @@ const STATE_HASH_MIN_NEARBY_MATCH_WINDOW: u64 = 8;
 const STATE_HASH_NEARBY_MATCH_SLACK_FRAMES: u64 = 4;
 const STATE_HASH_MAX_NEARBY_MATCH_WINDOW: u64 = 120;
 const STATE_HASH_FRAME_SAMPLE_FRESHNESS: Duration = Duration::from_secs(10);
-const STATE_HASH_TRUE_MISMATCHES_BEFORE_RESYNC: u8 = 3;
+const STATE_HASH_TRUE_MISMATCHES_BEFORE_RESYNC: u8 = 1;
 
 /// Result of accepting a deterministic state-hash report.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,9 +27,9 @@ pub(crate) enum StateHashEvaluation {
     Matched(u64),
     /// Same-frame hashes differed, but the hash buffer found a nearby match.
     FrameSkew(StateHashMismatchView),
-    /// Same-frame hashes differed with no nearby match; not enough for resync.
+    /// Same-frame hashes differed with no nearby match, below the resync threshold.
     TrueMismatch(StateHashMismatchView),
-    /// Persistent true mismatches require clients to resync from host state.
+    /// Confirmed mismatches require clients to resync from host state.
     ResyncRequired(StateHashMismatchView),
 }
 
@@ -93,19 +93,26 @@ impl NetplayRoom {
 
         let mismatch = StateHashMismatchView {
             frame: report.frame,
+            repair_frame: report.frame,
             hashes,
             nearby_matches,
         };
 
         if !mismatch.nearby_matches.is_empty() {
-            self.reset_state_hash_mismatch_streak();
+            self.record_state_hash_true_mismatch();
+
+            if self.state_hash_true_mismatch_streak >= STATE_HASH_TRUE_MISMATCHES_BEFORE_RESYNC {
+                self.enter_state_hash_resync(mismatch.repair_frame);
+                return Ok(StateHashEvaluation::ResyncRequired(mismatch));
+            }
+
             return Ok(StateHashEvaluation::FrameSkew(mismatch));
         }
 
         self.record_state_hash_true_mismatch();
 
         if self.state_hash_true_mismatch_streak >= STATE_HASH_TRUE_MISMATCHES_BEFORE_RESYNC {
-            self.enter_state_hash_resync();
+            self.enter_state_hash_resync(mismatch.repair_frame);
             return Ok(StateHashEvaluation::ResyncRequired(mismatch));
         }
 
@@ -216,8 +223,8 @@ impl NetplayRoom {
         self.state_hashes = self.state_hashes.split_off(&retain_from);
     }
 
-    fn enter_state_hash_resync(&mut self) {
-        self.reset_sync_state();
+    fn enter_state_hash_resync(&mut self, repair_frame: u64) {
+        self.reset_sync_state_to(repair_frame);
         self.bump_session_epoch();
         self.status = RoomStatus::CheckingCompatibility;
 

@@ -7,7 +7,7 @@ export interface StateHashReporterPolicy {
 }
 
 export const defaultStateHashReporterPolicy: StateHashReporterPolicy = {
-  reportEveryFrames: 60,
+  reportEveryFrames: 600,
 };
 
 export class StateHashReporter {

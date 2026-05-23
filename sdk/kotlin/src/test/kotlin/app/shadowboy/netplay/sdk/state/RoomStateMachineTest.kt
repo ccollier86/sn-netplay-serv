@@ -100,6 +100,7 @@ class RoomStateMachineTest {
 
         val mismatch = StateHashMismatchView(
             frame = 120,
+            repairFrame = 120,
             hashes = listOf(
                 PlayerStateHashView(playerIndex = 0, sha256 = "a".repeat(64)),
                 PlayerStateHashView(playerIndex = 1, sha256 = "b".repeat(64)),
@@ -156,6 +157,7 @@ class RoomStateMachineTest {
                 sessionEpoch = 4,
                 mismatch = StateHashMismatchView(
                     frame = 120,
+                    repairFrame = 120,
                     hashes = listOf(
                         PlayerStateHashView(playerIndex = 0, sha256 = "a".repeat(64)),
                         PlayerStateHashView(playerIndex = 1, sha256 = "b".repeat(64)),
@@ -424,7 +426,7 @@ class RoomStateMachineTest {
                 ServerMessage.SnapshotChunkMessage(
                     roomEpoch = 2,
                     sessionEpoch = 4,
-                    chunk = SnapshotChunk(index = 0, bytes = listOf(1)),
+                    chunk = SnapshotChunk(snapshotId = "snapshot-1", repairFrame = 0, index = 0, bytes = listOf(1)),
                 ),
             ),
         )
@@ -433,7 +435,12 @@ class RoomStateMachineTest {
                 ServerMessage.SnapshotComplete(
                     roomEpoch = 3,
                     sessionEpoch = 5,
-                    manifest = SnapshotManifest(totalBytes = 1, sha256 = "a".repeat(64)),
+                    manifest = SnapshotManifest(
+                        snapshotId = "snapshot-1",
+                        repairFrame = 0,
+                        totalBytes = 1,
+                        sha256 = "a".repeat(64),
+                    ),
                 ),
             ),
         )
@@ -442,7 +449,7 @@ class RoomStateMachineTest {
                 ServerMessage.SnapshotChunkMessage(
                     roomEpoch = 3,
                     sessionEpoch = 4,
-                    chunk = SnapshotChunk(index = 0, bytes = listOf(1)),
+                    chunk = SnapshotChunk(snapshotId = "snapshot-1", repairFrame = 0, index = 0, bytes = listOf(1)),
                 ),
             ),
         )

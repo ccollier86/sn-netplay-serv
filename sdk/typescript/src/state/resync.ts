@@ -87,7 +87,7 @@ export class ResyncCoordinator {
   }
 
   public markSnapshotSendComplete(nowMs = Date.now()): void {
-    this.transition("waitingForCompatibility", nowMs);
+    this.transition("waitingForReady", nowMs);
   }
 
   public markSnapshotReceiveStarted(nowMs = Date.now()): void {
@@ -99,11 +99,11 @@ export class ResyncCoordinator {
   }
 
   public markSnapshotLoadComplete(nowMs = Date.now()): void {
-    this.transition("waitingForCompatibility", nowMs);
+    this.transition("waitingForReady", nowMs);
   }
 
   public markCompatibilitySent(nowMs = Date.now()): void {
-    this.transition("waitingForReady", nowMs);
+    this.transition("waitingForCompatibility", nowMs);
   }
 
   public markComplete(nowMs = Date.now()): void {

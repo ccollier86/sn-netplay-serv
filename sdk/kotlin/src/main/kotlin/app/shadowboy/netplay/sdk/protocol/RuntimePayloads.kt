@@ -4,12 +4,16 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 public data class SnapshotChunk(
+    public val snapshotId: String,
+    public val repairFrame: Long,
     public val index: Int,
     public val bytes: List<Int>,
 )
 
 @Serializable
 public data class SnapshotManifest(
+    public val snapshotId: String,
+    public val repairFrame: Long,
     public val totalBytes: Long,
     public val sha256: String,
 )
@@ -53,6 +57,7 @@ public data class NearbyStateHashMatchView(
 @Serializable
 public data class StateHashMismatchView(
     public val frame: Long,
+    public val repairFrame: Long,
     public val hashes: List<PlayerStateHashView>,
     public val nearbyMatches: List<NearbyStateHashMatchView> = emptyList(),
 )

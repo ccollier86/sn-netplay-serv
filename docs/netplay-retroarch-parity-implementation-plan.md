@@ -40,9 +40,9 @@ pieces that can affect multiplayer correctness:
 ## SDKs
 
 - Update TypeScript and Kotlin types for exact-frame snapshot repair.
-- Normalize TypeScript and Kotlin resync phases:
-  `requested -> pausing -> snapshotNeeded -> snapshotSending/snapshotReceiving
-  -> waitingForCompatibility -> waitingForReady -> complete`.
+- Normalize TypeScript and Kotlin resync phases to the relay lifecycle:
+  `requested -> pausing -> waitingForCompatibility -> snapshotNeeded ->
+  snapshotSending/snapshotReceiving -> waitingForReady -> complete`.
 - Add helpers for canonical server-frame tracking and repair-frame validation.
 - Keep SDK responsibility limited to protocol, heartbeat, reconnect, pause,
   room state, and diagnostics. Rollback/prediction stays in the emulator
@@ -53,6 +53,10 @@ pieces that can affect multiplayer correctness:
 - Start or restart netplay runtime from the server-supplied start frame.
 - During repair, load the host snapshot and restart netplay mode from
   `repairFrame`; never use `startFrame = 0` for active repair.
+- Host repair snapshots must come from the retained netplay frame buffer for the
+  relay-provided `repairFrame`, not from an unframed current-state save.
+- The host must load that retained repair snapshot locally before sending
+  `ready`; otherwise the guest repairs while the host stays ahead.
 - Keep current RetroArch-style prediction behavior:
   previous real input, direction duration preservation, non-direction refresh,
   replay when resolved input changes, 60-frame stall window, 2-frame resume
@@ -83,4 +87,3 @@ pieces that can affect multiplayer correctness:
 - Runner tests for prediction/replay constants and exact start-frame reset.
 - Manual multiplayer checks: Desktop-to-Desktop NES/SNES/Genesis, Android-to-
   Android, and cross-platform only where state formats are confirmed compatible.
-

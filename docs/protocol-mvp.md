@@ -370,13 +370,16 @@ The nearby-frame window is dynamic. The relay sizes it from fresh heartbeat
 a small slack margin. The window is bounded so normal frame skew is recognized
 without letting very old hashes hide a real deterministic desync.
 
-Nearby-frame matches are diagnostics only and do not force recovery. If the
-relay sees repeated true mismatches with no nearby-frame match, it bumps the
-session epoch, moves the room back to compatibility checking, and broadcasts
-`stateHashMismatch`. Clients must pause their active netplay runtime, resend
-compatibility for the new session epoch, then run the normal host snapshot sync.
-The host sends a fresh current save state; guests load it and send `ready`.
-When both players are ready, the relay emits a new `startSession`.
+Nearby-frame matches are diagnostics only and do not suppress recovery. On the
+first confirmed exact-frame mismatch, the relay bumps the session epoch, moves
+the room back to compatibility checking, and broadcasts `stateHashMismatch` with
+a `repairFrame`. Clients must pause their active netplay runtime, resend
+compatibility for the new session epoch, then run host snapshot sync for that
+repair frame. Snapshot chunks and manifest carry the same `snapshotId` and
+`repairFrame`. The host also loads that same retained state locally before
+`ready`. Guests load it, reset rollback cursors to `repairFrame`, and send
+`ready`. When both players are ready, the relay emits `startSession` using the
+same repair frame.
 
 ## Input And Link Packets
 

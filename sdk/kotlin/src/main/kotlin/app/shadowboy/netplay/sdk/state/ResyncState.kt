@@ -92,7 +92,7 @@ public class ResyncCoordinator {
     }
 
     public fun markSnapshotSendComplete(nowMs: Long = System.currentTimeMillis()) {
-        transition(NetplayResyncPhase.WaitingForCompatibility, nowMs)
+        transition(NetplayResyncPhase.WaitingForReady, nowMs)
     }
 
     public fun markSnapshotReceiveStarted(nowMs: Long = System.currentTimeMillis()) {
@@ -104,11 +104,11 @@ public class ResyncCoordinator {
     }
 
     public fun markSnapshotLoadComplete(nowMs: Long = System.currentTimeMillis()) {
-        transition(NetplayResyncPhase.WaitingForCompatibility, nowMs)
+        transition(NetplayResyncPhase.WaitingForReady, nowMs)
     }
 
     public fun markCompatibilitySent(nowMs: Long = System.currentTimeMillis()) {
-        transition(NetplayResyncPhase.WaitingForReady, nowMs)
+        transition(NetplayResyncPhase.WaitingForCompatibility, nowMs)
     }
 
     public fun markComplete(nowMs: Long = System.currentTimeMillis()) {

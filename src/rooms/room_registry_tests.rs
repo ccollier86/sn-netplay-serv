@@ -281,6 +281,8 @@ async fn host_snapshot_chunk_is_broadcast() {
             invite,
             host_connection,
             SnapshotChunk {
+                snapshot_id: "snapshot-1".to_string(),
+                repair_frame: 0,
                 index: 0,
                 bytes: vec![1, 2, 3],
             },
@@ -309,6 +311,8 @@ async fn snapshot_chunks_do_not_publish_to_input_channel() {
             invite,
             host_connection,
             SnapshotChunk {
+                snapshot_id: "snapshot-1".to_string(),
+                repair_frame: 0,
                 index: 0,
                 bytes: vec![1, 2, 3],
             },
@@ -331,6 +335,8 @@ async fn snapshot_complete_requires_matching_chunks() {
             invite.clone(),
             host_connection,
             SnapshotChunk {
+                snapshot_id: "snapshot-1".to_string(),
+                repair_frame: 0,
                 index: 0,
                 bytes: vec![1, 2, 3],
             },
@@ -343,6 +349,8 @@ async fn snapshot_complete_requires_matching_chunks() {
             invite,
             host_connection,
             SnapshotManifest {
+                snapshot_id: "snapshot-1".to_string(),
+                repair_frame: 0,
                 total_bytes: 3,
                 sha256: "0".repeat(64),
             },
@@ -361,6 +369,8 @@ async fn host_snapshot_complete_is_broadcast_after_valid_chunks() {
             invite.clone(),
             host_connection,
             SnapshotChunk {
+                snapshot_id: "snapshot-1".to_string(),
+                repair_frame: 0,
                 index: 0,
                 bytes: vec![1, 2, 3],
             },
@@ -568,7 +578,7 @@ async fn future_host_input_waits_for_released_frame_before_broadcast() {
 }
 
 #[tokio::test]
-async fn state_hash_mismatch_is_diagnostic_without_resync() {
+async fn state_hash_mismatch_requests_snapshot_resync() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
@@ -591,18 +601,23 @@ async fn state_hash_mismatch_is_diagnostic_without_resync() {
         .await
         .expect("guest hash");
 
-    assert!(matches!(
-        events.try_recv(),
-        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-    ));
+    let event = events.recv().await.expect("state hash event");
+    let RoomEvent::StateHashMismatch { mismatch, room } = event else {
+        panic!("expected state hash mismatch event");
+    };
+
+    assert_eq!(mismatch.frame, 60);
+    assert_eq!(mismatch.repair_frame, 60);
+    assert_eq!(room.status, RoomStatus::CheckingCompatibility);
+    assert_eq!(room.session_epoch, session_epoch + 1);
+    assert_eq!(room.frame_clock.canonical_frame, 60);
 
     let room = registry
         .room_view(invite.clone())
         .await
-        .expect("room remains active");
-    assert_eq!(room.status, RoomStatus::Playing);
-    assert_eq!(room.session_epoch, session_epoch);
-    assert_eq!(room.frame_clock.canonical_frame, 0);
+        .expect("room remains available for resync");
+    assert_eq!(room.status, RoomStatus::CheckingCompatibility);
+    assert_eq!(room.session_epoch, session_epoch + 1);
 
     let debug_events = registry
         .room_events(invite.clone(), 1)
@@ -610,7 +625,7 @@ async fn state_hash_mismatch_is_diagnostic_without_resync() {
         .expect("debug events");
     assert_eq!(
         debug_events.first().map(|event| event.kind.as_str()),
-        Some("stateHashMismatchDiagnostic")
+        Some("stateHashResyncRequired")
     );
 }
 
@@ -658,7 +673,7 @@ async fn matching_state_hash_is_recorded_for_telemetry() {
 }
 
 #[tokio::test]
-async fn nearby_state_hash_match_does_not_trigger_resync() {
+async fn nearby_state_hash_match_is_diagnostic_on_resync_event() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
@@ -685,17 +700,23 @@ async fn nearby_state_hash_match_does_not_trigger_resync() {
         .await
         .expect("guest hash");
 
-    assert!(matches!(
-        events.try_recv(),
-        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-    ));
+    let event = events.recv().await.expect("state hash event");
+    let RoomEvent::StateHashMismatch { mismatch, room } = event else {
+        panic!("expected state hash mismatch event");
+    };
+
+    assert_eq!(mismatch.frame, 60);
+    assert_eq!(mismatch.repair_frame, 60);
+    assert_eq!(mismatch.nearby_matches.len(), 1);
+    assert_eq!(room.status, RoomStatus::CheckingCompatibility);
+    assert_eq!(room.session_epoch, session_epoch + 1);
 
     let room = registry
         .room_view(invite.clone())
         .await
-        .expect("room remains active");
-    assert_eq!(room.status, RoomStatus::Playing);
-    assert_eq!(room.session_epoch, session_epoch);
+        .expect("room remains available for resync");
+    assert_eq!(room.status, RoomStatus::CheckingCompatibility);
+    assert_eq!(room.session_epoch, session_epoch + 1);
 
     let debug_events = registry
         .room_events(invite.clone(), 1)
@@ -703,7 +724,7 @@ async fn nearby_state_hash_match_does_not_trigger_resync() {
         .expect("debug events");
     assert_eq!(
         debug_events.first().map(|event| event.kind.as_str()),
-        Some("stateHashFrameSkewDiagnostic")
+        Some("stateHashResyncRequired")
     );
     assert!(
         debug_events
@@ -765,9 +786,9 @@ async fn dynamic_state_hash_window_uses_reported_local_frame_spread() {
     let room = registry
         .room_view(invite.clone())
         .await
-        .expect("room remains active");
-    assert_eq!(room.status, RoomStatus::Playing);
-    assert_eq!(room.session_epoch, session_epoch);
+        .expect("room remains available for resync");
+    assert_eq!(room.status, RoomStatus::CheckingCompatibility);
+    assert_eq!(room.session_epoch, session_epoch + 1);
 
     let debug_events = registry
         .room_events(invite.clone(), 1)
@@ -775,7 +796,7 @@ async fn dynamic_state_hash_window_uses_reported_local_frame_spread() {
         .expect("debug events");
     assert_eq!(
         debug_events.first().map(|event| event.kind.as_str()),
-        Some("stateHashFrameSkewDiagnostic")
+        Some("stateHashResyncRequired")
     );
     assert!(
         debug_events
@@ -785,7 +806,7 @@ async fn dynamic_state_hash_window_uses_reported_local_frame_spread() {
 }
 
 #[tokio::test]
-async fn repeated_state_hash_mismatch_requires_snapshot_resync() {
+async fn first_confirmed_state_hash_mismatch_requires_snapshot_resync() {
     let (registry, invite, host_connection, guest_connection) = compatible_room().await;
     complete_snapshot(&registry, &invite, host_connection).await;
     registry
@@ -799,24 +820,14 @@ async fn repeated_state_hash_mismatch_requires_snapshot_resync() {
     let session_epoch = session_epoch(&registry, &invite).await;
     let mut events = registry.subscribe(invite.clone()).await.expect("events");
 
-    for (frame, host_hash, guest_hash) in [(60, "a", "b"), (120, "c", "d"), (180, "e", "f")] {
-        registry
-            .record_state_hash(
-                invite.clone(),
-                host_connection,
-                state_hash(frame, host_hash),
-            )
-            .await
-            .expect("host hash");
-        registry
-            .record_state_hash(
-                invite.clone(),
-                guest_connection,
-                state_hash(frame, guest_hash),
-            )
-            .await
-            .expect("guest hash");
-    }
+    registry
+        .record_state_hash(invite.clone(), host_connection, state_hash(180, "e"))
+        .await
+        .expect("host hash");
+    registry
+        .record_state_hash(invite.clone(), guest_connection, state_hash(180, "f"))
+        .await
+        .expect("guest hash");
 
     let event = events.recv().await.expect("state hash event");
     let RoomEvent::StateHashMismatch { mismatch, room } = event else {
@@ -824,8 +835,10 @@ async fn repeated_state_hash_mismatch_requires_snapshot_resync() {
     };
 
     assert_eq!(mismatch.frame, 180);
+    assert_eq!(mismatch.repair_frame, 180);
     assert_eq!(room.status, RoomStatus::CheckingCompatibility);
     assert_eq!(room.session_epoch, session_epoch + 1);
+    assert_eq!(room.frame_clock.canonical_frame, 180);
     assert_eq!(room.players[0].status, PlayerStatus::Connected);
     assert_eq!(room.players[1].status, PlayerStatus::Connected);
 
@@ -1212,6 +1225,8 @@ async fn complete_snapshot(
             invite.clone(),
             host_connection,
             SnapshotChunk {
+                snapshot_id: "snapshot-1".to_string(),
+                repair_frame: 0,
                 index: 0,
                 bytes: vec![1, 2, 3],
             },
@@ -1293,6 +1308,8 @@ fn content_hash_for_fixture(name: &str) -> String {
 
 fn snapshot_manifest(bytes: &[u8]) -> SnapshotManifest {
     SnapshotManifest {
+        snapshot_id: "snapshot-1".to_string(),
+        repair_frame: 0,
         total_bytes: bytes.len() as u64,
         sha256: format!("{:x}", Sha256::digest(bytes)),
     }

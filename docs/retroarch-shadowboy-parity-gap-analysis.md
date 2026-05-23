@@ -6,6 +6,11 @@ parity, not a line-for-line copy. A difference matters when it can change frame
 ownership, input timing, prediction, replay, desync repair, pause behavior, or
 client recovery.
 
+This is a gap-analysis snapshot used to drive
+`docs/netplay-retroarch-parity-implementation-plan.md`. Items here describe
+problems found before the parity implementation phases; use the implementation
+plan and protocol docs for the active wire contract.
+
 Primary RetroArch reference:
 
 - `docs/retroarch-netplay-architecture.md`
@@ -190,4 +195,3 @@ RetroArch-equivalent for controller netplay:
 8. Guests load that state at that frame, not as an unframed session restart.
 9. Pause/resume is synchronized runtime state, not only UI state.
 10. Desktop and Android use the same cursor definitions and recovery flow.
-

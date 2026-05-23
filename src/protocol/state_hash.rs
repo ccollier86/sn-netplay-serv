@@ -54,6 +54,8 @@ pub struct NearbyStateHashMatchView {
 pub struct StateHashMismatchView {
     /// Frame where the mismatch was detected.
     pub frame: u64,
+    /// Canonical frame whose host snapshot should repair the session.
+    pub repair_frame: u64,
     /// Reported hashes by player.
     pub hashes: Vec<PlayerStateHashView>,
     /// Nearby-frame matches that indicate an off-by-one or off-by-two label.

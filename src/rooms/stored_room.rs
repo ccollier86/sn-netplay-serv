@@ -222,7 +222,7 @@ impl StoredRoom {
         self.record_event(now, "stateHashMismatchDiagnostic", &detail);
     }
 
-    /// Records a nearby-frame hash match that should not trigger recovery.
+    /// Records nearby-frame hash matches for diagnostics.
     pub(super) fn record_state_hash_frame_skew_diagnostic(
         &mut self,
         now: Instant,
@@ -232,7 +232,7 @@ impl StoredRoom {
         self.record_event(now, "stateHashFrameSkewDiagnostic", &detail);
     }
 
-    /// Emits a resync requirement after persistent true state-hash mismatch.
+    /// Emits a resync requirement after exact-frame state-hash mismatch.
     pub(super) fn emit_state_hash_mismatch(
         &mut self,
         now: Instant,
@@ -368,13 +368,17 @@ impl StoredRoom {
 
 fn state_hash_mismatch_detail(prefix: &str, mismatch: &StateHashMismatchView) -> String {
     if mismatch.nearby_matches.is_empty() {
-        return format!("{prefix} at frame {}", mismatch.frame);
+        return format!(
+            "{prefix} at frame {}; repair frame {}",
+            mismatch.frame, mismatch.repair_frame
+        );
     }
 
     let first_match = &mismatch.nearby_matches[0];
     format!(
-        "{prefix} at frame {} with {} nearby-frame match(es); first offset {} p{} frame {} matched p{} frame {}",
+        "{prefix} at frame {} with repair frame {} and {} nearby-frame match(es); first offset {} p{} frame {} matched p{} frame {}",
         mismatch.frame,
+        mismatch.repair_frame,
         mismatch.nearby_matches.len(),
         first_match.frame_offset,
         first_match.source_player_index.zero_based(),

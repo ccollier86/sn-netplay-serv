@@ -305,6 +305,8 @@ fn guest_cannot_relay_snapshot_chunks() {
     let result = room.accept_snapshot_chunk(
         guest_connection,
         &SnapshotChunk {
+            snapshot_id: "snapshot-1".to_string(),
+            repair_frame: 0,
             index: 0,
             bytes: vec![1, 2, 3],
         },
@@ -323,6 +325,8 @@ fn host_can_relay_snapshot_manifest_during_sync() {
     room.accept_snapshot_chunk(
         host_connection,
         &SnapshotChunk {
+            snapshot_id: "snapshot-1".to_string(),
+            repair_frame: 0,
             index: 0,
             bytes: vec![1, 2, 3],
         },
@@ -348,6 +352,8 @@ fn snapshot_manifest_must_match_relayed_chunks() {
     room.accept_snapshot_chunk(
         host_connection,
         &SnapshotChunk {
+            snapshot_id: "snapshot-1".to_string(),
+            repair_frame: 0,
             index: 0,
             bytes: vec![1, 2, 3],
         },
@@ -358,6 +364,8 @@ fn snapshot_manifest_must_match_relayed_chunks() {
     let result = room.accept_snapshot_complete(
         host_connection,
         &SnapshotManifest {
+            snapshot_id: "snapshot-1".to_string(),
+            repair_frame: 0,
             total_bytes: 3,
             sha256: "0".repeat(64),
         },
@@ -478,7 +486,7 @@ fn server_frame_clock_follows_host_cursor() {
 }
 
 #[test]
-fn first_state_hash_mismatch_is_diagnostic_without_changing_room_state() {
+fn first_state_hash_mismatch_enters_resync_at_repair_frame() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = ready_room(host_connection, guest_connection);
@@ -494,18 +502,20 @@ fn first_state_hash_mismatch_is_diagnostic_without_changing_room_state() {
         .accept_state_hash(guest_connection, state_hash(60, "b"), now)
         .expect("guest hash");
 
-    let StateHashEvaluation::TrueMismatch(mismatch) = evaluation else {
-        panic!("expected true mismatch");
+    let StateHashEvaluation::ResyncRequired(mismatch) = evaluation else {
+        panic!("expected resync requirement");
     };
 
+    assert_eq!(mismatch.repair_frame, 60);
     assert_eq!(mismatch.nearby_matches.as_slice(), [].as_slice());
 
     let view = room.view();
-    assert_eq!(view.status, RoomStatus::Playing);
-    assert_eq!(view.session_epoch, session_epoch);
-    assert_eq!(view.frame_clock.canonical_frame, 0);
-    assert_eq!(view.players[0].status, PlayerStatus::Playing);
-    assert_eq!(view.players[1].status, PlayerStatus::Playing);
+    assert_eq!(view.status, RoomStatus::CheckingCompatibility);
+    assert_eq!(view.session_epoch, session_epoch + 1);
+    assert_eq!(view.frame_clock.canonical_frame, 60);
+    assert_eq!(view.frame_clock.next_release_frame, 60);
+    assert_eq!(view.players[0].status, PlayerStatus::Connected);
+    assert_eq!(view.players[1].status, PlayerStatus::Connected);
 }
 
 #[test]
@@ -523,10 +533,11 @@ fn state_hash_mismatch_reports_nearby_frame_matches() {
         .accept_state_hash(guest_connection, state_hash(60, "b"), now)
         .expect("guest hash");
 
-    let StateHashEvaluation::FrameSkew(mismatch) = evaluation else {
-        panic!("expected nearby-frame skew");
+    let StateHashEvaluation::ResyncRequired(mismatch) = evaluation else {
+        panic!("expected resync requirement with nearby-frame diagnostics");
     };
 
+    assert_eq!(mismatch.repair_frame, 60);
     assert_eq!(mismatch.nearby_matches.len(), 1);
     assert_eq!(
         mismatch.nearby_matches[0].source_player_index,
@@ -573,32 +584,23 @@ fn state_hash_window_uses_live_local_frame_spread() {
         .accept_state_hash(guest_connection, state_hash(60, "b"), now)
         .expect("guest hash");
 
-    let StateHashEvaluation::FrameSkew(mismatch) = evaluation else {
-        panic!("expected dynamic nearby-frame skew");
+    let StateHashEvaluation::ResyncRequired(mismatch) = evaluation else {
+        panic!("expected resync requirement with dynamic nearby-frame diagnostics");
     };
 
+    assert_eq!(mismatch.repair_frame, 60);
     assert_eq!(mismatch.nearby_matches.len(), 1);
     assert_eq!(mismatch.nearby_matches[0].matched_frame, 75);
     assert_eq!(mismatch.nearby_matches[0].frame_offset, 15);
 }
 
 #[test]
-fn repeated_true_state_hash_mismatch_enters_resync() {
+fn state_hash_resync_uses_mismatched_frame_as_new_sync_start() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = ready_room(host_connection, guest_connection);
     let now = std::time::Instant::now();
     let session_epoch = room.view().session_epoch;
-
-    for (frame, host_hash, guest_hash) in [(60, "a", "b"), (120, "c", "d")] {
-        room.accept_state_hash(host_connection, state_hash(frame, host_hash), now)
-            .expect("host hash");
-        assert!(matches!(
-            room.accept_state_hash(guest_connection, state_hash(frame, guest_hash), now)
-                .expect("guest hash"),
-            StateHashEvaluation::TrueMismatch(_)
-        ));
-    }
 
     room.accept_state_hash(host_connection, state_hash(180, "e"), now)
         .expect("host hash");
@@ -611,7 +613,8 @@ fn repeated_true_state_hash_mismatch_enters_resync() {
     let view = room.view();
     assert_eq!(view.status, RoomStatus::CheckingCompatibility);
     assert_eq!(view.session_epoch, session_epoch + 1);
-    assert_eq!(view.frame_clock.canonical_frame, 0);
+    assert_eq!(view.frame_clock.canonical_frame, 180);
+    assert_eq!(view.frame_clock.next_release_frame, 180);
     assert_eq!(view.players[0].status, PlayerStatus::Connected);
     assert_eq!(view.players[1].status, PlayerStatus::Connected);
 }
@@ -895,6 +898,8 @@ fn complete_snapshot(room: &mut NetplayRoom, host_connection: ConnectionId) {
     room.accept_snapshot_chunk(
         host_connection,
         &SnapshotChunk {
+            snapshot_id: "snapshot-1".to_string(),
+            repair_frame: 0,
             index: 0,
             bytes: vec![1, 2, 3],
         },
@@ -1034,6 +1039,8 @@ fn content_hash_for_fixture(name: &str) -> String {
 
 fn snapshot_manifest(bytes: &[u8]) -> SnapshotManifest {
     SnapshotManifest {
+        snapshot_id: "snapshot-1".to_string(),
+        repair_frame: 0,
         total_bytes: bytes.len() as u64,
         sha256: format!("{:x}", Sha256::digest(bytes)),
     }

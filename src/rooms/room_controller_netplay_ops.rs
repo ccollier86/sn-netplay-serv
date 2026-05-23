@@ -289,7 +289,7 @@ impl NetplayRoom {
         self.next_input_frames
             .get(&player_index)
             .copied()
-            .unwrap_or(0)
+            .unwrap_or(self.sync_start_frame)
     }
 }
 

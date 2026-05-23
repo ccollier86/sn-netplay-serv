@@ -11,6 +11,8 @@ use sha2::{Digest, Sha256};
 /// Running validation state for one host snapshot transfer.
 #[derive(Clone, Debug)]
 pub struct SnapshotTransferState {
+    repair_frame: Option<u64>,
+    snapshot_id: Option<String>,
     next_chunk_index: u32,
     received_bytes: u64,
     hasher: Sha256,
@@ -20,6 +22,8 @@ impl SnapshotTransferState {
     /// Creates an empty transfer state.
     pub fn new() -> Self {
         Self {
+            repair_frame: None,
+            snapshot_id: None,
             next_chunk_index: 0,
             received_bytes: 0,
             hasher: Sha256::new(),
@@ -35,6 +39,16 @@ impl SnapshotTransferState {
         chunk
             .validate(limits)
             .map_err(|_| RoomError::SnapshotInvalid)?;
+
+        match (&self.snapshot_id, self.repair_frame) {
+            (Some(snapshot_id), Some(repair_frame))
+                if snapshot_id == &chunk.snapshot_id && repair_frame == chunk.repair_frame => {}
+            (None, None) => {
+                self.snapshot_id = Some(chunk.snapshot_id.clone());
+                self.repair_frame = Some(chunk.repair_frame);
+            }
+            _ => return Err(RoomError::SnapshotInvalid),
+        }
 
         if chunk.index != self.next_chunk_index {
             return Err(RoomError::SnapshotInvalid);
@@ -69,6 +83,12 @@ impl SnapshotTransferState {
             .validate(limits)
             .map_err(|_| RoomError::SnapshotInvalid)?;
 
+        if self.snapshot_id.as_deref() != Some(manifest.snapshot_id.as_str())
+            || self.repair_frame != Some(manifest.repair_frame)
+        {
+            return Err(RoomError::SnapshotInvalid);
+        }
+
         if manifest.total_bytes != self.received_bytes {
             return Err(RoomError::SnapshotInvalid);
         }
@@ -102,6 +122,8 @@ mod tests {
         transfer
             .accept_chunk(
                 &SnapshotChunk {
+                    snapshot_id: "snapshot-1".to_string(),
+                    repair_frame: 7,
                     index: 0,
                     bytes: vec![1, 2],
                 },
@@ -111,6 +133,8 @@ mod tests {
         transfer
             .accept_chunk(
                 &SnapshotChunk {
+                    snapshot_id: "snapshot-1".to_string(),
+                    repair_frame: 7,
                     index: 1,
                     bytes: vec![3],
                 },
@@ -133,6 +157,8 @@ mod tests {
             transfer
                 .accept_chunk(
                     &SnapshotChunk {
+                        snapshot_id: "snapshot-1".to_string(),
+                        repair_frame: 7,
                         index: 1,
                         bytes: vec![1],
                     },
@@ -148,6 +174,8 @@ mod tests {
         transfer
             .accept_chunk(
                 &SnapshotChunk {
+                    snapshot_id: "snapshot-1".to_string(),
+                    repair_frame: 7,
                     index: 0,
                     bytes: vec![1],
                 },
@@ -164,6 +192,8 @@ mod tests {
 
     fn manifest(bytes: &[u8]) -> SnapshotManifest {
         SnapshotManifest {
+            snapshot_id: "snapshot-1".to_string(),
+            repair_frame: 7,
             total_bytes: bytes.len() as u64,
             sha256: format!("{:x}", Sha256::digest(bytes)),
         }

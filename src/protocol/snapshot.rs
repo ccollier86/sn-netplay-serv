@@ -29,6 +29,10 @@ impl Default for SnapshotLimits {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotManifest {
+    /// Stable id shared by every chunk in this snapshot transfer.
+    pub snapshot_id: String,
+    /// Canonical frame represented by the snapshot bytes.
+    pub repair_frame: u64,
     /// Total snapshot byte count.
     pub total_bytes: u64,
     /// Lowercase hexadecimal SHA-256 checksum.
@@ -38,6 +42,10 @@ pub struct SnapshotManifest {
 impl SnapshotManifest {
     /// Validates declared snapshot metadata before bytes are relayed.
     pub fn validate(&self, limits: SnapshotLimits) -> Result<(), SnapshotError> {
+        if !is_snapshot_id(&self.snapshot_id) {
+            return Err(SnapshotError::InvalidSnapshotId);
+        }
+
         if self.total_bytes > limits.max_total_bytes {
             return Err(SnapshotError::TotalTooLarge);
         }
@@ -75,6 +83,10 @@ impl SnapshotManifest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotChunk {
+    /// Stable id shared by every chunk in this snapshot transfer.
+    pub snapshot_id: String,
+    /// Canonical frame represented by the snapshot bytes.
+    pub repair_frame: u64,
     /// Zero-based chunk index.
     pub index: u32,
     /// Chunk bytes.
@@ -84,6 +96,10 @@ pub struct SnapshotChunk {
 impl SnapshotChunk {
     /// Validates the chunk size against relay limits.
     pub fn validate(&self, limits: SnapshotLimits) -> Result<(), SnapshotError> {
+        if !is_snapshot_id(&self.snapshot_id) {
+            return Err(SnapshotError::InvalidSnapshotId);
+        }
+
         if self.bytes.len() > limits.max_chunk_bytes {
             Err(SnapshotError::ChunkTooLarge)
         } else {
@@ -110,10 +126,21 @@ pub enum SnapshotError {
     /// Manifest checksum is not a hexadecimal SHA-256 digest.
     #[error("snapshot checksum format is invalid")]
     InvalidChecksum,
+    /// Snapshot id is not safe to relay.
+    #[error("snapshot id format is invalid")]
+    InvalidSnapshotId,
 }
 
 fn is_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_snapshot_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
 #[cfg(test)]
@@ -123,6 +150,8 @@ mod tests {
     #[test]
     fn chunk_rejects_large_payloads() {
         let chunk = SnapshotChunk {
+            snapshot_id: "snapshot-1".to_string(),
+            repair_frame: 7,
             index: 0,
             bytes: vec![0; 3],
         };
@@ -137,6 +166,8 @@ mod tests {
     #[test]
     fn manifest_rejects_checksum_mismatch() {
         let manifest = SnapshotManifest {
+            snapshot_id: "snapshot-1".to_string(),
+            repair_frame: 7,
             total_bytes: 3,
             sha256: "0".repeat(64),
         };
@@ -154,6 +185,8 @@ mod tests {
     #[test]
     fn manifest_rejects_invalid_checksum_format() {
         let manifest = SnapshotManifest {
+            snapshot_id: "snapshot-1".to_string(),
+            repair_frame: 7,
             total_bytes: 3,
             sha256: "bad".to_string(),
         };

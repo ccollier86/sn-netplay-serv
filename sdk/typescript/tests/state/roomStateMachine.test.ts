@@ -91,6 +91,7 @@ describe("TypeScript netplay room state", () => {
 
     const mismatch = {
       frame: 120,
+      repairFrame: 120,
       hashes: [
         { playerIndex: 0, sha256: "a".repeat(64) },
         { playerIndex: 1, sha256: "b".repeat(64) },
@@ -153,6 +154,7 @@ describe("TypeScript netplay room state", () => {
       eventSeq: 11,
       mismatch: {
         frame: 120,
+        repairFrame: 120,
         hashes: [
           { playerIndex: 0, sha256: "a".repeat(64) },
           { playerIndex: 1, sha256: "b".repeat(64) },
@@ -508,19 +510,24 @@ describe("TypeScript netplay room state", () => {
     });
 
     expect(stateMachine.isRuntimeMessageCurrent({
-      chunk: { bytes: [1], index: 0 },
+      chunk: { bytes: [1], index: 0, repairFrame: 0, snapshotId: "snapshot-1" },
       roomEpoch: 2,
       sessionEpoch: 4,
       type: "snapshotChunk",
     })).toBe(false);
     expect(stateMachine.isRuntimeMessageCurrent({
-      manifest: { sha256: "a".repeat(64), totalBytes: 1 },
+      manifest: {
+        repairFrame: 0,
+        sha256: "a".repeat(64),
+        snapshotId: "snapshot-1",
+        totalBytes: 1,
+      },
       roomEpoch: 3,
       sessionEpoch: 5,
       type: "snapshotComplete",
     })).toBe(false);
     expect(stateMachine.isRuntimeMessageCurrent({
-      chunk: { bytes: [1], index: 0 },
+      chunk: { bytes: [1], index: 0, repairFrame: 0, snapshotId: "snapshot-1" },
       roomEpoch: 3,
       sessionEpoch: 4,
       type: "snapshotChunk",

@@ -6,7 +6,7 @@ import app.shadowboy.netplay.sdk.protocol.StateHashReport
 private val SHA256_PATTERN = Regex("^[a-f0-9]{64}$")
 
 public data class StateHashReporterPolicy(
-    public val reportEveryFrames: Long = 60,
+    public val reportEveryFrames: Long = 600,
 )
 
 public class StateHashReporter(

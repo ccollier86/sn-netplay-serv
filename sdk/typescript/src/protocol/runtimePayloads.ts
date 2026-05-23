@@ -1,9 +1,13 @@
 export interface SnapshotChunk {
+  readonly snapshotId: string;
+  readonly repairFrame: number;
   readonly index: number;
   readonly bytes: readonly number[];
 }
 
 export interface SnapshotManifest {
+  readonly snapshotId: string;
+  readonly repairFrame: number;
   readonly totalBytes: number;
   readonly sha256: string;
 }
@@ -41,6 +45,7 @@ export interface NearbyStateHashMatchView {
 
 export interface StateHashMismatchView {
   readonly frame: number;
+  readonly repairFrame: number;
   readonly hashes: readonly PlayerStateHashView[];
   readonly nearbyMatches: readonly NearbyStateHashMatchView[];
 }
