@@ -7,6 +7,7 @@ mod websocket_input_session;
 mod websocket_join;
 mod websocket_message_handler;
 mod websocket_outbound;
+mod websocket_peer_close;
 mod websocket_session;
 
 pub use websocket_input_session::handle_websocket_input_session;

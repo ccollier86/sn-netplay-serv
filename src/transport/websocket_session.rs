@@ -11,6 +11,7 @@ use crate::transport::websocket_message_handler::handle_client_text;
 use crate::transport::websocket_outbound::{
     SocketSender, send_server_message, send_static_error, send_upgrade_error,
 };
+use crate::transport::websocket_peer_close::{peer_close_detail, peer_error_detail};
 use crate::transport::{WebSocketJoinRequest, WebSocketJoinRole};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
@@ -160,7 +161,26 @@ async fn handle_incoming(
             )
             .await
         }
-        Some(Ok(Message::Close(_))) | None => false,
+        Some(Ok(Message::Close(frame))) => {
+            record_transport_close(
+                services,
+                invite_code,
+                connection_id,
+                peer_close_detail(frame),
+            )
+            .await;
+            false
+        }
+        None => {
+            record_transport_close(
+                services,
+                invite_code,
+                connection_id,
+                "peer stream ended without close frame".to_string(),
+            )
+            .await;
+            false
+        }
         Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => true,
         Some(Ok(Message::Binary(_))) => send_static_error(
             sender,
@@ -169,8 +189,29 @@ async fn handle_incoming(
         )
         .await
         .is_ok(),
-        Some(Err(_)) => false,
+        Some(Err(error)) => {
+            record_transport_close(
+                services,
+                invite_code,
+                connection_id,
+                peer_error_detail(&error),
+            )
+            .await;
+            false
+        }
     }
+}
+
+async fn record_transport_close(
+    services: &AppServices,
+    invite_code: &crate::rooms::InviteCode,
+    connection_id: ConnectionId,
+    reason: String,
+) {
+    let _ = services
+        .rooms
+        .record_transport_close(invite_code.clone(), connection_id, "control", reason)
+        .await;
 }
 
 async fn handle_room_event(

@@ -212,6 +212,17 @@ impl RoomRegistry for InMemoryRoomRegistry {
         self.disconnect_impl(invite_code, connection_id).await
     }
 
+    async fn record_transport_close(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        socket_kind: &'static str,
+        reason: String,
+    ) -> Result<(), RoomError> {
+        self.record_transport_close_impl(invite_code, connection_id, socket_kind, reason)
+            .await
+    }
+
     async fn player_exited(
         &self,
         invite_code: InviteCode,

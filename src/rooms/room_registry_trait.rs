@@ -73,6 +73,15 @@ pub trait RoomRegistry: Send + Sync {
         connection_id: ConnectionId,
     ) -> Result<RoomView, RoomError>;
 
+    /// Records a sanitized transport close/error before room lifecycle cleanup.
+    async fn record_transport_close(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        socket_kind: &'static str,
+        reason: String,
+    ) -> Result<(), RoomError>;
+
     /// Ends a room because one player intentionally left.
     async fn player_exited(
         &self,

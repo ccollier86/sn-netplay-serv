@@ -186,13 +186,16 @@ impl InMemoryRoomRegistry {
         let normalized = invite_code.normalized().to_string();
         let stored_room = rooms.get_mut(&normalized).ok_or(RoomError::NotFound)?;
         let now = self.clock.now();
+        let detail = stored_room
+            .room
+            .describe_control_connection(connection_id, "room cleanup");
         let closed = stored_room.room.disconnect_with_recovery(
             connection_id,
             now,
             self.recovery_config.reconnect_grace,
         )?;
 
-        stored_room.emit_state(now, "socketDisconnected", "socket disconnected");
+        stored_room.emit_state(now, "socketDisconnected", &detail);
         let room = stored_room.view(now);
         self.record_recent_events(stored_room.debug_events(1));
 
@@ -201,6 +204,38 @@ impl InMemoryRoomRegistry {
         }
 
         Ok(room)
+    }
+
+    /// Records transport close diagnostics before room lifecycle cleanup runs.
+    pub(super) async fn record_transport_close_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        socket_kind: &'static str,
+        reason: String,
+    ) -> Result<(), RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        let now = self.clock.now();
+        let detail = match socket_kind {
+            "input" => stored_room
+                .room
+                .describe_input_connection(connection_id, &reason),
+            _ => stored_room
+                .room
+                .describe_control_connection(connection_id, &reason),
+        };
+        let kind = match socket_kind {
+            "input" => "inputSocketTransportClosed",
+            _ => "socketTransportClosed",
+        };
+
+        stored_room.record_debug_event(now, kind, &detail);
+        self.record_recent_events(stored_room.debug_events(1));
+
+        Ok(())
     }
 
     /// Ends a room because one player intentionally left.
@@ -270,11 +305,14 @@ impl InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
         let now = self.clock.now();
+        let detail = stored_room
+            .room
+            .describe_input_connection(connection_id, "room cleanup");
 
         stored_room
             .room
             .disconnect_input_socket(connection_id, now)?;
-        stored_room.emit_state(now, "inputSocketDisconnected", "input socket disconnected");
+        stored_room.emit_state(now, "inputSocketDisconnected", &detail);
         let room = stored_room.view(now);
         self.record_recent_events(stored_room.debug_events(1));
 

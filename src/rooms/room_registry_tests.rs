@@ -891,6 +891,35 @@ async fn repeated_pause_request_updates_existing_pause() {
 }
 
 #[tokio::test]
+async fn transport_close_records_actor_detail_without_broadcasting_state() {
+    let (registry, invite, _host_connection, guest_connection) = compatible_room().await;
+    let mut events = registry.subscribe(invite.clone()).await.expect("events");
+
+    registry
+        .record_transport_close(
+            invite.clone(),
+            guest_connection,
+            "control",
+            "peer close frame code=1000 reason=android runtime failed".to_string(),
+        )
+        .await
+        .expect("transport close diagnostic");
+
+    assert!(matches!(
+        events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+
+    let debug_events = registry.room_events(invite, 1).await.expect("debug events");
+    let event = debug_events.first().expect("event");
+    assert_eq!(event.kind, "socketTransportClosed");
+    assert!(event.detail.contains("p2"));
+    assert!(event.detail.contains("role=guest"));
+    assert!(event.detail.contains("client=desktop"));
+    assert!(event.detail.contains("reason=peer close frame code=1000"));
+}
+
+#[tokio::test]
 async fn reconnect_with_valid_resume_token_restores_player_slot() {
     let (registry, invite, _host_connection, guest_connection, _host_token, guest_token) =
         reconnectable_room().await;

@@ -10,6 +10,7 @@ use crate::transport::WebSocketInputJoinRequest;
 use crate::transport::websocket_outbound::{
     SocketSender, send_binary_message, send_room_error, send_static_error, send_upgrade_error,
 };
+use crate::transport::websocket_peer_close::{peer_close_detail, peer_error_detail};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
 use futures_util::stream::SplitStream;
@@ -104,8 +105,15 @@ async fn handle_incoming(
         Some(Ok(Message::Binary(payload))) => {
             let batch = match decode_input_frame_batch(&payload) {
                 Ok(batch) => batch,
-                Err(_) => {
+                Err(error) => {
                     services.metrics.record_protocol_error();
+                    record_transport_close(
+                        services,
+                        invite_code,
+                        connection_id,
+                        format!("relay rejected input batch: {error}"),
+                    )
+                    .await;
                     let _ =
                         send_static_error(sender, "invalidInputBatch", "Input batch is invalid.")
                             .await;
@@ -123,14 +131,47 @@ async fn handle_incoming(
                         return true;
                     }
 
+                    record_transport_close(
+                        services,
+                        invite_code,
+                        connection_id,
+                        format!("relay rejected input batch: {error}"),
+                    )
+                    .await;
                     let _ = send_room_error(sender, error).await;
                     false
                 }
             }
         }
-        Some(Ok(Message::Close(_))) | None => false,
+        Some(Ok(Message::Close(frame))) => {
+            record_transport_close(
+                services,
+                invite_code,
+                connection_id,
+                peer_close_detail(frame),
+            )
+            .await;
+            false
+        }
+        None => {
+            record_transport_close(
+                services,
+                invite_code,
+                connection_id,
+                "peer stream ended without close frame".to_string(),
+            )
+            .await;
+            false
+        }
         Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => true,
         Some(Ok(Message::Text(_))) => {
+            record_transport_close(
+                services,
+                invite_code,
+                connection_id,
+                "relay rejected text message on input socket".to_string(),
+            )
+            .await;
             let _ = send_static_error(
                 sender,
                 "unsupportedMessage",
@@ -139,8 +180,29 @@ async fn handle_incoming(
             .await;
             false
         }
-        Some(Err(_)) => false,
+        Some(Err(error)) => {
+            record_transport_close(
+                services,
+                invite_code,
+                connection_id,
+                peer_error_detail(&error),
+            )
+            .await;
+            false
+        }
     }
+}
+
+async fn record_transport_close(
+    services: &AppServices,
+    invite_code: &crate::rooms::InviteCode,
+    connection_id: ConnectionId,
+    reason: String,
+) {
+    let _ = services
+        .rooms
+        .record_transport_close(invite_code.clone(), connection_id, "input", reason)
+        .await;
 }
 
 fn is_droppable_input_error(error: &RoomError) -> bool {

@@ -17,6 +17,7 @@ mod recovery_config;
 mod resume_token;
 mod room;
 mod room_adaptive_input_delay_ops;
+mod room_connection_diagnostics;
 mod room_connection_ops;
 mod room_controller_netplay_ops;
 mod room_debug_event;

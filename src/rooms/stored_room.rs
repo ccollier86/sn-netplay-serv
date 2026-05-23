@@ -149,9 +149,14 @@ impl StoredRoom {
     }
 
     /// Emits the current room view.
-    pub(super) fn emit_state(&mut self, now: Instant, kind: &'static str, detail: &'static str) {
+    pub(super) fn emit_state(&mut self, now: Instant, kind: &str, detail: &str) {
         let room = self.record_event(now, kind, detail);
         let _ = self.events.send(RoomEvent::RoomStateChanged(room));
+    }
+
+    /// Records a debug-only event without broadcasting a room-state update.
+    pub(super) fn record_debug_event(&mut self, now: Instant, kind: &str, detail: &str) {
+        self.record_event(now, kind, detail);
     }
 
     /// Emits a session-start event.
