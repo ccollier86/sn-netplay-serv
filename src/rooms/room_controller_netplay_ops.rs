@@ -40,20 +40,19 @@ impl NetplayRoom {
             return Ok(InputFrameAcceptance::Ignore);
         }
 
+        if input.frame > self.room_frame + limits.max_future_frame_distance {
+            return Err(RoomError::FutureFrameTooLarge);
+        }
+
         let next_frame = self.next_input_frame_for_player(input.player_index);
 
         if input.frame < next_frame {
             return Ok(InputFrameAcceptance::Ignore);
         }
 
-        if input.frame > next_frame {
-            return Err(RoomError::OutOfOrderFrame);
-        }
-
-        if input.frame > self.room_frame + limits.max_future_frame_distance {
-            return Err(RoomError::FutureFrameTooLarge);
-        }
-
+        // Bounded gaps can happen at startup or after resync if a client begins
+        // relaying from its current runtime frame. Peers fill those missing
+        // frames with predicted input, so the relay must not tear down the room.
         self.last_input_frames
             .insert(input.player_index, input.frame);
         self.next_input_frames
