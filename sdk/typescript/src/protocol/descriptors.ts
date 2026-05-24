@@ -1,5 +1,9 @@
 import { netplayProtocolVersion } from "../constants.ts";
-import type { LinkCableTransport, NetplaySessionMode } from "./enums.ts";
+import type {
+  LinkCableTransport,
+  NetplaySessionMode,
+  NetplayVoiceMode,
+} from "./enums.ts";
 import type { RoomView } from "./roomViews.ts";
 
 export interface CreateRoomRequest {
@@ -22,6 +26,7 @@ export interface NetplaySessionDescriptor {
   readonly core: NetplayCoreDescriptor;
   readonly controller: ControllerNetplayDescriptor;
   readonly link?: LinkCableDescriptor | null;
+  readonly voice?: NetplayVoiceDescriptor | null;
 }
 
 export interface NetplayGameDescriptor {
@@ -52,6 +57,11 @@ export interface LinkCableDescriptor {
   readonly runtimeProfile: string;
   readonly maxPlayers: number;
   readonly transport: LinkCableTransport;
+}
+
+export interface NetplayVoiceDescriptor {
+  readonly enabled: boolean;
+  readonly mode: NetplayVoiceMode;
 }
 
 export function createRoomRequest(

@@ -90,6 +90,7 @@ pub async fn handle_websocket_session(
             your_player_index: join.player_index.zero_based(),
             input_socket_token: join.input_socket_token,
             resume_token: join.resume_token,
+            voice: join.voice,
             room: join.room,
         },
     )

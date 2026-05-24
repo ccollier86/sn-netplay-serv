@@ -35,6 +35,8 @@ mod room_registry_trait;
 mod room_state_hash_ops;
 mod room_status;
 mod room_view;
+mod room_voice;
+mod room_voice_ops;
 mod session_pause_state;
 mod snapshot_transfer;
 mod stored_room;
@@ -69,5 +71,7 @@ pub use room_registry_trait::{RoomEventReceiver, RoomInputEventReceiver, RoomReg
 pub(crate) use room_state_hash_ops::StateHashEvaluation;
 pub use room_status::RoomStatus;
 pub use room_view::{PlayerFrameCursorView, PlayerSlotView, RoomFrameClockView, RoomView};
+pub(crate) use room_voice::RoomVoiceState;
+pub use room_voice::{PlayerVoiceJoinGrant, RoomVoiceStatus, RoomVoiceView};
 pub(crate) use session_pause_state::SessionPauseStateTracker;
 pub(crate) use snapshot_transfer::SnapshotTransferState;

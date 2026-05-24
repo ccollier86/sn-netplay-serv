@@ -13,7 +13,8 @@ use crate::protocol::{
 use crate::rooms::{
     AdaptiveInputDelayPolicy, ConnectionId, InviteCode, LinkCableRoomState, PlayerIndex,
     PlayerRole, PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus, ResumeTokenHash,
-    RoomError, RoomId, RoomStatus, RoomView, SessionPauseStateTracker, SnapshotTransferState,
+    RoomError, RoomId, RoomStatus, RoomView, RoomVoiceState, SessionPauseStateTracker,
+    SnapshotTransferState,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
@@ -46,6 +47,7 @@ pub struct NetplayRoom {
     pub(super) input_delay_policy: AdaptiveInputDelayPolicy,
     pub(super) state_hashes: BTreeMap<u64, HashMap<PlayerIndex, String>>,
     pub(super) state_hash_true_mismatch_streak: u8,
+    pub(super) voice: Option<RoomVoiceState>,
 }
 
 impl NetplayRoom {
@@ -118,6 +120,7 @@ impl NetplayRoom {
             input_delay_policy: AdaptiveInputDelayPolicy::new(now),
             state_hashes: BTreeMap::new(),
             state_hash_true_mismatch_streak: 0,
+            voice: None,
         }
     }
 
@@ -134,6 +137,11 @@ impl NetplayRoom {
     /// Returns the current room lifecycle status.
     pub fn status(&self) -> RoomStatus {
         self.status
+    }
+
+    /// Returns the configured player capacity.
+    pub(crate) fn max_players(&self) -> u8 {
+        self.max_players
     }
 
     /// Stores a compatibility fingerprint for the connected player.
@@ -304,6 +312,7 @@ impl NetplayRoom {
             invite_code: self.invite_code.display(),
             protocol: NetplayProtocolView::default(),
             session: self.session.clone(),
+            voice: self.voice.as_ref().map(RoomVoiceState::view),
             max_players: self.max_players,
             pause: self
                 .pause_state

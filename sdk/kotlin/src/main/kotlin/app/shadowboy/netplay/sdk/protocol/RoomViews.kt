@@ -17,11 +17,24 @@ public data class RoomView(
     public val inviteCode: String,
     public val protocol: NetplayProtocolView,
     public val session: NetplaySessionDescriptor,
+    public val voice: RoomVoiceView? = null,
     public val maxPlayers: Int,
     public val pause: SessionPauseView? = null,
     public val frameClock: RoomFrameClockView = RoomFrameClockView(),
     public val status: RoomStatus,
     public val players: List<PlayerSlotView>,
+)
+
+@Serializable
+public data class RoomVoiceView(
+    public val status: RoomVoiceStatus,
+    public val provider: String? = null,
+    public val voiceRoomId: String? = null,
+    public val livekitRoomName: String? = null,
+    public val serverUrl: String? = null,
+    public val mode: NetplayVoiceMode = NetplayVoiceMode.VoiceActivation,
+    public val maxParticipants: Int = 0,
+    public val statusDetail: String? = null,
 )
 
 @Serializable

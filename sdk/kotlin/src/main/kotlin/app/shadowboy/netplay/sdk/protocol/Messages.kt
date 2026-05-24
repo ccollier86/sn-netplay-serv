@@ -137,6 +137,7 @@ public sealed interface ServerMessage {
         public val yourPlayerIndex: Int,
         public val resumeToken: String,
         public val inputSocketToken: String,
+        public val voice: PlayerVoiceJoinGrant? = null,
         public val room: RoomView,
     ) : ServerMessage {
         override val eventSeqOrNull: Long = eventSeq
@@ -390,3 +391,15 @@ public sealed interface ServerMessage {
         override val sessionEpochOrNull: Long? = null
     }
 }
+
+@Serializable
+public data class PlayerVoiceJoinGrant(
+    public val provider: String,
+    public val voiceRoomId: String,
+    public val livekitRoomName: String,
+    public val serverUrl: String,
+    public val participantIdentity: String,
+    public val token: String,
+    public val expiresAt: String,
+    public val mode: NetplayVoiceMode,
+)

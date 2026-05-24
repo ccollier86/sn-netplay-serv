@@ -77,6 +77,9 @@ SB_NETPLAY_RECONNECT_GRACE_SECONDS=90
 SB_NETPLAY_HEARTBEAT_STALE_SECONDS=15
 SB_NETPLAY_HEARTBEAT_DISCONNECT_SECONDS=30
 SB_NETPLAY_ROOM_IDLE_SECONDS=300
+SB_NETPLAY_VOICE_BROKER_URL=https://voice-broker.internal
+SB_NETPLAY_VOICE_BROKER_TOKEN=<netplay-to-voice-service-token>
+SB_NETPLAY_VOICE_BROKER_TIMEOUT_MS=2500
 SB_NETPLAY_TELEMETRY_QUEUE_CAPACITY=20000
 SB_NETPLAY_TELEMETRY_BATCH_SIZE=250
 SB_NETPLAY_TELEMETRY_FLUSH_MS=1000
@@ -89,6 +92,9 @@ SB_NETPLAY_POSTGRES_PERFORMANCE_TABLE=netplay_performance_samples
 `SB_NETPLAY_BIND_ADDR` is optional and defaults to `127.0.0.1:8077`.
 `SB_NETPLAY_DESKTOP_AUTHORIZE_URL` and `SB_NETPLAY_LICENSE_VERIFY_URL` are still
 accepted as legacy fallbacks for the authorization URL.
+Voice chat is optional. If either `SB_NETPLAY_VOICE_BROKER_URL` or
+`SB_NETPLAY_VOICE_BROKER_TOKEN` is absent, room creation still works and
+voice-enabled rooms report voice as unavailable.
 
 For Coolify, set `SB_NETPLAY_BIND_ADDR=0.0.0.0:8077` and let Coolify own the
 public reverse proxy and TLS certificate. Deploy with

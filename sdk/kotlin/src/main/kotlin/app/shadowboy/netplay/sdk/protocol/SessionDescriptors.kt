@@ -28,6 +28,7 @@ public data class NetplaySessionDescriptor(
     public val core: NetplayCoreDescriptor,
     public val controller: ControllerNetplayDescriptor = ControllerNetplayDescriptor(),
     public val link: LinkCableDescriptor? = null,
+    public val voice: NetplayVoiceDescriptor? = null,
 )
 
 @Serializable
@@ -62,6 +63,12 @@ public data class LinkCableDescriptor(
     public val runtimeProfile: String,
     public val maxPlayers: Int = 2,
     public val transport: LinkCableTransport = LinkCableTransport.Relay,
+)
+
+@Serializable
+public data class NetplayVoiceDescriptor(
+    public val enabled: Boolean = false,
+    public val mode: NetplayVoiceMode = NetplayVoiceMode.VoiceActivation,
 )
 
 public fun NetplaySessionDescriptor.validateForRelay() {

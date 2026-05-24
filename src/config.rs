@@ -32,6 +32,8 @@ pub struct ServerConfig {
     pub log: LogConfig,
     /// Optional durable analytics sink.
     pub telemetry: TelemetryConfig,
+    /// Optional trusted voice broker used for LiveKit room orchestration.
+    pub voice: VoiceConfig,
 }
 
 impl ServerConfig {
@@ -81,6 +83,7 @@ impl ServerConfig {
             format: optional_log_format_env("SB_NETPLAY_LOG_FORMAT", LogFormat::Compact)?,
         };
         let telemetry = TelemetryConfig::from_env()?;
+        let voice = VoiceConfig::from_env()?;
 
         Ok(Self {
             bind_addr,
@@ -92,7 +95,72 @@ impl ServerConfig {
             recovery,
             log,
             telemetry,
+            voice,
         })
+    }
+}
+
+/// Optional voice broker integration configuration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VoiceConfig {
+    /// Selected voice broker backend.
+    pub broker: VoiceBrokerConfig,
+}
+
+impl VoiceConfig {
+    fn from_env() -> Result<Self, ConfigError> {
+        let broker_url = optional_env("SB_NETPLAY_VOICE_BROKER_URL")?;
+        let broker_token = optional_env("SB_NETPLAY_VOICE_BROKER_TOKEN")?;
+        let request_timeout =
+            optional_duration_millis_env("SB_NETPLAY_VOICE_BROKER_TIMEOUT_MS", 2500)?;
+
+        let broker = match (broker_url, broker_token) {
+            (None, None) => VoiceBrokerConfig::Disabled,
+            (Some(base_url), Some(bearer_token)) => {
+                VoiceBrokerConfig::Http(HttpVoiceBrokerConfig {
+                    base_url,
+                    bearer_token,
+                    request_timeout,
+                })
+            }
+            (Some(_), None) => {
+                return Err(ConfigError::MissingEnv("SB_NETPLAY_VOICE_BROKER_TOKEN"));
+            }
+            (None, Some(_)) => return Err(ConfigError::MissingEnv("SB_NETPLAY_VOICE_BROKER_URL")),
+        };
+
+        Ok(Self { broker })
+    }
+}
+
+/// Supported voice broker backends.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VoiceBrokerConfig {
+    /// Voice broker integration is disabled.
+    Disabled,
+    /// HTTP broker compatible with `sb-webrtc`.
+    Http(HttpVoiceBrokerConfig),
+}
+
+/// HTTP voice broker configuration.
+#[derive(Clone, Eq, PartialEq)]
+pub struct HttpVoiceBrokerConfig {
+    /// Base URL for the trusted voice broker.
+    pub base_url: String,
+    /// Service bearer token for broker calls.
+    pub bearer_token: String,
+    /// Request timeout for broker calls.
+    pub request_timeout: std::time::Duration,
+}
+
+impl fmt::Debug for HttpVoiceBrokerConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HttpVoiceBrokerConfig")
+            .field("base_url", &self.base_url)
+            .field("bearer_token", &"<redacted>")
+            .field("request_timeout", &self.request_timeout)
+            .finish()
     }
 }
 

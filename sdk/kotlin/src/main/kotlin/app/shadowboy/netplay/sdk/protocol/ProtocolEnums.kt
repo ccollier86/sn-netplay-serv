@@ -28,6 +28,27 @@ public enum class LinkCableTransport {
 }
 
 @Serializable
+public enum class NetplayVoiceMode {
+    @SerialName("voiceActivation")
+    VoiceActivation,
+
+    @SerialName("pushToTalk")
+    PushToTalk,
+
+    @SerialName("mutedOnJoin")
+    MutedOnJoin,
+}
+
+@Serializable
+public enum class RoomVoiceStatus {
+    @SerialName("available")
+    Available,
+
+    @SerialName("unavailable")
+    Unavailable,
+}
+
+@Serializable
 public enum class PlayerRole {
     @SerialName("host")
     Host,

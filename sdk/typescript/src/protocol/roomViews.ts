@@ -5,6 +5,8 @@ import type {
   RoomStatus,
   SessionPauseReason,
   SessionPauseState,
+  NetplayVoiceMode,
+  RoomVoiceStatus,
 } from "./enums.ts";
 import type { NetplaySessionDescriptor } from "./descriptors.ts";
 import type { InputDelayChange } from "./inputDelay.ts";
@@ -22,11 +24,23 @@ export interface RoomView {
   readonly inviteCode: string;
   readonly protocol: NetplayProtocolView;
   readonly session: NetplaySessionDescriptor;
+  readonly voice?: RoomVoiceView | null;
   readonly maxPlayers: number;
   readonly pause: SessionPauseView | null;
   readonly frameClock: RoomFrameClockView;
   readonly status: RoomStatus;
   readonly players: readonly PlayerSlotView[];
+}
+
+export interface RoomVoiceView {
+  readonly status: RoomVoiceStatus;
+  readonly provider?: string | null;
+  readonly voiceRoomId?: string | null;
+  readonly livekitRoomName?: string | null;
+  readonly serverUrl?: string | null;
+  readonly mode: NetplayVoiceMode;
+  readonly maxParticipants: number;
+  readonly statusDetail?: string | null;
 }
 
 export interface RoomFrameClockView {

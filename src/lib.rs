@@ -14,3 +14,4 @@ pub mod protocol;
 pub mod rate_limit;
 pub mod rooms;
 pub mod transport;
+pub mod voice;

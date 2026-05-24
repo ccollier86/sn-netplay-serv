@@ -5,7 +5,7 @@
 //! `protocol`.
 
 use sb_netplay_serv::auth::HttpLicenseAuthority;
-use sb_netplay_serv::config::ServerConfig;
+use sb_netplay_serv::config::{ServerConfig, VoiceBrokerConfig};
 use sb_netplay_serv::http::{AdminAuthorizer, AppServices, build_router};
 use sb_netplay_serv::observability::{
     InMemoryMetrics, ensure_telemetry_schema, init_tracing, spawn_telemetry_sink,
@@ -15,6 +15,7 @@ use sb_netplay_serv::rooms::{
     InMemoryRoomRegistry, UuidInviteCodeGenerator, spawn_room_expiration_task,
     spawn_room_frame_clock_task,
 };
+use sb_netplay_serv::voice::{DisabledVoiceBroker, HttpVoiceBroker, VoiceBroker};
 use std::sync::Arc;
 use tracing::info;
 
@@ -31,13 +32,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let metrics = Arc::new(InMemoryMetrics::new());
     let (event_sink, _telemetry_task) =
         spawn_telemetry_sink(config.telemetry.clone(), metrics.clone());
-    let rooms = Arc::new(InMemoryRoomRegistry::with_dependencies_and_event_sink(
-        Arc::new(UuidInviteCodeGenerator),
-        Arc::new(sb_netplay_serv::rooms::UuidResumeTokenGenerator),
-        Arc::new(sb_netplay_serv::rooms::SystemClock),
-        config.recovery,
-        event_sink,
-    ));
+    let voice_broker: Arc<dyn VoiceBroker> = match config.voice.broker.clone() {
+        VoiceBrokerConfig::Disabled => Arc::new(DisabledVoiceBroker),
+        VoiceBrokerConfig::Http(voice) => Arc::new(HttpVoiceBroker::new(
+            voice.base_url,
+            voice.bearer_token,
+            voice.request_timeout,
+        )?),
+    };
+    let rooms = Arc::new(
+        InMemoryRoomRegistry::with_dependencies_event_sink_and_voice(
+            Arc::new(UuidInviteCodeGenerator),
+            Arc::new(sb_netplay_serv::rooms::UuidResumeTokenGenerator),
+            Arc::new(sb_netplay_serv::rooms::SystemClock),
+            config.recovery,
+            event_sink,
+            voice_broker,
+        ),
+    );
     let rate_limiter = Arc::new(InMemoryRateLimiter::new(config.rate_limits));
     let admin_authorizer = AdminAuthorizer::new(config.admin_token.clone());
     let _room_expiration_task = spawn_room_expiration_task(rooms.clone());

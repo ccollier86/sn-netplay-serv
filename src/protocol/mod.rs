@@ -24,6 +24,7 @@ mod session_mode;
 mod session_pause;
 mod snapshot;
 mod state_hash;
+mod voice_descriptor;
 
 pub use client_kind::NetplayClientKind;
 pub use client_message::ClientMessage;
@@ -60,3 +61,4 @@ pub use snapshot::{SnapshotChunk, SnapshotLimits, SnapshotManifest};
 pub use state_hash::{
     NearbyStateHashMatchView, PlayerStateHashView, StateHashMismatchView, StateHashReport,
 };
+pub use voice_descriptor::{NetplayVoiceDescriptor, NetplayVoiceMode};

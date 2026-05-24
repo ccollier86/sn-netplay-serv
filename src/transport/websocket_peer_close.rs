@@ -26,9 +26,7 @@ pub(super) fn peer_error_detail(error: &axum::Error) -> String {
 
 fn sanitize_reason(reason: &str) -> String {
     let compact = reason
-        .replace('\n', " ")
-        .replace('\r', " ")
-        .replace('\t', " ")
+        .replace(['\n', '\r', '\t'], " ")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");

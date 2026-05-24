@@ -2,6 +2,7 @@ import type { CompatibilityFingerprint, LinkCableCompatibility } from "./compati
 import type { ClientRuntimeState, SessionPauseReason } from "./enums.ts";
 import type { InputDelayChange } from "./inputDelay.ts";
 import type { RoomView, SessionPauseView } from "./roomViews.ts";
+import type { NetplayVoiceMode } from "./enums.ts";
 import type { ClientNetworkQualityReport } from "./networkQuality.ts";
 import type {
   InputFrame,
@@ -56,6 +57,7 @@ export type ServerMessage =
       readonly yourPlayerIndex: number;
       readonly resumeToken: string;
       readonly inputSocketToken: string;
+      readonly voice?: PlayerVoiceJoinGrant | null;
       readonly room: RoomView;
     }
   | RoomEpochMessage<"roomStateChanged"> & { readonly room: RoomView }
@@ -113,4 +115,15 @@ export interface EpochMessage<TType extends string> {
 
 export interface RoomEpochMessage<TType extends string> extends EpochMessage<TType> {
   readonly eventSeq: number;
+}
+
+export interface PlayerVoiceJoinGrant {
+  readonly provider: string;
+  readonly voiceRoomId: string;
+  readonly livekitRoomName: string;
+  readonly serverUrl: string;
+  readonly participantIdentity: string;
+  readonly token: string;
+  readonly expiresAt: string;
+  readonly mode: NetplayVoiceMode;
 }

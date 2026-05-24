@@ -3,7 +3,7 @@
 //! These values are transport-neutral. WebSocket sessions decide how to encode
 //! them into protocol messages.
 
-use crate::rooms::{PlayerIndex, RoomView};
+use crate::rooms::{PlayerIndex, PlayerVoiceJoinGrant, RoomView};
 
 /// Result returned when a socket joins or rejoins a room.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -14,6 +14,8 @@ pub struct RoomJoin {
     pub resume_token: String,
     /// Opaque token used to attach the binary input socket.
     pub input_socket_token: String,
+    /// Optional player-specific voice grant. Never broadcast this in room views.
+    pub voice: Option<PlayerVoiceJoinGrant>,
     /// Room state immediately after the join.
     pub room: RoomView,
 }

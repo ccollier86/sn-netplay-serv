@@ -9,7 +9,8 @@ use crate::protocol::descriptor_validation::{
     validate_sha256, validate_title,
 };
 use crate::protocol::{
-    LinkCableDescriptor, NetplayClientKind, NetplaySessionMode, SessionDescriptorError,
+    LinkCableDescriptor, NetplayClientKind, NetplaySessionMode, NetplayVoiceDescriptor,
+    SessionDescriptorError,
 };
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +41,9 @@ pub struct NetplaySessionDescriptor {
     /// Link-cable compatibility details for `linkCable` rooms.
     #[serde(default)]
     pub link: Option<LinkCableDescriptor>,
+    /// Optional voice-chat setup requested by the host.
+    #[serde(default)]
+    pub voice: Option<NetplayVoiceDescriptor>,
 }
 
 impl NetplaySessionDescriptor {
@@ -406,6 +410,10 @@ mod tests {
             },
             "controller": {
                 "inputDelayFrames": 3
+            },
+            "voice": {
+                "enabled": true,
+                "mode": "voiceActivation"
             },
             "core": {
                 "coreId": "dolphin",

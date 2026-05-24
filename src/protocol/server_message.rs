@@ -7,7 +7,7 @@ use crate::protocol::{
     InputDelayChange, InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk,
     SnapshotManifest, StateHashMismatchView,
 };
-use crate::rooms::RoomView;
+use crate::rooms::{PlayerVoiceJoinGrant, RoomView};
 use serde::Serialize;
 
 /// Message sent by the relay over a room WebSocket.
@@ -32,6 +32,8 @@ pub enum ServerMessage {
         resume_token: String,
         /// Opaque token this player uses to attach the binary input socket.
         input_socket_token: String,
+        /// Optional player-specific voice grant.
+        voice: Option<PlayerVoiceJoinGrant>,
         /// Current room state.
         room: RoomView,
     },

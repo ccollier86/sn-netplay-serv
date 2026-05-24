@@ -6,7 +6,7 @@
 use crate::protocol::{
     InputDelayChange, NetplayProtocolView, NetplaySessionDescriptor, SessionPauseView,
 };
-use crate::rooms::{PlayerRole, PlayerStatus, RoomId, RoomStatus};
+use crate::rooms::{PlayerRole, PlayerStatus, RoomId, RoomStatus, RoomVoiceView};
 use serde::Serialize;
 
 /// Serializable room state view.
@@ -27,6 +27,8 @@ pub struct RoomView {
     pub protocol: NetplayProtocolView,
     /// Game/core session descriptor used for local ROM matching.
     pub session: NetplaySessionDescriptor,
+    /// Shared voice-chat metadata, if the host requested voice for this room.
+    pub voice: Option<RoomVoiceView>,
     /// Configured room capacity.
     pub max_players: u8,
     /// Active coordinated pause details, if any.

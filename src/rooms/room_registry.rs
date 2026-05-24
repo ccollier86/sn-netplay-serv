@@ -16,6 +16,7 @@ use crate::rooms::{
     RoomEventReceiver, RoomJoin, RoomPerformanceSample, RoomRecoveryConfig, RoomRegistry,
     RoomRegistrySnapshot, RoomView, SystemClock, UuidResumeTokenGenerator,
 };
+use crate::voice::{DisabledVoiceBroker, VoiceBroker};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -29,6 +30,8 @@ mod query_ops;
 mod relay_ops;
 #[path = "room_registry_sync_ops.rs"]
 mod sync_ops;
+#[path = "room_registry_voice_ops.rs"]
+mod voice_ops;
 
 /// Thread-safe in-memory room registry.
 pub struct InMemoryRoomRegistry {
@@ -39,6 +42,7 @@ pub struct InMemoryRoomRegistry {
     recovery_config: RoomRecoveryConfig,
     recent_events: Mutex<RoomDebugEventLog>,
     event_sink: Arc<dyn RoomDebugEventSink>,
+    voice_broker: Arc<dyn VoiceBroker>,
 }
 
 impl InMemoryRoomRegistry {
@@ -76,6 +80,25 @@ impl InMemoryRoomRegistry {
         recovery_config: RoomRecoveryConfig,
         event_sink: Arc<dyn RoomDebugEventSink>,
     ) -> Self {
+        Self::with_dependencies_event_sink_and_voice(
+            invite_code_generator,
+            resume_token_generator,
+            clock,
+            recovery_config,
+            event_sink,
+            Arc::new(DisabledVoiceBroker),
+        )
+    }
+
+    /// Creates a registry with event and voice broker dependencies.
+    pub fn with_dependencies_event_sink_and_voice(
+        invite_code_generator: Arc<dyn InviteCodeGenerator>,
+        resume_token_generator: Arc<dyn ResumeTokenGenerator>,
+        clock: Arc<dyn Clock>,
+        recovery_config: RoomRecoveryConfig,
+        event_sink: Arc<dyn RoomDebugEventSink>,
+        voice_broker: Arc<dyn VoiceBroker>,
+    ) -> Self {
         Self {
             invite_codes: RwLock::new(HashMap::new()),
             invite_code_generator,
@@ -84,6 +107,7 @@ impl InMemoryRoomRegistry {
             recovery_config,
             recent_events: Mutex::new(RoomDebugEventLog::default()),
             event_sink,
+            voice_broker,
         }
     }
 
@@ -455,3 +479,7 @@ mod room_registry_link_tests;
 #[cfg(test)]
 #[path = "room_registry_tests.rs"]
 mod room_registry_tests;
+
+#[cfg(test)]
+#[path = "room_registry_voice_tests.rs"]
+mod room_registry_voice_tests;

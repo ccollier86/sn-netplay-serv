@@ -2,6 +2,13 @@ export type NetplaySessionMode = "controllerNetplay" | "linkCable";
 
 export type LinkCableTransport = "relay";
 
+export type NetplayVoiceMode =
+  | "voiceActivation"
+  | "pushToTalk"
+  | "mutedOnJoin";
+
+export type RoomVoiceStatus = "available" | "unavailable";
+
 export type PlayerRole = "host" | "guest";
 
 export type PlayerStatus =

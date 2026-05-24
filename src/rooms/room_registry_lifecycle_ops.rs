@@ -26,7 +26,7 @@ impl InMemoryRoomRegistry {
         let resume_token = self.resume_token_generator.generate();
         let input_socket_token = self.resume_token_generator.generate();
         let now = self.clock.now();
-        let room = NetplayRoom::new_with_resume(
+        let mut room = NetplayRoom::new_with_resume(
             host,
             host_connection,
             invite_code.clone(),
@@ -35,6 +35,9 @@ impl InMemoryRoomRegistry {
             input_socket_token.hash(),
             now,
         );
+        if let Some(voice) = self.create_voice_state_for_room(&room).await {
+            room.set_voice_state(voice);
+        }
         let view = room.view_for_event(0, now);
 
         self.invite_codes
@@ -103,6 +106,7 @@ impl InMemoryRoomRegistry {
             input_socket_token: input_socket_token.expose().to_string(),
             player_index,
             resume_token: resume_token.expose().to_string(),
+            voice: stored_room.room.voice_grant_for(player_index),
             room,
         })
     }
@@ -137,6 +141,7 @@ impl InMemoryRoomRegistry {
             input_socket_token: input_socket_token.expose().to_string(),
             player_index,
             resume_token: resume_token.expose().to_string(),
+            voice: stored_room.room.voice_grant_for(player_index),
             room,
         })
     }
@@ -172,6 +177,7 @@ impl InMemoryRoomRegistry {
             input_socket_token: input_socket_token.expose().to_string(),
             player_index,
             resume_token,
+            voice: stored_room.room.voice_grant_for(player_index),
             room,
         })
     }
@@ -199,9 +205,17 @@ impl InMemoryRoomRegistry {
         let room = stored_room.view(now);
         self.record_recent_events(stored_room.debug_events(1));
 
+        let voice_cleanup = if closed {
+            stored_room.room.voice_room_id_for_cleanup()
+        } else {
+            None
+        };
+
         if closed {
             rooms.remove(&normalized);
         }
+        drop(rooms);
+        self.cleanup_voice_room(voice_cleanup, "netplay-room-closed");
 
         Ok(room)
     }
@@ -257,8 +271,11 @@ impl InMemoryRoomRegistry {
             player_index.zero_based(),
             normalize_exit_reason(reason),
         );
+        let voice_cleanup = stored_room.room.take_voice_room_id_for_cleanup();
         let room = stored_room.view(now);
         self.record_recent_events(stored_room.debug_events(1));
+        drop(rooms);
+        self.cleanup_voice_room(voice_cleanup, "player-exited");
 
         Ok(room)
     }
@@ -344,15 +361,27 @@ impl InMemoryRoomRegistry {
             }
         }
 
-        let before_count = rooms.len();
-        rooms.retain(|_, stored_room| {
-            !stored_room.is_expired_waiting(now, join_timeout)
-                && !stored_room.is_expired_recovery(now)
-                && !stored_room.is_idle_disconnected(now, self.recovery_config.room_idle)
-        });
-        let removed_count = before_count.saturating_sub(rooms.len());
+        let expired_keys = rooms
+            .iter()
+            .filter_map(|(key, stored_room)| {
+                let expired = stored_room.is_expired_waiting(now, join_timeout)
+                    || stored_room.is_expired_recovery(now)
+                    || stored_room.is_idle_disconnected(now, self.recovery_config.room_idle);
+                expired.then_some(key.clone())
+            })
+            .collect::<Vec<_>>();
+        let mut voice_cleanup = Vec::new();
+        for key in &expired_keys {
+            if let Some(mut stored_room) = rooms.remove(key) {
+                voice_cleanup.push(stored_room.room.take_voice_room_id_for_cleanup());
+            }
+        }
+        let removed_count = expired_keys.len();
         drop(rooms);
         self.record_recent_events(lifecycle_events);
+        for voice_room_id in voice_cleanup {
+            self.cleanup_voice_room(voice_room_id, "room-expired");
+        }
 
         removed_count
     }
