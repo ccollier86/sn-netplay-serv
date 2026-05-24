@@ -7,6 +7,11 @@ import { HeartbeatTracker, type HeartbeatHealth } from "./heartbeat.ts";
 import { PauseCoordinator } from "./pause.ts";
 import { ReconnectTokenStore } from "./reconnect.ts";
 import { ResyncCoordinator, type NetplayResyncState } from "./resync.ts";
+import {
+  NetplayVoiceGrantTracker,
+  type NetplayVoiceDiagnostics,
+  type NetplayVoiceGrantState,
+} from "./voiceGrant.ts";
 
 export interface NetplayClientState {
   readonly room: RoomView | null;
@@ -16,6 +21,7 @@ export interface NetplayClientState {
   readonly sessionEpoch: number;
   readonly resync: NetplayResyncState | null;
   readonly runtimeResetRequired: boolean;
+  readonly voice: NetplayVoiceGrantState;
   readonly lastError: Extract<NetplayCloseReason, { readonly kind: "relayError" }> | null;
 }
 
@@ -37,6 +43,7 @@ export interface NetplayClientDiagnostics {
   readonly resync: NetplayResyncState | null;
   readonly roomEpoch: number;
   readonly sessionEpoch: number;
+  readonly voice: NetplayVoiceDiagnostics;
 }
 
 export class RoomStateMachine {
@@ -45,6 +52,7 @@ export class RoomStateMachine {
   public readonly pause: PauseCoordinator;
   public readonly reconnectTokens: ReconnectTokenStore;
   public readonly resync: ResyncCoordinator;
+  public readonly voice: NetplayVoiceGrantTracker;
   public state: NetplayClientState = initialClientState();
 
   public constructor({
@@ -53,18 +61,21 @@ export class RoomStateMachine {
     pause = new PauseCoordinator(),
     reconnectTokens = new ReconnectTokenStore(),
     resync = new ResyncCoordinator(),
+    voice = new NetplayVoiceGrantTracker(),
   }: {
     readonly heartbeat?: HeartbeatTracker;
     readonly frameClock?: FrameClockTracker;
     readonly pause?: PauseCoordinator;
     readonly reconnectTokens?: ReconnectTokenStore;
     readonly resync?: ResyncCoordinator;
+    readonly voice?: NetplayVoiceGrantTracker;
   } = {}) {
     this.heartbeat = heartbeat;
     this.frameClock = frameClock;
     this.pause = pause;
     this.reconnectTokens = reconnectTokens;
     this.resync = resync;
+    this.voice = voice;
   }
 
   public apply(message: ServerMessage): NetplayClientState {
@@ -75,6 +86,7 @@ export class RoomStateMachine {
     switch (message.type) {
       case "roomJoined":
         this.reconnectTokens.applyRoomJoined(message);
+        this.voice.applyMessage(message);
         this.updateRoom(message.room, message.yourPlayerIndex);
         break;
       case "roomStateChanged":
@@ -109,6 +121,7 @@ export class RoomStateMachine {
         break;
       case "heartbeatAck":
       case "voiceTokenRefreshed":
+        this.voice.applyMessage(message);
         this.updateEpochs(message.eventSeq, message.roomEpoch, message.sessionEpoch);
         break;
       case "serverFrame":
@@ -141,6 +154,7 @@ export class RoomStateMachine {
     this.pause.reset();
     this.frameClock.reset();
     this.reconnectTokens.clear();
+    this.voice.reset();
     this.resync.reset();
     this.state = initialClientState();
   }
@@ -219,6 +233,7 @@ export class RoomStateMachine {
       resync: this.resync.currentResync,
       roomEpoch: this.state.roomEpoch,
       sessionEpoch: this.state.sessionEpoch,
+      voice: this.voice.diagnostics(),
     };
   }
 
@@ -229,6 +244,7 @@ export class RoomStateMachine {
     }
 
     this.reconnectTokens.updateAcceptedEpoch(room.roomEpoch);
+    this.voice.applyRoom(room);
     this.frameClock.applyRoom(room);
     this.state = {
       assignedPlayerIndex,
@@ -239,6 +255,7 @@ export class RoomStateMachine {
       roomEpoch: room.roomEpoch,
       runtimeResetRequired: this.state.runtimeResetRequired || sessionChanged,
       sessionEpoch: room.sessionEpoch,
+      voice: this.voice.state,
     };
   }
 
@@ -251,6 +268,7 @@ export class RoomStateMachine {
       runtimeResetRequired: this.state.runtimeResetRequired ||
         (this.state.sessionEpoch !== 0 && sessionEpoch > this.state.sessionEpoch),
       sessionEpoch,
+      voice: this.voice.state,
     };
   }
 
@@ -274,5 +292,14 @@ export function initialClientState(): NetplayClientState {
     roomEpoch: 0,
     runtimeResetRequired: false,
     sessionEpoch: 0,
+    voice: initialNetplayVoiceGrantState(),
+  };
+}
+
+function initialNetplayVoiceGrantState(): NetplayVoiceGrantState {
+  return {
+    privateGrant: null,
+    refreshedAtEventSeq: null,
+    roomAvailable: false,
   };
 }

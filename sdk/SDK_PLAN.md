@@ -22,6 +22,9 @@ hand-writing relay calls.
 - Room/player state machine driven only by relay messages.
 - Controller and link-cable session descriptors.
 - Compatibility fingerprints and link-cable compatibility values.
+- Voice room descriptors, private voice grant tracking, token-safe diagnostics,
+  and `refreshVoiceToken` message support. Media transport remains in the
+  standalone voice SDK/LiveKit adapter.
 - Stable app-level close/error reasons.
 
 ## Non-Scope

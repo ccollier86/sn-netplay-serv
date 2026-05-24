@@ -19,5 +19,6 @@ export * from "./state/resync.ts";
 export * from "./state/roomStateMachine.ts";
 export * from "./state/runtimeTelemetry.ts";
 export * from "./state/stateHash.ts";
+export * from "./state/voiceGrant.ts";
 export * from "./transport/http.ts";
 export * from "./transport/webSocket.ts";

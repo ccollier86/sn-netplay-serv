@@ -11,6 +11,7 @@ public data class NetplayClientState(
     public val sessionEpoch: Long = 0,
     public val resync: NetplayResyncState? = null,
     public val runtimeResetRequired: Boolean = false,
+    public val voice: NetplayVoiceGrantState = NetplayVoiceGrantState(),
     public val lastError: NetplayCloseReason.RelayError? = null,
 )
 
@@ -33,6 +34,7 @@ public data class NetplayClientDiagnostics(
     public val resync: NetplayResyncState?,
     public val roomEpoch: Long,
     public val sessionEpoch: Long,
+    public val voice: NetplayVoiceDiagnostics,
 )
 
 public class RoomStateMachine(
@@ -41,6 +43,7 @@ public class RoomStateMachine(
     public val heartbeat: HeartbeatTracker = HeartbeatTracker(),
     public val frameClock: FrameClockTracker = FrameClockTracker(),
     public val resync: ResyncCoordinator = ResyncCoordinator(),
+    public val voice: NetplayVoiceGrantTracker = NetplayVoiceGrantTracker(),
 ) {
     public var state: NetplayClientState = NetplayClientState()
         private set
@@ -53,6 +56,7 @@ public class RoomStateMachine(
         when (message) {
             is ServerMessage.RoomJoined -> {
                 reconnectTokens.apply(message)
+                voice.applyMessage(message)
                 updateRoom(message.room, message.yourPlayerIndex)
             }
             is ServerMessage.RoomStateChanged -> updateRoom(message.room)
@@ -93,11 +97,14 @@ public class RoomStateMachine(
                 roomEpoch = message.roomEpoch,
                 sessionEpoch = message.sessionEpoch,
             )
-            is ServerMessage.VoiceTokenRefreshed -> updateEpochs(
-                eventSeq = message.eventSeq,
-                roomEpoch = message.roomEpoch,
-                sessionEpoch = message.sessionEpoch,
-            )
+            is ServerMessage.VoiceTokenRefreshed -> {
+                voice.applyMessage(message)
+                updateEpochs(
+                    eventSeq = message.eventSeq,
+                    roomEpoch = message.roomEpoch,
+                    sessionEpoch = message.sessionEpoch,
+                )
+            }
             is ServerMessage.Error -> {
                 state = state.copy(lastError = NetplayCloseReason.RelayError(message.code, message.message))
             }
@@ -195,6 +202,7 @@ public class RoomStateMachine(
             resync = resync.currentResync,
             roomEpoch = state.roomEpoch,
             sessionEpoch = state.sessionEpoch,
+            voice = voice.diagnostics(),
         )
 
     public fun reset() {
@@ -202,6 +210,7 @@ public class RoomStateMachine(
         pause.reset()
         frameClock.reset()
         resync.reset()
+        voice.reset()
         state = NetplayClientState()
     }
 
@@ -212,6 +221,7 @@ public class RoomStateMachine(
         }
 
         reconnectTokens.updateAcceptedEpoch(room.roomEpoch)
+        voice.applyRoom(room)
         frameClock.applyRoom(room)
         state = state.copy(
             room = room,
@@ -221,6 +231,7 @@ public class RoomStateMachine(
             sessionEpoch = room.sessionEpoch,
             resync = resync.currentResync,
             runtimeResetRequired = state.runtimeResetRequired || sessionChanged,
+            voice = voice.state,
             lastError = null,
         )
     }
@@ -231,6 +242,7 @@ public class RoomStateMachine(
             latestEventSeq = eventSeq,
             roomEpoch = roomEpoch,
             sessionEpoch = sessionEpoch,
+            voice = voice.state,
             runtimeResetRequired = state.runtimeResetRequired ||
                 (state.sessionEpoch != 0L && sessionEpoch > state.sessionEpoch),
         )
