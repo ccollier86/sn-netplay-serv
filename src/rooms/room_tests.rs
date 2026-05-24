@@ -413,18 +413,49 @@ fn duplicate_and_old_frames_are_ignored() {
 }
 
 #[test]
-fn skipped_future_frame_is_rejected_as_out_of_order() {
+fn bounded_startup_input_gap_is_accepted() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = ready_room(host_connection, guest_connection);
 
-    let result = room.accept_input_frame(
+    let accepted = room.accept_input_frame(
         host_connection,
         &input(PlayerIndex::ONE, 2),
         InputFrameLimits::default(),
     );
+    let skipped = room.accept_input_frame(
+        host_connection,
+        &input(PlayerIndex::ONE, 1),
+        InputFrameLimits::default(),
+    );
 
-    assert!(matches!(result, Err(RoomError::OutOfOrderFrame)));
+    assert!(matches!(accepted, Ok(InputFrameAcceptance::Relay)));
+    assert!(matches!(skipped, Ok(InputFrameAcceptance::Ignore)));
+}
+
+#[test]
+fn startup_input_gap_releases_missing_server_frames() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_room(host_connection, guest_connection);
+
+    room.accept_input_frame(
+        host_connection,
+        &input(PlayerIndex::ONE, 2),
+        InputFrameLimits::default(),
+    )
+    .expect("startup input gap");
+
+    let released = (0..3)
+        .map(|_| {
+            room.release_next_server_frame()
+                .expect("server frame should release")
+                .frame
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(released, vec![0, 1, 2]);
+    assert!(room.release_next_server_frame().is_none());
 }
 
 #[test]
