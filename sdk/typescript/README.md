@@ -17,6 +17,9 @@ transport adapters, protected request signing, emulator integration, and UI.
   frame, latency, jitter, stall, catch-up, late-input, and audio-underrun data.
 - `StateHashReporter` owns report cadence, SHA-256 normalization, and duplicate
   frame suppression.
+- Voice DTOs cover optional LiveKit grants. Apps receive a private grant on
+  `roomJoined`, request renewal with `refreshVoiceToken`, and replace the local
+  LiveKit token when `voiceTokenRefreshed` arrives.
 
 Apps still own emulator-specific work: pausing the core, serializing/loading
 save states, computing state hashes, and displaying progress.

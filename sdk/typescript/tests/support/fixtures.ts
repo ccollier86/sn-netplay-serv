@@ -23,6 +23,7 @@ export function sessionDescriptor(): NetplaySessionDescriptor {
       systemId: "snes",
       title: "Test Game",
     },
+    hostClientKind: "desktop",
     hostAppVersion: "0.2.16",
     mode: "controllerNetplay",
   };

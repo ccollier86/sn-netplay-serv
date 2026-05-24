@@ -4,7 +4,10 @@
 //! diluting the core room lifecycle state machine.
 
 use crate::protocol::NetplayVoiceMode;
-use crate::rooms::{NetplayRoom, PlayerIndex, PlayerVoiceJoinGrant, RoomVoiceState};
+use crate::rooms::{
+    ConnectionId, NetplayRoom, PlayerIndex, PlayerVoiceJoinGrant, RoomError, RoomVoiceState,
+    RoomVoiceTokenRefreshRequest,
+};
 
 impl NetplayRoom {
     /// Returns whether this room requested voice chat at creation time.
@@ -37,6 +40,45 @@ impl NetplayRoom {
         self.voice
             .as_ref()
             .and_then(|voice| voice.grant_for(player_index))
+    }
+
+    /// Builds a broker request for refreshing this connection's voice token.
+    pub(crate) fn voice_token_refresh_request(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Result<RoomVoiceTokenRefreshRequest, RoomError> {
+        let player_index = self
+            .player_index_for_connection(connection_id)
+            .ok_or(RoomError::UnknownConnection)?;
+        let grant = self
+            .voice_grant_for(player_index)
+            .ok_or(RoomError::VoiceUnavailable)?;
+
+        Ok(RoomVoiceTokenRefreshRequest {
+            voice_room_id: grant.voice_room_id,
+            player_index,
+            participant_identity: grant.participant_identity,
+            display_name: format!("Player {}", player_index.display_number()),
+        })
+    }
+
+    /// Stores a freshly issued token for this connection's voice participant.
+    pub(crate) fn refresh_voice_grant(
+        &mut self,
+        connection_id: ConnectionId,
+        participant_identity: String,
+        token: String,
+        expires_at: String,
+    ) -> Result<PlayerVoiceJoinGrant, RoomError> {
+        let player_index = self
+            .player_index_for_connection(connection_id)
+            .ok_or(RoomError::UnknownConnection)?;
+        self.voice
+            .as_mut()
+            .and_then(|voice| {
+                voice.refresh_grant(player_index, participant_identity, token, expires_at)
+            })
+            .ok_or(RoomError::VoiceUnavailable)
     }
 
     /// Returns the voice broker room id that should be cleaned up.

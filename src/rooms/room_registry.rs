@@ -257,6 +257,15 @@ impl RoomRegistry for InMemoryRoomRegistry {
             .await
     }
 
+    async fn refresh_voice_token(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<crate::rooms::RoomVoiceTokenRefresh, RoomError> {
+        self.refresh_voice_token_impl(invite_code, connection_id)
+            .await
+    }
+
     async fn connect_input_socket(
         &self,
         invite_code: InviteCode,

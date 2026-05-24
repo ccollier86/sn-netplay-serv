@@ -50,6 +50,7 @@ export type ClientMessage =
       readonly sequence: number;
     }
   | EpochMessage<"playerExited"> & { readonly reason: string }
+  | EpochMessage<"refreshVoiceToken">
   | EpochMessage<"stateHash"> & { readonly report: StateHashReport };
 
 export type ServerMessage =
@@ -94,6 +95,9 @@ export type ServerMessage =
       readonly playerIndex: number;
       readonly reason: string;
       readonly room: RoomView;
+    }
+  | RoomEpochMessage<"voiceTokenRefreshed"> & {
+      readonly voice: PlayerVoiceJoinGrant;
     }
   | RoomEpochMessage<"recoveryResyncRequired"> & { readonly room: RoomView }
   | RoomEpochMessage<"stateHashMismatch"> & {

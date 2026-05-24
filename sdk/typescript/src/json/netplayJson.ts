@@ -16,6 +16,7 @@ const serverMessageTypes = new Set([
   "recoveryStarted",
   "playerReconnected",
   "playerExited",
+  "voiceTokenRefreshed",
   "recoveryResyncRequired",
   "serverFrame",
   "stateHashMismatch",

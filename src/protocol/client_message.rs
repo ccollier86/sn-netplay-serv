@@ -146,6 +146,13 @@ pub enum ClientMessage {
         /// Short client-provided reason for diagnostics and peer UI.
         reason: String,
     },
+    /// Client requests a fresh private voice-room token.
+    RefreshVoiceToken {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+    },
     /// Low-frequency deterministic state hash for desync detection.
     StateHash {
         /// Current room epoch observed by the client.

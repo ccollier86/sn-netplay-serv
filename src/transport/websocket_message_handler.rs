@@ -10,6 +10,7 @@ use crate::rooms::{ConnectionId, InviteCode, RoomError};
 use crate::transport::websocket_outbound::{
     SocketSender, send_room_error, send_server_message, send_static_error,
 };
+use crate::transport::websocket_voice_handler::handle_refresh_voice_token;
 
 /// Parses and applies one client text message.
 pub async fn handle_client_text(
@@ -330,6 +331,17 @@ async fn handle_client_message(
                     .map(|_| ()),
             )
             .await
+        }
+        ClientMessage::RefreshVoiceToken {
+            room_epoch,
+            session_epoch,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            handle_refresh_voice_token(sender, services, invite_code, connection_id).await
         }
         ClientMessage::StateHash {
             room_epoch,

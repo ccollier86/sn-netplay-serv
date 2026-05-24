@@ -114,6 +114,13 @@ public sealed interface ClientMessage {
     ) : ClientMessage
 
     @Serializable
+    @SerialName("refreshVoiceToken")
+    public data class RefreshVoiceToken(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+    ) : ClientMessage
+
+    @Serializable
     @SerialName("stateHash")
     public data class StateHash(
         public val roomEpoch: Long,
@@ -207,6 +214,19 @@ public sealed interface ServerMessage {
         public val playerIndex: Int,
         public val reason: String,
         public val room: RoomView,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long = eventSeq
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("voiceTokenRefreshed")
+    public data class VoiceTokenRefreshed(
+        public val eventSeq: Long,
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val voice: PlayerVoiceJoinGrant,
     ) : ServerMessage {
         override val eventSeqOrNull: Long = eventSeq
         override val roomEpochOrNull: Long = roomEpoch

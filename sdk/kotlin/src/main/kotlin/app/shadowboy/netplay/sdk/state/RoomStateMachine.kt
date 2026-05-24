@@ -93,6 +93,11 @@ public class RoomStateMachine(
                 roomEpoch = message.roomEpoch,
                 sessionEpoch = message.sessionEpoch,
             )
+            is ServerMessage.VoiceTokenRefreshed -> updateEpochs(
+                eventSeq = message.eventSeq,
+                roomEpoch = message.roomEpoch,
+                sessionEpoch = message.sessionEpoch,
+            )
             is ServerMessage.Error -> {
                 state = state.copy(lastError = NetplayCloseReason.RelayError(message.code, message.message))
             }

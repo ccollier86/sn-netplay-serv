@@ -103,6 +103,45 @@ class ProtocolCodecTest {
     }
 
     @Test
+    fun `round trips voice token refresh messages`() {
+        val payload = NetplayJson.encodeClientMessage(
+            ClientMessage.RefreshVoiceToken(
+                roomEpoch = 4,
+                sessionEpoch = 7,
+            ),
+        )
+        val json = NetplayJson.format.parseToJsonElement(payload).jsonObject
+
+        assertEquals("refreshVoiceToken", json.string("type"))
+        assertEquals("4", json["roomEpoch"]?.jsonPrimitive?.content)
+
+        val message = NetplayJson.decodeServerMessage(
+            """
+            {
+              "type": "voiceTokenRefreshed",
+              "eventSeq": 14,
+              "roomEpoch": 4,
+              "sessionEpoch": 7,
+              "voice": {
+                "provider": "livekit",
+                "voiceRoomId": "voice-room-1",
+                "livekitRoomName": "sb-voice-room-1",
+                "serverUrl": "wss://voice.shadowboy.app",
+                "participantIdentity": "player-2",
+                "token": "fresh-token",
+                "expiresAt": "2026-05-23T21:00:00Z",
+                "mode": "pushToTalk"
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val refreshed = assertIs<ServerMessage.VoiceTokenRefreshed>(message)
+        assertEquals("fresh-token", refreshed.voice.token)
+        assertEquals("player-2", refreshed.voice.participantIdentity)
+    }
+
+    @Test
     fun `rejects malformed rom checksums before relay calls`() {
         val session = testSessionDescriptor().copy(
             game = testSessionDescriptor().game.copy(romSha256 = "not-a-checksum"),

@@ -119,5 +119,8 @@ fn room_error_message(error: RoomError) -> ServerMessage {
         RoomError::RecoveryExpired => {
             static_error("recoveryExpired", "Reconnect recovery window expired.")
         }
+        RoomError::VoiceUnavailable => {
+            static_error("voiceUnavailable", "Voice chat is unavailable.")
+        }
     }
 }

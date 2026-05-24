@@ -1,6 +1,7 @@
 import { netplayProtocolVersion } from "../constants.ts";
 import type {
   LinkCableTransport,
+  NetplayClientKind,
   NetplaySessionMode,
   NetplayVoiceMode,
 } from "./enums.ts";
@@ -20,6 +21,7 @@ export interface RoomStatusResponse {
 }
 
 export interface NetplaySessionDescriptor {
+  readonly hostClientKind?: NetplayClientKind | null;
   readonly hostAppVersion?: string | null;
   readonly mode: NetplaySessionMode;
   readonly game: NetplayGameDescriptor;

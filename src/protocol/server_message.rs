@@ -186,6 +186,17 @@ pub enum ServerMessage {
         /// Current room state.
         room: RoomView,
     },
+    /// Private response with a fresh voice token for this socket's player.
+    VoiceTokenRefreshed {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Refreshed player-specific voice grant.
+        voice: PlayerVoiceJoinGrant,
+    },
     /// Relay requires a compatibility check and state sync after recovery.
     RecoveryResyncRequired {
         /// Monotonic event sequence included with the room view.

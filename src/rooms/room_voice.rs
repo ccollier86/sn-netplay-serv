@@ -62,6 +62,19 @@ pub struct PlayerVoiceJoinGrant {
     pub mode: NetplayVoiceMode,
 }
 
+/// Internal request details for a player-specific token refresh.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RoomVoiceTokenRefreshRequest {
+    /// ShadowBoy voice broker room id.
+    pub(crate) voice_room_id: String,
+    /// One-based ShadowBoy player slot.
+    pub(crate) player_index: PlayerIndex,
+    /// Stable LiveKit identity.
+    pub(crate) participant_identity: String,
+    /// Display name sent to the voice broker.
+    pub(crate) display_name: String,
+}
+
 /// Internal voice-room state with private per-player grants.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RoomVoiceState {
@@ -103,6 +116,25 @@ impl RoomVoiceState {
     /// Returns the grant for one player, if the broker issued it.
     pub(crate) fn grant_for(&self, player_index: PlayerIndex) -> Option<PlayerVoiceJoinGrant> {
         self.grants.get(&player_index).cloned()
+    }
+
+    /// Refreshes one player's private token while preserving shared room data.
+    pub(crate) fn refresh_grant(
+        &mut self,
+        player_index: PlayerIndex,
+        participant_identity: String,
+        token: String,
+        expires_at: String,
+    ) -> Option<PlayerVoiceJoinGrant> {
+        let grant = self.grants.get_mut(&player_index)?;
+        if grant.participant_identity != participant_identity {
+            return None;
+        }
+
+        grant.token = token;
+        grant.expires_at = expires_at;
+
+        Some(grant.clone())
     }
 
     /// Returns the broker voice-room id for cleanup.

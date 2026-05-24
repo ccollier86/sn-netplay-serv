@@ -95,6 +95,10 @@ accepted as legacy fallbacks for the authorization URL.
 Voice chat is optional. If either `SB_NETPLAY_VOICE_BROKER_URL` or
 `SB_NETPLAY_VOICE_BROKER_TOKEN` is absent, room creation still works and
 voice-enabled rooms report voice as unavailable.
+Voice grants are private per player and are sent only on `roomJoined` and
+`voiceTokenRefreshed`. Clients request token renewal with `refreshVoiceToken`;
+the relay validates the socket's assigned player before asking the broker for a
+fresh LiveKit token.
 
 For Coolify, set `SB_NETPLAY_BIND_ADDR=0.0.0.0:8077` and let Coolify own the
 public reverse proxy and TLS certificate. Deploy with

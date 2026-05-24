@@ -6,11 +6,12 @@
 use super::InMemoryRoomRegistry;
 use crate::protocol::NetplayVoiceMode;
 use crate::rooms::{
-    NetplayRoom, PlayerIndex, PlayerVoiceJoinGrant, RoomVoiceState, RoomVoiceStatus, RoomVoiceView,
+    ConnectionId, InviteCode, NetplayRoom, PlayerIndex, PlayerVoiceJoinGrant, RoomError,
+    RoomVoiceState, RoomVoiceStatus, RoomVoiceTokenRefresh, RoomVoiceView,
 };
 use crate::voice::{
-    CreateVoiceRoomBrokerRequest, CreateVoiceRoomBrokerResponse, VoiceBrokerGrant,
-    VoiceBrokerParticipant,
+    CreateVoiceRoomBrokerRequest, CreateVoiceRoomBrokerResponse, IssueVoiceTokenBrokerRequest,
+    VoiceBrokerGrant, VoiceBrokerParticipant,
 };
 use std::collections::HashMap;
 use tracing::warn;
@@ -73,6 +74,62 @@ impl InMemoryRoomRegistry {
                 );
             }
         });
+    }
+
+    /// Refreshes the private voice token for one connected player.
+    pub(super) async fn refresh_voice_token_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<RoomVoiceTokenRefresh, RoomError> {
+        if !self.voice_broker.is_enabled() {
+            return Err(RoomError::VoiceUnavailable);
+        }
+
+        let request = {
+            let rooms = self.invite_codes.read().await;
+            let stored_room = rooms
+                .get(invite_code.normalized())
+                .ok_or(RoomError::NotFound)?;
+            stored_room
+                .room
+                .voice_token_refresh_request(connection_id)?
+        };
+
+        let grant = self
+            .voice_broker
+            .issue_token(
+                &request.voice_room_id,
+                IssueVoiceTokenBrokerRequest {
+                    player_index: request.player_index.display_number(),
+                    participant_identity: request.participant_identity,
+                    display_name: Some(request.display_name),
+                },
+            )
+            .await
+            .map_err(|error| {
+                warn!(
+                    voice_room_id = %request.voice_room_id,
+                    error = %error,
+                    "voice broker token refresh failed"
+                );
+                RoomError::VoiceUnavailable
+            })?;
+
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        let now = self.clock.now();
+        let voice = stored_room.room.refresh_voice_grant(
+            connection_id,
+            grant.participant_identity,
+            grant.token,
+            grant.expires_at,
+        )?;
+        let room = stored_room.view(now);
+
+        Ok(RoomVoiceTokenRefresh { voice, room })
     }
 }
 

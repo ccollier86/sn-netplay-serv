@@ -12,7 +12,7 @@ use crate::protocol::{
 };
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, RoomDebugEvent, RoomError, RoomEvent, RoomInputEvent,
-    RoomJoin, RoomRegistrySnapshot, RoomView,
+    RoomJoin, RoomRegistrySnapshot, RoomView, RoomVoiceTokenRefresh,
 };
 use tokio::sync::broadcast;
 
@@ -89,6 +89,13 @@ pub trait RoomRegistry: Send + Sync {
         connection_id: ConnectionId,
         reason: String,
     ) -> Result<RoomView, RoomError>;
+
+    /// Refreshes the private voice token for one connected player.
+    async fn refresh_voice_token(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<RoomVoiceTokenRefresh, RoomError>;
 
     /// Attaches a binary input socket to an occupied player slot.
     async fn connect_input_socket(

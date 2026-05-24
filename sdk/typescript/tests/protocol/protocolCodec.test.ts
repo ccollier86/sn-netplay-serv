@@ -81,6 +81,43 @@ describe("TypeScript netplay protocol codec", () => {
     }
   });
 
+  test("round trips voice token refresh messages", () => {
+    const request = JSON.parse(
+      encodeClientMessage({
+        roomEpoch: 4,
+        sessionEpoch: 7,
+        type: "refreshVoiceToken",
+      }),
+    ) as Record<string, unknown>;
+    expect(request.type).toBe("refreshVoiceToken");
+    expect(request.roomEpoch).toBe(4);
+
+    const message = decodeServerMessage(
+      JSON.stringify({
+        eventSeq: 14,
+        roomEpoch: 4,
+        sessionEpoch: 7,
+        type: "voiceTokenRefreshed",
+        voice: {
+          expiresAt: "2026-05-23T21:00:00Z",
+          livekitRoomName: "sb-voice-room-1",
+          mode: "pushToTalk",
+          participantIdentity: "player-2",
+          provider: "livekit",
+          serverUrl: "wss://voice.shadowboy.app",
+          token: "fresh-token",
+          voiceRoomId: "voice-room-1",
+        },
+      }),
+    );
+
+    expect(message.type).toBe("voiceTokenRefreshed");
+    if (message.type === "voiceTokenRefreshed") {
+      expect(message.voice.token).toBe("fresh-token");
+      expect(message.voice.participantIdentity).toBe("player-2");
+    }
+  });
+
   test("rejects unknown server message tags", () => {
     expect(() =>
       decodeServerMessage(JSON.stringify({ type: "futureMessage" })),

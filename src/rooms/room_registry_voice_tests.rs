@@ -156,6 +156,46 @@ async fn voice_room_is_closed_when_player_exits() {
     );
 }
 
+#[tokio::test]
+async fn voice_token_refresh_updates_only_requesting_player_grant() {
+    let registry = registry_with_voice_broker(MockVoiceBroker::available());
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let view = registry
+        .create_room(
+            license("host"),
+            ConnectionId::new(),
+            descriptor_with_voice(),
+        )
+        .await
+        .expect("room");
+    let invite = InviteCode::parse(view.invite_code).expect("invite");
+    registry
+        .connect_host(invite.clone(), license("host"), host_connection)
+        .await
+        .expect("host join");
+    let guest_join = registry
+        .connect_guest(invite.clone(), license("guest"), guest_connection)
+        .await
+        .expect("guest join");
+
+    let refresh = registry
+        .refresh_voice_token(invite, guest_connection)
+        .await
+        .expect("voice refresh");
+
+    assert_eq!(
+        guest_join.voice.as_ref().map(|voice| voice.token.as_str()),
+        Some("token-guest")
+    );
+    assert_eq!(refresh.voice.token, "refreshed-player-2");
+    assert_eq!(refresh.voice.participant_identity, "player-2");
+    assert_eq!(
+        refresh.room.voice.and_then(|voice| voice.voice_room_id),
+        Some("voice-room-1".to_string())
+    );
+}
+
 fn registry_with_voice_broker(broker: MockVoiceBroker) -> InMemoryRoomRegistry {
     InMemoryRoomRegistry::with_dependencies_event_sink_and_voice(
         Arc::new(StaticInviteCodeGenerator),
@@ -259,9 +299,14 @@ impl VoiceBroker for MockVoiceBroker {
     async fn issue_token(
         &self,
         _voice_room_id: &str,
-        _request: IssueVoiceTokenBrokerRequest,
+        request: IssueVoiceTokenBrokerRequest,
     ) -> Result<VoiceBrokerGrant, VoiceBrokerError> {
-        Err(VoiceBrokerError::RequestFailed)
+        Ok(VoiceBrokerGrant {
+            player_index: request.player_index,
+            participant_identity: request.participant_identity,
+            token: format!("refreshed-player-{}", request.player_index),
+            expires_at: "2026-05-23T21:00:00Z".to_string(),
+        })
     }
 
     async fn close_room(&self, voice_room_id: &str, _reason: &str) -> Result<(), VoiceBrokerError> {

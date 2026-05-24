@@ -1,5 +1,7 @@
 export type NetplaySessionMode = "controllerNetplay" | "linkCable";
 
+export type NetplayClientKind = "desktop" | "android";
+
 export type LinkCableTransport = "relay";
 
 export type NetplayVoiceMode =

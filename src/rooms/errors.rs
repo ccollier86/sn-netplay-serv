@@ -71,4 +71,7 @@ pub enum RoomError {
     /// Reconnect grace elapsed before the player reclaimed the slot.
     #[error("recovery window expired")]
     RecoveryExpired,
+    /// Voice was not configured or a token refresh could not be completed.
+    #[error("voice chat is unavailable")]
+    VoiceUnavailable,
 }

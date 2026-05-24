@@ -108,6 +108,7 @@ export class RoomStateMachine {
         this.updateRoom(message.room);
         break;
       case "heartbeatAck":
+      case "voiceTokenRefreshed":
         this.updateEpochs(message.eventSeq, message.roomEpoch, message.sessionEpoch);
         break;
       case "serverFrame":
