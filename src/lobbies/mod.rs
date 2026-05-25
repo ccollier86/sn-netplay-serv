@@ -27,7 +27,9 @@ pub use lobby_capabilities::{LobbyClientCapabilities, LobbyServerCapabilities};
 pub use lobby_chat::LobbyChatMessageView;
 pub use lobby_event::LobbyEvent;
 pub use lobby_game::{LobbyGameCandidate, LobbyGameSelectionView};
-pub use lobby_launch::{LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView};
+pub use lobby_launch::{
+    LobbyGameLaunchStatus, LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView,
+};
 pub use lobby_player::{LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerSlotView, LobbyPlayerStatus};
 pub use lobby_registry_trait::{LobbyEventReceiver, LobbyRegistry};
 pub use lobby_view::LobbyView;

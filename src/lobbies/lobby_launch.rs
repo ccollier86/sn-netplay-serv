@@ -70,6 +70,24 @@ pub struct LobbyGameLaunchView {
     pub requested_by_player_index: u8,
     /// Milliseconds since unix epoch when launch was requested.
     pub requested_at_ms: u128,
+    /// Current handoff status.
+    pub status: LobbyGameLaunchStatus,
+    /// Gameplay room invite code once the host has created it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub room_invite_code: Option<String>,
+    /// Milliseconds since unix epoch when the gameplay room was published.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub room_published_at_ms: Option<u128>,
+}
+
+/// Handoff state for launching the selected lobby game.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LobbyGameLaunchStatus {
+    /// Host has asked all clients to prepare for launch.
+    Preparing,
+    /// Host published the direct gameplay room invite code.
+    Ready,
 }
 
 impl LobbyGameLaunchView {
@@ -79,7 +97,17 @@ impl LobbyGameLaunchView {
             proposal_id,
             requested_by_player_index: requested_by.zero_based(),
             requested_at_ms,
+            status: LobbyGameLaunchStatus::Preparing,
+            room_invite_code: None,
+            room_published_at_ms: None,
         }
+    }
+
+    /// Records the gameplay room invite once host setup completes.
+    pub fn publish_room(&mut self, invite_code: String, published_at_ms: u128) {
+        self.status = LobbyGameLaunchStatus::Ready;
+        self.room_invite_code = Some(invite_code);
+        self.room_published_at_ms = Some(published_at_ms);
     }
 }
 

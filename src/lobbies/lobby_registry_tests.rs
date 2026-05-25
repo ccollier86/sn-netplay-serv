@@ -288,15 +288,41 @@ async fn host_launch_requires_connected_players_ready() {
     }
 
     let launched = registry
-        .request_lobby_game_launch(invite, host_connection, selected.proposal_id)
+        .request_lobby_game_launch(invite.clone(), host_connection, selected.proposal_id)
         .await
         .expect("launched");
 
     assert_eq!(launched.status, LobbyStatus::InGame);
     assert_eq!(
-        launched.pending_launch.expect("launch").proposal_id,
+        launched
+            .pending_launch
+            .as_ref()
+            .expect("launch")
+            .proposal_id,
         selected.proposal_id
     );
+    assert_eq!(
+        launched.pending_launch.expect("launch").status,
+        crate::lobbies::LobbyGameLaunchStatus::Preparing
+    );
+
+    let published = registry
+        .publish_lobby_game_room(
+            invite,
+            host_connection,
+            selected.proposal_id,
+            InviteCode::parse("AB23-CD").expect("room invite"),
+        )
+        .await
+        .expect("published");
+
+    let pending_launch = published.pending_launch.expect("launch");
+
+    assert_eq!(
+        pending_launch.status,
+        crate::lobbies::LobbyGameLaunchStatus::Ready
+    );
+    assert_eq!(pending_launch.room_invite_code.as_deref(), Some("AB23-CD"));
 }
 
 #[tokio::test]

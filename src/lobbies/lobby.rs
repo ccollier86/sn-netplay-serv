@@ -274,6 +274,38 @@ impl Lobby {
         Ok(launch)
     }
 
+    /// Publishes the gameplay room invite created by the host.
+    pub fn publish_game_room(
+        &mut self,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+        room_invite_code: InviteCode,
+        now_ms: u128,
+    ) -> Result<LobbyGameLaunchView, LobbyError> {
+        let player_index = self.player_index_for_connection(connection_id)?;
+        let slot = self
+            .slot(player_index)
+            .ok_or(LobbyError::UnknownConnection)?;
+        if slot.role != LobbyPlayerRole::Host {
+            return Err(LobbyError::HostOnly);
+        }
+        self.require_selected_proposal(proposal_id)?;
+        let launch = self
+            .pending_launch
+            .as_mut()
+            .ok_or(LobbyError::StaleGameProposal)?;
+        if launch.proposal_id != proposal_id {
+            return Err(LobbyError::StaleGameProposal);
+        }
+
+        launch.publish_room(room_invite_code.display(), now_ms);
+        let launch = launch.clone();
+        self.status = LobbyStatus::InGame;
+        self.bump(now_ms);
+
+        Ok(launch)
+    }
+
     /// Returns the player index assigned to a lobby connection.
     pub fn player_index_for_connection(
         &self,

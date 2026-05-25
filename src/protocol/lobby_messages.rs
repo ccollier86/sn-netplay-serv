@@ -40,6 +40,15 @@ pub enum LobbyClientMessage {
         /// Selected game proposal to launch.
         proposal_id: Uuid,
     },
+    /// Host publishes the direct gameplay room once it is ready.
+    PublishGameRoom {
+        /// Lobby epoch observed by the client.
+        lobby_epoch: u64,
+        /// Selected game proposal being launched.
+        proposal_id: Uuid,
+        /// User-facing gameplay room invite code.
+        room_invite_code: String,
+    },
     /// Sends a lobby-scoped chat message.
     Chat {
         /// Lobby epoch observed by the client.

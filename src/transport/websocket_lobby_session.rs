@@ -273,6 +273,43 @@ async fn handle_lobby_message(
             )
             .await
         }
+        LobbyClientMessage::PublishGameRoom {
+            lobby_epoch,
+            proposal_id,
+            room_invite_code,
+        } => {
+            apply_lobby_result(
+                sender,
+                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
+            )
+            .await?;
+            let room_invite = match InviteCode::parse(&room_invite_code) {
+                Ok(room_invite) => room_invite,
+                Err(_) => {
+                    return send_lobby_static_error(
+                        sender,
+                        "invalidRoomInviteCode",
+                        "Gameplay invite code is invalid.",
+                    )
+                    .await;
+                }
+            };
+
+            apply_lobby_result(
+                sender,
+                services
+                    .lobbies
+                    .publish_lobby_game_room(
+                        invite_code.clone(),
+                        connection_id,
+                        proposal_id,
+                        room_invite,
+                    )
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
         LobbyClientMessage::Chat { lobby_epoch, body } => {
             apply_lobby_result(
                 sender,

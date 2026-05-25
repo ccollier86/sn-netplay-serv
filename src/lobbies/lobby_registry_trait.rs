@@ -90,6 +90,15 @@ pub trait LobbyRegistry: Send + Sync {
         proposal_id: uuid::Uuid,
     ) -> Result<LobbyView, LobbyError>;
 
+    /// Publishes the direct gameplay room invite created by the host.
+    async fn publish_lobby_game_room(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+        room_invite_code: InviteCode,
+    ) -> Result<LobbyView, LobbyError>;
+
     /// Sends a sanitized lobby chat message.
     async fn send_lobby_chat(
         &self,
