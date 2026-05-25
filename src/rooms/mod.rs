@@ -12,6 +12,7 @@ mod input_frame_acceptance;
 mod input_frame_relay_buffer;
 mod invite_code;
 mod link_cable_room_state;
+mod player_runtime_state_mapping;
 mod player_slot;
 mod recovery_config;
 mod resume_token;
