@@ -181,6 +181,16 @@ impl IntoResponse for HttpError {
                 "lobbyHostOnly",
                 "Only Player 1 can perform this action.",
             ),
+            Self::Lobby(LobbyError::StaleGameProposal) => (
+                StatusCode::CONFLICT,
+                "staleLobbyGameProposal",
+                "Selected game changed; refresh and retry.",
+            ),
+            Self::Lobby(LobbyError::PlayersNotReady) => (
+                StatusCode::CONFLICT,
+                "lobbyPlayersNotReady",
+                "Players are not ready yet.",
+            ),
             Self::Lobby(LobbyError::InvalidPayload) => (
                 StatusCode::BAD_REQUEST,
                 "invalidLobbyPayload",

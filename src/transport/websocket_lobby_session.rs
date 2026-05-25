@@ -227,6 +227,52 @@ async fn handle_lobby_message(
             )
             .await
         }
+        LobbyClientMessage::SetGameReadiness {
+            lobby_epoch,
+            proposal_id,
+            status,
+            detail,
+        } => {
+            apply_lobby_result(
+                sender,
+                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
+            )
+            .await?;
+            apply_lobby_result(
+                sender,
+                services
+                    .lobbies
+                    .set_lobby_game_readiness(
+                        invite_code.clone(),
+                        connection_id,
+                        proposal_id,
+                        status,
+                        detail,
+                    )
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
+        LobbyClientMessage::LaunchGame {
+            lobby_epoch,
+            proposal_id,
+        } => {
+            apply_lobby_result(
+                sender,
+                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
+            )
+            .await?;
+            apply_lobby_result(
+                sender,
+                services
+                    .lobbies
+                    .request_lobby_game_launch(invite_code.clone(), connection_id, proposal_id)
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
         LobbyClientMessage::Chat { lobby_epoch, body } => {
             apply_lobby_result(
                 sender,

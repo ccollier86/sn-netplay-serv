@@ -77,6 +77,13 @@ fn lobby_error_message(error: LobbyError) -> LobbyServerMessage {
         LobbyError::HostOnly => {
             lobby_static_error("lobbyHostOnly", "Only Player 1 can perform this action.")
         }
+        LobbyError::StaleGameProposal => lobby_static_error(
+            "staleLobbyGameProposal",
+            "Selected game changed; refresh and retry.",
+        ),
+        LobbyError::PlayersNotReady => {
+            lobby_static_error("lobbyPlayersNotReady", "Players are not ready yet.")
+        }
         LobbyError::InvalidPayload => {
             lobby_static_error("invalidLobbyPayload", "Lobby payload is invalid.")
         }

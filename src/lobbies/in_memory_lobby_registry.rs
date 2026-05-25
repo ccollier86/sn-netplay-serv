@@ -6,8 +6,8 @@
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, Lobby, LobbyChatMessageView, LobbyError,
-    LobbyEventReceiver, LobbyGameCandidate, LobbyJoin, LobbyRegistry, LobbyServerCapabilities,
-    LobbyView, MAX_LOBBY_PLAYERS, StoredLobby,
+    LobbyEventReceiver, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyRegistry,
+    LobbyServerCapabilities, LobbyView, MAX_LOBBY_PLAYERS, StoredLobby,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeTokenGenerator,
@@ -228,6 +228,50 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         lobby
             .lobby
             .select_game(connection_id, game, crate::rooms::current_timestamp_ms())?;
+        lobby.emit_state_changed();
+
+        Ok(lobby.view())
+    }
+
+    async fn set_lobby_game_readiness(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+        status: LobbyGameReadinessStatus,
+        detail: Option<String>,
+    ) -> Result<LobbyView, LobbyError> {
+        let mut lobbies = self.lobbies.write().await;
+        let lobby = lobbies
+            .get_mut(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+        lobby.lobby.set_game_readiness(
+            connection_id,
+            proposal_id,
+            status,
+            detail,
+            crate::rooms::current_timestamp_ms(),
+        )?;
+        lobby.emit_state_changed();
+
+        Ok(lobby.view())
+    }
+
+    async fn request_lobby_game_launch(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+    ) -> Result<LobbyView, LobbyError> {
+        let mut lobbies = self.lobbies.write().await;
+        let lobby = lobbies
+            .get_mut(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+        lobby.lobby.request_game_launch(
+            connection_id,
+            proposal_id,
+            crate::rooms::current_timestamp_ms(),
+        )?;
         lobby.emit_state_changed();
 
         Ok(lobby.view())

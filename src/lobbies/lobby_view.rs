@@ -4,7 +4,8 @@
 //! resume tokens or internal authenticated subject keys.
 
 use crate::lobbies::{
-    LobbyGameSelectionView, LobbyPlayerSlotView, LobbyServerCapabilities, LobbyStatus,
+    LobbyGameLaunchView, LobbyGameReadinessView, LobbyGameSelectionView, LobbyPlayerSlotView,
+    LobbyServerCapabilities, LobbyStatus,
 };
 use crate::rooms::RoomId;
 use serde::Serialize;
@@ -34,4 +35,10 @@ pub struct LobbyView {
     /// Selected game proposal, if one exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selected_game: Option<LobbyGameSelectionView>,
+    /// Player readiness for the selected game.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub game_readiness: Vec<LobbyGameReadinessView>,
+    /// Host launch signal for the selected game.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_launch: Option<LobbyGameLaunchView>,
 }

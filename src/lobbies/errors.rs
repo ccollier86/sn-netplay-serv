@@ -32,6 +32,12 @@ pub enum LobbyError {
     /// Only Player 1 can perform this lobby operation.
     #[error("host only lobby operation")]
     HostOnly,
+    /// Selected game changed or no longer exists.
+    #[error("lobby game proposal is stale")]
+    StaleGameProposal,
+    /// One or more connected players are not ready to launch.
+    #[error("lobby players are not ready")]
+    PlayersNotReady,
     /// Client supplied malformed lobby data.
     #[error("invalid lobby payload")]
     InvalidPayload,

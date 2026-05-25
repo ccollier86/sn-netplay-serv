@@ -3,8 +3,8 @@
 use crate::auth::{ClientKind, VerifiedLicense};
 use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyClientCapabilities, LobbyError,
-    LobbyEvent, LobbyGameCandidate, LobbyPlayerRole, LobbyRegistry, LobbyServerCapabilities,
-    MAX_LOBBY_PLAYERS,
+    LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyPlayerRole, LobbyRegistry,
+    LobbyServerCapabilities, LobbyStatus, MAX_LOBBY_PLAYERS,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, ResumeToken, ResumeTokenGenerator,
@@ -183,6 +183,120 @@ async fn host_can_select_game_and_broadcast_lobby_state() {
         "Starlight Ruins"
     );
     assert!(matches!(event, LobbyEvent::LobbyStateChanged(_)));
+}
+
+#[tokio::test]
+async fn players_report_readiness_for_selected_game() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+
+    let selected = registry
+        .select_lobby_game(invite.clone(), host_connection, game_candidate())
+        .await
+        .expect("selected")
+        .selected_game
+        .expect("selected game");
+
+    let view = registry
+        .set_lobby_game_readiness(
+            invite,
+            host_connection,
+            selected.proposal_id,
+            LobbyGameReadinessStatus::Ready,
+            Some("  exact ROM matched  ".to_string()),
+        )
+        .await
+        .expect("ready");
+
+    assert_eq!(view.game_readiness.len(), 1);
+    assert_eq!(
+        view.game_readiness[0].status,
+        LobbyGameReadinessStatus::Ready
+    );
+    assert_eq!(
+        view.game_readiness[0].detail.as_deref(),
+        Some("exact ROM matched")
+    );
+}
+
+#[tokio::test]
+async fn host_launch_requires_connected_players_ready() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_params(),
+            guest_connection,
+        )
+        .await
+        .expect("guest connected");
+    let selected = registry
+        .select_lobby_game(invite.clone(), host_connection, game_candidate())
+        .await
+        .expect("selected")
+        .selected_game
+        .expect("selected game");
+
+    let not_ready = registry
+        .request_lobby_game_launch(invite.clone(), host_connection, selected.proposal_id)
+        .await
+        .expect_err("guest not ready");
+    assert!(matches!(not_ready, LobbyError::PlayersNotReady));
+
+    for connection in [host_connection, guest_connection] {
+        registry
+            .set_lobby_game_readiness(
+                invite.clone(),
+                connection,
+                selected.proposal_id,
+                LobbyGameReadinessStatus::Ready,
+                None,
+            )
+            .await
+            .expect("ready");
+    }
+
+    let launched = registry
+        .request_lobby_game_launch(invite, host_connection, selected.proposal_id)
+        .await
+        .expect("launched");
+
+    assert_eq!(launched.status, LobbyStatus::InGame);
+    assert_eq!(
+        launched.pending_launch.expect("launch").proposal_id,
+        selected.proposal_id
+    );
 }
 
 #[tokio::test]

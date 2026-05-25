@@ -5,8 +5,9 @@
 
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
-    LobbyClientCapabilities, LobbyError, LobbyGameCandidate, LobbyGameSelectionView,
-    LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerStatus, LobbyServerCapabilities, LobbyView,
+    LobbyClientCapabilities, LobbyError, LobbyGameCandidate, LobbyGameLaunchView,
+    LobbyGameReadinessStatus, LobbyGameReadinessView, LobbyGameSelectionView, LobbyPlayerRole,
+    LobbyPlayerSlot, LobbyPlayerStatus, LobbyServerCapabilities, LobbyView,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, ResumeTokenHash, RoomId, hash_resume_token,
@@ -42,6 +43,8 @@ pub struct Lobby {
     status: LobbyStatus,
     players: Vec<LobbyPlayerSlot>,
     selected_game: Option<LobbyGameSelectionView>,
+    game_readiness: Vec<LobbyGameReadinessView>,
+    pending_launch: Option<LobbyGameLaunchView>,
 }
 
 impl Lobby {
@@ -86,6 +89,8 @@ impl Lobby {
             status,
             players,
             selected_game,
+            game_readiness: Vec::new(),
+            pending_launch: None,
         }
     }
 
@@ -204,10 +209,69 @@ impl Lobby {
 
         let proposal = LobbyGameSelectionView::new(game, player_index, now_ms);
         self.selected_game = Some(proposal.clone());
+        self.game_readiness.clear();
+        self.pending_launch = None;
         self.status = LobbyStatus::GameSelected;
         self.bump(now_ms);
 
         Ok(proposal)
+    }
+
+    /// Records this player's readiness for the selected game proposal.
+    pub fn set_game_readiness(
+        &mut self,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+        status: LobbyGameReadinessStatus,
+        detail: Option<String>,
+        now_ms: u128,
+    ) -> Result<LobbyGameReadinessView, LobbyError> {
+        let player_index = self.player_index_for_connection(connection_id)?;
+        self.require_selected_proposal(proposal_id)?;
+        let readiness =
+            LobbyGameReadinessView::new(player_index, proposal_id, status, detail, now_ms)?;
+
+        if let Some(existing) = self
+            .game_readiness
+            .iter_mut()
+            .find(|candidate| candidate.player_index == player_index.zero_based())
+        {
+            *existing = readiness.clone();
+        } else {
+            self.game_readiness.push(readiness.clone());
+        }
+        self.pending_launch = None;
+        self.status = LobbyStatus::GameSelected;
+        self.bump(now_ms);
+
+        Ok(readiness)
+    }
+
+    /// Creates a launch signal once every connected player is ready.
+    pub fn request_game_launch(
+        &mut self,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+        now_ms: u128,
+    ) -> Result<LobbyGameLaunchView, LobbyError> {
+        let player_index = self.player_index_for_connection(connection_id)?;
+        let slot = self
+            .slot(player_index)
+            .ok_or(LobbyError::UnknownConnection)?;
+        if slot.role != LobbyPlayerRole::Host {
+            return Err(LobbyError::HostOnly);
+        }
+        self.require_selected_proposal(proposal_id)?;
+        if !self.connected_players_are_ready(proposal_id) {
+            return Err(LobbyError::PlayersNotReady);
+        }
+
+        let launch = LobbyGameLaunchView::new(proposal_id, player_index, now_ms);
+        self.pending_launch = Some(launch.clone());
+        self.status = LobbyStatus::InGame;
+        self.bump(now_ms);
+
+        Ok(launch)
     }
 
     /// Returns the player index assigned to a lobby connection.
@@ -235,6 +299,8 @@ impl Lobby {
             capabilities,
             players: self.players.iter().map(LobbyPlayerSlot::view).collect(),
             selected_game: self.selected_game.clone(),
+            game_readiness: self.game_readiness.clone(),
+            pending_launch: self.pending_launch.clone(),
         }
     }
 
@@ -254,6 +320,26 @@ impl Lobby {
         self.players
             .iter_mut()
             .find(|slot| slot.player_index == player_index)
+    }
+
+    fn require_selected_proposal(&self, proposal_id: uuid::Uuid) -> Result<(), LobbyError> {
+        match self.selected_game.as_ref() {
+            Some(selected_game) if selected_game.proposal_id == proposal_id => Ok(()),
+            _ => Err(LobbyError::StaleGameProposal),
+        }
+    }
+
+    fn connected_players_are_ready(&self, proposal_id: uuid::Uuid) -> bool {
+        self.players
+            .iter()
+            .filter(|slot| slot.subject_key.is_some() && slot.connection_id.is_some())
+            .all(|slot| {
+                self.game_readiness.iter().any(|readiness| {
+                    readiness.player_index == slot.player_index.zero_based()
+                        && readiness.proposal_id == proposal_id
+                        && readiness.status == LobbyGameReadinessStatus::Ready
+                })
+            })
     }
 }
 

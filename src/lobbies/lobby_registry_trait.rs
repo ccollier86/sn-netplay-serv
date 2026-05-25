@@ -6,7 +6,7 @@
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, LobbyChatMessageView, LobbyError, LobbyEvent,
-    LobbyGameCandidate, LobbyJoin, LobbyView,
+    LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyView,
 };
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
 use tokio::sync::broadcast;
@@ -70,6 +70,24 @@ pub trait LobbyRegistry: Send + Sync {
         invite_code: InviteCode,
         connection_id: ConnectionId,
         game: LobbyGameCandidate,
+    ) -> Result<LobbyView, LobbyError>;
+
+    /// Records local readiness for the selected game proposal.
+    async fn set_lobby_game_readiness(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+        status: LobbyGameReadinessStatus,
+        detail: Option<String>,
+    ) -> Result<LobbyView, LobbyError>;
+
+    /// Requests launch after all connected players are ready.
+    async fn request_lobby_game_launch(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
     ) -> Result<LobbyView, LobbyError>;
 
     /// Sends a sanitized lobby chat message.
