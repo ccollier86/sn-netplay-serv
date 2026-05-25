@@ -6,6 +6,7 @@
 use crate::http::client_auth_headers::client_auth_proof;
 use crate::http::client_identity::request_rate_limit_key;
 use crate::http::errors::HttpError;
+use crate::http::lobby_routes::{create_lobby, join_lobby, lobby_status};
 use crate::http::services::AppServices;
 use crate::limits::{
     MAX_CREATE_ROOM_BODY_BYTES, MAX_WEBSOCKET_FRAME_BYTES, MAX_WEBSOCKET_MESSAGE_BYTES,
@@ -41,6 +42,9 @@ pub fn build_router(services: AppServices) -> Router {
         .route("/health", get(health))
         .route("/v1/rooms", post(create_room))
         .route("/v1/rooms/{invite_code}/status", get(room_status))
+        .route("/v1/lobbies", post(create_lobby))
+        .route("/v1/lobbies/{invite_code}/join", post(join_lobby))
+        .route("/v1/lobbies/{invite_code}/status", get(lobby_status))
         .route("/v1/ws", get(websocket_room))
         .route("/v1/ws/input", get(websocket_input_room))
         .route("/internal/metrics", get(internal_metrics))

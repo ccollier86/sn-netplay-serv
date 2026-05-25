@@ -10,6 +10,7 @@ use crate::auth::{
 use crate::http::AdminAuthorizer;
 use crate::http::services::AppServices;
 use crate::limits::MAX_CREATE_ROOM_BODY_BYTES;
+use crate::lobbies::InMemoryLobbyRegistry;
 use crate::observability::InMemoryMetrics;
 use crate::rate_limit::{InMemoryRateLimiter, RateLimitPolicy};
 use crate::rooms::{InMemoryRoomRegistry, InviteCode, InviteCodeGenerator};
@@ -32,7 +33,7 @@ impl LicenseAuthority for FakeLicenseAuthority {
             Ok(VerifiedLicense::with_entitlement(
                 auth.client_kind,
                 auth.installation_id.as_str(),
-                "subject",
+                auth.installation_id.as_str(),
                 match auth.client_kind {
                     ClientKind::Desktop => "premium",
                     ClientKind::Android => "authenticated",
@@ -177,6 +178,102 @@ async fn create_room_accepts_android_client_auth() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(value["room"]["session"]["hostClientKind"], "android");
+}
+
+#[tokio::test]
+async fn create_lobby_returns_invite_player_slot_and_initial_game() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/lobbies")
+                .header("authorization", "Bearer valid")
+                .header("x-install-id", "host-install")
+                .body(Body::from(create_lobby_body()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let value = serde_json::from_slice::<Value>(&body).expect("json");
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["lobby"]["inviteCode"], "AB23-CD");
+    assert_eq!(value["playerIndex"], 0);
+    assert!(
+        value["resumeToken"]
+            .as_str()
+            .is_some_and(|token| !token.is_empty())
+    );
+    assert_eq!(value["lobby"]["players"][0]["role"], "host");
+    assert_eq!(value["lobby"]["players"][0]["color"], "cyan");
+    assert_eq!(
+        value["lobby"]["selectedGame"]["game"]["title"],
+        "Starlight Ruins"
+    );
+}
+
+#[tokio::test]
+async fn join_lobby_assigns_second_player_and_status_hides_resume_token() {
+    let app = app();
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/lobbies")
+                .header("authorization", "Bearer valid")
+                .header("x-install-id", "host-install")
+                .body(Body::from(create_lobby_body()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(create_response.status(), StatusCode::OK);
+
+    let join_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/lobbies/AB23-CD/join")
+                .header("authorization", "Bearer valid")
+                .header("x-install-id", "guest-install")
+                .body(Body::from(join_lobby_body()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let join_status = join_response.status();
+    let join_body = to_bytes(join_response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let join_value = serde_json::from_slice::<Value>(&join_body).expect("json");
+
+    assert_eq!(join_status, StatusCode::OK);
+    assert_eq!(join_value["playerIndex"], 1);
+    assert_eq!(join_value["lobby"]["players"][1]["color"], "violet");
+
+    let status_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/lobbies/AB23-CD/status")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let status_body = to_bytes(status_response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let status_value = serde_json::from_slice::<Value>(&status_body).expect("json");
+
+    assert_eq!(status_value["lobby"]["players"][1]["displayNumber"], 2);
+    assert!(status_value.get("resumeToken").is_none());
 }
 
 #[tokio::test]
@@ -404,6 +501,9 @@ fn limited_app(create_room_per_minute: u32) -> axum::Router {
         Arc::new(InMemoryRoomRegistry::new(Arc::new(
             StaticInviteCodeGenerator,
         ))),
+        Arc::new(InMemoryLobbyRegistry::new(Arc::new(
+            StaticInviteCodeGenerator,
+        ))),
         Arc::new(InMemoryRateLimiter::new(RateLimitPolicy {
             create_room_per_minute,
             websocket_join_per_minute: 30,
@@ -419,6 +519,42 @@ fn limited_app(create_room_per_minute: u32) -> axum::Router {
 
 fn create_room_body() -> String {
     create_room_value().to_string()
+}
+
+fn create_lobby_body() -> String {
+    json!({
+        "protocolVersion": 4,
+        "displayName": "Host",
+        "capabilities": {
+            "supportsLobby": true,
+            "supportsTemporarySessionRomRelay": true,
+            "supportsLobbyVoice": true,
+            "supportsMultiGameLobby": true
+        },
+        "initialGame": {
+            "title": "Starlight Ruins",
+            "systemId": "snes",
+            "coreId": "snes9x",
+            "contentSha256": "c".repeat(64),
+            "romSizeBytes": 2097152,
+            "startStateLabel": "fresh"
+        }
+    })
+    .to_string()
+}
+
+fn join_lobby_body() -> String {
+    json!({
+        "protocolVersion": 4,
+        "displayName": "Guest",
+        "capabilities": {
+            "supportsLobby": true,
+            "supportsTemporarySessionRomRelay": false,
+            "supportsLobbyVoice": false,
+            "supportsMultiGameLobby": false
+        }
+    })
+    .to_string()
 }
 
 fn create_room_value() -> Value {

@@ -5,6 +5,7 @@
 
 use crate::auth::LicenseAuthority;
 use crate::http::AdminAuthorizer;
+use crate::lobbies::LobbyRegistry;
 use crate::observability::MetricsRecorder;
 use crate::rate_limit::RateLimiter;
 use crate::rooms::RoomRegistry;
@@ -17,6 +18,8 @@ pub struct AppServices {
     pub license_authority: Arc<dyn LicenseAuthority>,
     /// Active room registry.
     pub rooms: Arc<dyn RoomRegistry>,
+    /// Persistent multiplayer lobby registry.
+    pub lobbies: Arc<dyn LobbyRegistry>,
     /// Public request limiter.
     pub rate_limiter: Arc<dyn RateLimiter>,
     /// Process metrics recorder.
@@ -32,6 +35,7 @@ impl AppServices {
     pub fn new(
         license_authority: Arc<dyn LicenseAuthority>,
         rooms: Arc<dyn RoomRegistry>,
+        lobbies: Arc<dyn LobbyRegistry>,
         rate_limiter: Arc<dyn RateLimiter>,
         metrics: Arc<dyn MetricsRecorder>,
         admin_authorizer: AdminAuthorizer,
@@ -40,6 +44,7 @@ impl AppServices {
         Self {
             license_authority,
             rooms,
+            lobbies,
             rate_limiter,
             metrics,
             admin_authorizer,

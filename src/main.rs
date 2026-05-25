@@ -7,6 +7,7 @@
 use sb_netplay_serv::auth::HttpLicenseAuthority;
 use sb_netplay_serv::config::{ServerConfig, VoiceBrokerConfig};
 use sb_netplay_serv::http::{AdminAuthorizer, AppServices, build_router};
+use sb_netplay_serv::lobbies::InMemoryLobbyRegistry;
 use sb_netplay_serv::observability::{
     InMemoryMetrics, ensure_telemetry_schema, init_tracing, spawn_telemetry_sink,
 };
@@ -50,6 +51,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             voice_broker,
         ),
     );
+    let lobbies = Arc::new(InMemoryLobbyRegistry::new(Arc::new(
+        UuidInviteCodeGenerator,
+    )));
     let rate_limiter = Arc::new(InMemoryRateLimiter::new(config.rate_limits));
     let admin_authorizer = AdminAuthorizer::new(config.admin_token.clone());
     let _room_expiration_task = spawn_room_expiration_task(rooms.clone());
@@ -57,6 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let services = AppServices::new(
         license_authority,
         rooms,
+        lobbies,
         rate_limiter,
         metrics,
         admin_authorizer,
