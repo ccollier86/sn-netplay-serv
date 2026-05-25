@@ -4,8 +4,15 @@
 //! implementation.
 
 use crate::auth::VerifiedLicense;
-use crate::lobbies::{CreateLobbyParams, JoinLobbyParams, LobbyError, LobbyJoin, LobbyView};
-use crate::rooms::InviteCode;
+use crate::lobbies::{
+    CreateLobbyParams, JoinLobbyParams, LobbyChatMessageView, LobbyError, LobbyEvent,
+    LobbyGameCandidate, LobbyJoin, LobbyView,
+};
+use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
+use tokio::sync::broadcast;
+
+/// Receiver for lobby domain events.
+pub type LobbyEventReceiver = broadcast::Receiver<LobbyEvent>;
 
 /// Lobby storage behavior used by HTTP and future WebSocket transports.
 #[async_trait::async_trait]
@@ -24,6 +31,54 @@ pub trait LobbyRegistry: Send + Sync {
         player: VerifiedLicense,
         params: JoinLobbyParams,
     ) -> Result<LobbyJoin, LobbyError>;
+
+    /// Connects a lobby WebSocket for a verified player.
+    async fn connect_lobby(
+        &self,
+        invite_code: InviteCode,
+        player: VerifiedLicense,
+        params: JoinLobbyParams,
+        connection_id: ConnectionId,
+    ) -> Result<LobbyJoin, LobbyError>;
+
+    /// Reclaims a lobby slot with a valid resume token.
+    async fn reconnect_lobby_player(
+        &self,
+        invite_code: InviteCode,
+        player_index: PlayerIndex,
+        lobby_epoch: u64,
+        resume_token: String,
+        connection_id: ConnectionId,
+    ) -> Result<LobbyJoin, LobbyError>;
+
+    /// Marks a lobby WebSocket disconnected.
+    async fn disconnect_lobby(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<LobbyView, LobbyError>;
+
+    /// Subscribes to domain events for one active lobby.
+    async fn subscribe_lobby(
+        &self,
+        invite_code: InviteCode,
+    ) -> Result<LobbyEventReceiver, LobbyError>;
+
+    /// Host selects or replaces the proposed lobby game.
+    async fn select_lobby_game(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        game: LobbyGameCandidate,
+    ) -> Result<LobbyView, LobbyError>;
+
+    /// Sends a sanitized lobby chat message.
+    async fn send_lobby_chat(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        body: String,
+    ) -> Result<LobbyChatMessageView, LobbyError>;
 
     /// Returns the current lobby view.
     async fn lobby_view(&self, invite_code: InviteCode) -> Result<LobbyView, LobbyError>;

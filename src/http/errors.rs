@@ -171,6 +171,21 @@ impl IntoResponse for HttpError {
                 "lobbyPlayerSlotUnavailable",
                 "Lobby player slot is not available.",
             ),
+            Self::Lobby(LobbyError::UnknownConnection) => (
+                StatusCode::CONFLICT,
+                "unknownLobbyConnection",
+                "Connection is not assigned to this lobby.",
+            ),
+            Self::Lobby(LobbyError::HostOnly) => (
+                StatusCode::FORBIDDEN,
+                "lobbyHostOnly",
+                "Only Player 1 can perform this action.",
+            ),
+            Self::Lobby(LobbyError::InvalidPayload) => (
+                StatusCode::BAD_REQUEST,
+                "invalidLobbyPayload",
+                "Lobby payload is invalid.",
+            ),
             Self::RateLimited(error) => {
                 retry_after_seconds = Some(error.retry_after.as_secs().max(1));
                 (

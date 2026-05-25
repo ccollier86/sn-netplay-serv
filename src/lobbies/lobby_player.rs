@@ -159,7 +159,9 @@ impl LobbyPlayerSlot {
         self.subject_key = Some(license.identity_key());
         self.client_kind = Some(license.client_kind);
         self.connection_id = Some(connection_id);
-        self.display_name = display_name;
+        if display_name.is_some() {
+            self.display_name = display_name;
+        }
         self.status = LobbyPlayerStatus::Connected;
         self.capabilities = capabilities;
         self.resume_token_hash = Some(resume_token_hash);

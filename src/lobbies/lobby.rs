@@ -6,9 +6,11 @@
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     LobbyClientCapabilities, LobbyError, LobbyGameCandidate, LobbyGameSelectionView,
-    LobbyPlayerRole, LobbyPlayerSlot, LobbyServerCapabilities, LobbyView,
+    LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerStatus, LobbyServerCapabilities, LobbyView,
 };
-use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, ResumeTokenHash, RoomId};
+use crate::rooms::{
+    ConnectionId, InviteCode, PlayerIndex, ResumeTokenHash, RoomId, hash_resume_token,
+};
 use serde::Serialize;
 
 /// Maximum supported lobby size while game sessions remain focused on MVP rooms.
@@ -139,6 +141,87 @@ impl Lobby {
         Ok(player_index)
     }
 
+    /// Reclaims a lobby slot with a valid resume token.
+    pub fn reconnect_player(
+        &mut self,
+        player_index: PlayerIndex,
+        lobby_epoch: u64,
+        resume_token: &str,
+        connection_id: ConnectionId,
+        now_ms: u128,
+    ) -> Result<PlayerIndex, LobbyError> {
+        if self.lobby_epoch != lobby_epoch {
+            return Err(LobbyError::StaleLobbyEpoch);
+        }
+        let slot = self
+            .slot_mut(player_index)
+            .ok_or(LobbyError::PlayerSlotUnavailable)?;
+        if slot.resume_token_hash.as_deref() != Some(hash_resume_token(resume_token).as_str()) {
+            return Err(LobbyError::ResumeTokenInvalid);
+        }
+
+        slot.connection_id = Some(connection_id);
+        slot.status = LobbyPlayerStatus::Connected;
+        slot.last_seen_at_ms = Some(now_ms);
+        self.bump(now_ms);
+
+        Ok(player_index)
+    }
+
+    /// Marks one lobby socket disconnected while preserving the slot.
+    pub fn disconnect(&mut self, connection_id: ConnectionId, now_ms: u128) -> bool {
+        let Some(slot) = self
+            .players
+            .iter_mut()
+            .find(|slot| slot.connection_id == Some(connection_id))
+        else {
+            return false;
+        };
+
+        slot.connection_id = None;
+        slot.status = LobbyPlayerStatus::Reconnecting;
+        slot.last_seen_at_ms = Some(now_ms);
+        self.bump(now_ms);
+
+        true
+    }
+
+    /// Selects or replaces the game proposal for this lobby.
+    pub fn select_game(
+        &mut self,
+        connection_id: ConnectionId,
+        game: LobbyGameCandidate,
+        now_ms: u128,
+    ) -> Result<LobbyGameSelectionView, LobbyError> {
+        let player_index = self.player_index_for_connection(connection_id)?;
+        let slot = self
+            .slot(player_index)
+            .ok_or(LobbyError::UnknownConnection)?;
+        if slot.role != LobbyPlayerRole::Host {
+            return Err(LobbyError::HostOnly);
+        }
+        validate_game_candidate(&game)?;
+
+        let proposal = LobbyGameSelectionView::new(game, player_index, now_ms);
+        self.selected_game = Some(proposal.clone());
+        self.status = LobbyStatus::GameSelected;
+        self.bump(now_ms);
+
+        Ok(proposal)
+    }
+
+    /// Returns the player index assigned to a lobby connection.
+    pub fn player_index_for_connection(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Result<PlayerIndex, LobbyError> {
+        self.players
+            .iter()
+            .find(|slot| slot.connection_id == Some(connection_id))
+            .map(|slot| slot.player_index)
+            .ok_or(LobbyError::UnknownConnection)
+    }
+
     /// Returns the immutable lobby view for API clients.
     pub fn view(&self, capabilities: LobbyServerCapabilities) -> LobbyView {
         LobbyView {
@@ -160,4 +243,33 @@ impl Lobby {
         self.lobby_epoch += 1;
         self.updated_at_ms = now_ms;
     }
+
+    fn slot(&self, player_index: PlayerIndex) -> Option<&LobbyPlayerSlot> {
+        self.players
+            .iter()
+            .find(|slot| slot.player_index == player_index)
+    }
+
+    fn slot_mut(&mut self, player_index: PlayerIndex) -> Option<&mut LobbyPlayerSlot> {
+        self.players
+            .iter_mut()
+            .find(|slot| slot.player_index == player_index)
+    }
+}
+
+fn validate_game_candidate(game: &LobbyGameCandidate) -> Result<(), LobbyError> {
+    if game.title.trim().is_empty()
+        || game.system_id.trim().is_empty()
+        || game.core_id.trim().is_empty()
+    {
+        return Err(LobbyError::InvalidPayload);
+    }
+
+    if let Some(hash) = game.content_sha256.as_ref()
+        && (hash.len() != 64 || !hash.chars().all(|candidate| candidate.is_ascii_hexdigit()))
+    {
+        return Err(LobbyError::InvalidPayload);
+    }
+
+    Ok(())
 }

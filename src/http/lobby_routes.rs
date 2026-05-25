@@ -7,14 +7,20 @@ use crate::http::client_auth_headers::client_auth_proof;
 use crate::http::client_identity::request_rate_limit_key;
 use crate::http::errors::HttpError;
 use crate::http::services::AppServices;
-use crate::lobbies::{CreateLobbyParams, JoinLobbyParams, LobbyJoin, LobbyView};
+use crate::lobbies::{
+    CreateLobbyParams, JoinLobbyParams, LobbyClientCapabilities, LobbyJoin, LobbyView,
+    MAX_LOBBY_PLAYERS,
+};
 use crate::protocol::validate_client_protocol_version;
 use crate::rate_limit::RateLimitAction;
-use crate::rooms::InviteCode;
+use crate::rooms::{InviteCode, PlayerIndex};
+use crate::transport::{WebSocketLobbyJoinRequest, handle_websocket_lobby_session};
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::ws::WebSocketUpgrade;
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Uri};
+use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -103,6 +109,54 @@ pub async fn lobby_status(
     Ok(Json(LobbyStatusResponse { lobby }))
 }
 
+/// Upgrades an authenticated ShadowBoy client into a lobby WebSocket.
+pub async fn websocket_lobby(
+    websocket: WebSocketUpgrade,
+    State(services): State<AppServices>,
+    Query(query): Query<WebSocketLobbyQuery>,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Result<Response, HttpError> {
+    enforce_rate_limit(&services, RateLimitAction::WebSocketJoin, &headers)?;
+    let path_and_query = uri
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or(uri.path());
+    let auth = client_auth_proof(&headers, "GET", path_and_query, &[])?;
+    let license = match services
+        .license_authority
+        .verify_client_access(auth, NETPLAY_FEATURE)
+        .await
+    {
+        Ok(license) => license,
+        Err(error) => {
+            services.metrics.record_auth_rejected();
+            return Err(error.into());
+        }
+    };
+    validate_client_protocol_version(query.protocol_version.ok_or(HttpError::InvalidRequest {
+        code: "missingProtocolVersion",
+        message: "Netplay protocol version is required.",
+    })?)?;
+    let invite_code = InviteCode::parse(&query.invite_code)?;
+    let reconnect = reconnect_query(&query)?;
+    let capabilities = lobby_capabilities(&query, license.client_kind);
+    let join_request = WebSocketLobbyJoinRequest {
+        invite_code,
+        display_name: query.display_name,
+        capabilities,
+        reconnect_player_index: reconnect.as_ref().map(|value| value.player_index),
+        reconnect_lobby_epoch: reconnect.as_ref().map(|value| value.lobby_epoch),
+        resume_token: reconnect.map(|value| value.resume_token),
+        license,
+    };
+
+    Ok(websocket
+        .max_message_size(crate::limits::MAX_WEBSOCKET_MESSAGE_BYTES)
+        .max_frame_size(crate::limits::MAX_WEBSOCKET_FRAME_BYTES)
+        .on_upgrade(move |socket| handle_websocket_lobby_session(socket, services, join_request)))
+}
+
 fn parse_create_lobby_request(body: &[u8]) -> Result<CreateLobbyRequest, HttpError> {
     serde_json::from_slice::<CreateLobbyRequest>(body).map_err(|_| HttpError::InvalidRequest {
         code: "invalidCreateLobbyRequest",
@@ -187,4 +241,79 @@ pub struct JoinLobbyRequest {
     /// Lobby join parameters.
     #[serde(flatten)]
     pub params: JoinLobbyParams,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSocketLobbyQuery {
+    invite_code: String,
+    protocol_version: Option<u16>,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    supports_temporary_session_rom_relay: Option<bool>,
+    #[serde(default)]
+    supports_lobby_voice: Option<bool>,
+    #[serde(default)]
+    supports_multi_game_lobby: Option<bool>,
+    #[serde(default)]
+    player_index: Option<u8>,
+    #[serde(default)]
+    lobby_epoch: Option<u64>,
+    #[serde(default)]
+    resume_token: Option<String>,
+}
+
+struct LobbyReconnectQuery {
+    player_index: PlayerIndex,
+    lobby_epoch: u64,
+    resume_token: String,
+}
+
+fn reconnect_query(query: &WebSocketLobbyQuery) -> Result<Option<LobbyReconnectQuery>, HttpError> {
+    match (
+        query.player_index,
+        query.lobby_epoch,
+        query.resume_token.as_ref(),
+    ) {
+        (None, None, None) => Ok(None),
+        (Some(player_index), Some(lobby_epoch), Some(resume_token)) => {
+            let player_index = PlayerIndex::new(player_index, MAX_LOBBY_PLAYERS).ok_or(
+                HttpError::InvalidRequest {
+                    code: "invalidPlayerIndex",
+                    message: "Lobby reconnect playerIndex is invalid.",
+                },
+            )?;
+
+            Ok(Some(LobbyReconnectQuery {
+                player_index,
+                lobby_epoch,
+                resume_token: resume_token.clone(),
+            }))
+        }
+        _ => Err(HttpError::InvalidRequest {
+            code: "invalidLobbyReconnectRequest",
+            message: "Lobby reconnect requires playerIndex, lobbyEpoch, and resumeToken.",
+        }),
+    }
+}
+
+fn lobby_capabilities(
+    query: &WebSocketLobbyQuery,
+    client_kind: crate::auth::ClientKind,
+) -> LobbyClientCapabilities {
+    let defaults_to_rich_desktop = client_kind == crate::auth::ClientKind::Desktop;
+
+    LobbyClientCapabilities {
+        supports_lobby: true,
+        supports_temporary_session_rom_relay: query
+            .supports_temporary_session_rom_relay
+            .unwrap_or(defaults_to_rich_desktop),
+        supports_lobby_voice: query
+            .supports_lobby_voice
+            .unwrap_or(defaults_to_rich_desktop),
+        supports_multi_game_lobby: query
+            .supports_multi_game_lobby
+            .unwrap_or(defaults_to_rich_desktop),
+    }
 }

@@ -3,11 +3,16 @@
 use crate::auth::{ClientKind, VerifiedLicense};
 use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyClientCapabilities, LobbyError,
-    LobbyPlayerRole, LobbyRegistry, LobbyServerCapabilities, MAX_LOBBY_PLAYERS,
+    LobbyEvent, LobbyGameCandidate, LobbyPlayerRole, LobbyRegistry, LobbyServerCapabilities,
+    MAX_LOBBY_PLAYERS,
 };
-use crate::rooms::{InviteCode, InviteCodeGenerator, ResumeToken, ResumeTokenGenerator};
+use crate::rooms::{
+    ConnectionId, InviteCode, InviteCodeGenerator, ResumeToken, ResumeTokenGenerator,
+};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+use tokio::time::timeout;
 
 #[tokio::test]
 async fn create_lobby_reserves_host_as_player_one() {
@@ -116,6 +121,120 @@ async fn lobby_view_reports_server_capabilities() {
     assert!(join.lobby.capabilities.supports_temporary_session_rom_relay);
     assert!(join.lobby.capabilities.supports_lobby_voice);
     assert_eq!(join.lobby.capabilities.max_players, 4);
+}
+
+#[tokio::test]
+async fn connected_lobby_socket_broadcasts_state_changes() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let mut events = registry
+        .subscribe_lobby(invite.clone())
+        .await
+        .expect("events");
+
+    let connection_id = ConnectionId::new();
+    let joined = registry
+        .connect_lobby(invite, license("host"), join_params(), connection_id)
+        .await
+        .expect("connected");
+    let event = recv_lobby_event(&mut events).await;
+
+    assert_eq!(joined.player_index.zero_based(), 0);
+    assert!(matches!(event, LobbyEvent::LobbyStateChanged(_)));
+}
+
+#[tokio::test]
+async fn host_can_select_game_and_broadcast_lobby_state() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let mut events = registry
+        .subscribe_lobby(invite.clone())
+        .await
+        .expect("events");
+    let connection_id = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            connection_id,
+        )
+        .await
+        .expect("connected");
+    let _ = recv_lobby_event(&mut events).await;
+
+    let view = registry
+        .select_lobby_game(invite, connection_id, game_candidate())
+        .await
+        .expect("selected");
+    let event = recv_lobby_event(&mut events).await;
+
+    assert_eq!(view.status, crate::lobbies::LobbyStatus::GameSelected);
+    assert_eq!(
+        view.selected_game.expect("selected").game.title,
+        "Starlight Ruins"
+    );
+    assert!(matches!(event, LobbyEvent::LobbyStateChanged(_)));
+}
+
+#[tokio::test]
+async fn lobby_chat_is_sanitized_and_broadcast() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let mut events = registry
+        .subscribe_lobby(invite.clone())
+        .await
+        .expect("events");
+    let connection_id = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            connection_id,
+        )
+        .await
+        .expect("connected");
+    let _ = recv_lobby_event(&mut events).await;
+
+    let chat = registry
+        .send_lobby_chat(invite, connection_id, "  hello\n\nworld  ".to_string())
+        .await
+        .expect("chat");
+    let event = recv_lobby_event(&mut events).await;
+
+    assert_eq!(chat.body, "hello world");
+    assert!(matches!(event, LobbyEvent::ChatMessage(_)));
+}
+
+async fn recv_lobby_event(events: &mut crate::lobbies::LobbyEventReceiver) -> LobbyEvent {
+    timeout(Duration::from_millis(250), events.recv())
+        .await
+        .expect("event timeout")
+        .expect("event")
+}
+
+fn game_candidate() -> LobbyGameCandidate {
+    LobbyGameCandidate {
+        title: "Starlight Ruins".to_string(),
+        system_id: "snes".to_string(),
+        core_id: "snes9x".to_string(),
+        content_sha256: Some("c".repeat(64)),
+        rom_size_bytes: Some(2_097_152),
+        start_state_label: Some("fresh".to_string()),
+    }
 }
 
 fn registry() -> InMemoryLobbyRegistry {

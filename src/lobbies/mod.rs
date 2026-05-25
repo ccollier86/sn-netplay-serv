@@ -8,10 +8,13 @@ mod errors;
 mod in_memory_lobby_registry;
 mod lobby;
 mod lobby_capabilities;
+mod lobby_chat;
+mod lobby_event;
 mod lobby_game;
 mod lobby_player;
 mod lobby_registry_trait;
 mod lobby_view;
+mod stored_lobby;
 
 use crate::rooms::PlayerIndex;
 use serde::{Deserialize, Serialize};
@@ -20,10 +23,13 @@ pub use errors::LobbyError;
 pub use in_memory_lobby_registry::InMemoryLobbyRegistry;
 pub use lobby::{Lobby, LobbyStatus, MAX_LOBBY_PLAYERS};
 pub use lobby_capabilities::{LobbyClientCapabilities, LobbyServerCapabilities};
+pub use lobby_chat::LobbyChatMessageView;
+pub use lobby_event::LobbyEvent;
 pub use lobby_game::{LobbyGameCandidate, LobbyGameSelectionView};
 pub use lobby_player::{LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerSlotView, LobbyPlayerStatus};
-pub use lobby_registry_trait::LobbyRegistry;
+pub use lobby_registry_trait::{LobbyEventReceiver, LobbyRegistry};
 pub use lobby_view::LobbyView;
+pub(crate) use stored_lobby::StoredLobby;
 
 /// Parameters used to create a lobby.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

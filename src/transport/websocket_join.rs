@@ -4,6 +4,7 @@
 //! moved into the upgraded socket task.
 
 use crate::auth::VerifiedLicense;
+use crate::lobbies::LobbyClientCapabilities;
 use crate::rooms::{InviteCode, PlayerIndex};
 use serde::Deserialize;
 
@@ -48,6 +49,25 @@ pub struct WebSocketInputJoinRequest {
     pub session_epoch: u64,
     /// Opaque input socket token returned by the control socket.
     pub input_socket_token: String,
+    /// Verified Desktop install/license identity.
+    pub license: VerifiedLicense,
+}
+
+/// Authenticated lobby WebSocket join request.
+#[derive(Clone, Debug)]
+pub struct WebSocketLobbyJoinRequest {
+    /// Lobby invite code.
+    pub invite_code: InviteCode,
+    /// Optional display name for lobby UI.
+    pub display_name: Option<String>,
+    /// Client feature support.
+    pub capabilities: LobbyClientCapabilities,
+    /// Player slot being reclaimed during reconnect.
+    pub reconnect_player_index: Option<PlayerIndex>,
+    /// Lobby epoch supplied for reconnect.
+    pub reconnect_lobby_epoch: Option<u64>,
+    /// Opaque resume token supplied for reconnect.
+    pub resume_token: Option<String>,
     /// Verified Desktop install/license identity.
     pub license: VerifiedLicense,
 }

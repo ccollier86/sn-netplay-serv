@@ -26,4 +26,13 @@ pub enum LobbyError {
     /// Player slot could not be used by the requesting subject.
     #[error("player slot is not available")]
     PlayerSlotUnavailable,
+    /// Socket does not belong to this lobby.
+    #[error("unknown lobby connection")]
+    UnknownConnection,
+    /// Only Player 1 can perform this lobby operation.
+    #[error("host only lobby operation")]
+    HostOnly,
+    /// Client supplied malformed lobby data.
+    #[error("invalid lobby payload")]
+    InvalidPayload,
 }
