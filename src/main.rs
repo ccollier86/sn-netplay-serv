@@ -9,7 +9,7 @@ use sb_netplay_serv::config::{ServerConfig, VoiceBrokerConfig};
 use sb_netplay_serv::file_relay::{
     DisabledFileRelayBroker, FileRelayBroker, FileRelayBrokerConfig, HttpFileRelayBroker,
 };
-use sb_netplay_serv::http::{AdminAuthorizer, AppServices, build_router};
+use sb_netplay_serv::http::{AdminAuthorizer, AppServices, FileRelayPolicy, build_router};
 use sb_netplay_serv::lobbies::{InMemoryLobbyRegistry, LobbyServerCapabilities, MAX_LOBBY_PLAYERS};
 use sb_netplay_serv::observability::{
     InMemoryMetrics, ensure_telemetry_schema, init_tracing, spawn_telemetry_sink,
@@ -81,6 +81,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rooms,
         lobbies,
         file_relay_broker,
+        FileRelayPolicy {
+            temporary_roms_enabled: config.file_relay.temporary_roms_enabled,
+            temporary_rom_max_bytes: config.file_relay.temporary_rom_max_bytes,
+        },
         rate_limiter,
         metrics,
         admin_authorizer,

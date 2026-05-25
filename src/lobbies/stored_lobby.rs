@@ -4,6 +4,8 @@
 //! beside a lobby and exposes small emit helpers.
 
 use crate::lobbies::{Lobby, LobbyChatMessageView, LobbyEvent, LobbyServerCapabilities, LobbyView};
+use crate::protocol::LobbyFileRelayGrantPair;
+use crate::rooms::ConnectionId;
 use tokio::sync::broadcast;
 
 const LOBBY_EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -45,5 +47,25 @@ impl StoredLobby {
     /// Broadcasts a chat message.
     pub(super) fn emit_chat_message(&self, chat: LobbyChatMessageView) {
         let _ = self.events.send(LobbyEvent::ChatMessage(chat));
+    }
+
+    /// Sends private ROM transfer grants to the two involved sockets.
+    pub(super) fn emit_rom_transfer_grants(
+        &self,
+        source: ConnectionId,
+        receiver: ConnectionId,
+        grants: LobbyFileRelayGrantPair,
+    ) {
+        let lobby_epoch = self.lobby.lobby_epoch();
+        let _ = self.events.send(LobbyEvent::RomTransferUploadGranted {
+            source,
+            lobby_epoch,
+            grant: grants.upload,
+        });
+        let _ = self.events.send(LobbyEvent::RomTransferDownloadReady {
+            receiver,
+            lobby_epoch,
+            grant: grants.download,
+        });
     }
 }

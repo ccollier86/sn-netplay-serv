@@ -4,6 +4,8 @@
 //! socket concepts into the lobby state machine.
 
 use crate::lobbies::{LobbyChatMessageView, LobbyView};
+use crate::protocol::LobbyFileRelayGrant;
+use crate::rooms::ConnectionId;
 
 /// Event emitted after lobby state or chat changes.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,4 +14,22 @@ pub enum LobbyEvent {
     LobbyStateChanged(LobbyView),
     /// Lobby chat message should be broadcast to subscribers.
     ChatMessage(LobbyChatMessageView),
+    /// Private ROM upload grant for one lobby socket.
+    RomTransferUploadGranted {
+        /// Sender lobby socket.
+        source: ConnectionId,
+        /// Current lobby epoch.
+        lobby_epoch: u64,
+        /// Private upload grant.
+        grant: LobbyFileRelayGrant,
+    },
+    /// Private ROM download grant for one lobby socket.
+    RomTransferDownloadReady {
+        /// Receiver lobby socket.
+        receiver: ConnectionId,
+        /// Current lobby epoch.
+        lobby_epoch: u64,
+        /// Private download grant.
+        grant: LobbyFileRelayGrant,
+    },
 }

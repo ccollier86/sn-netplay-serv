@@ -7,8 +7,10 @@ use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, Lobby, LobbyChatMessageView, LobbyError,
     LobbyEventReceiver, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyRegistry,
-    LobbyServerCapabilities, LobbyView, MAX_LOBBY_PLAYERS, StoredLobby,
+    LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyView,
+    MAX_LOBBY_PLAYERS, StoredLobby,
 };
+use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeTokenGenerator,
     UuidResumeTokenGenerator,
@@ -275,6 +277,48 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         lobby.emit_state_changed();
 
         Ok(lobby.view())
+    }
+
+    async fn prepare_lobby_rom_relay_transfer(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+        receiver_player_index: PlayerIndex,
+        limits: LobbyRomRelayLimits,
+    ) -> Result<LobbyRomRelayTransferIntent, LobbyError> {
+        let lobbies = self.lobbies.read().await;
+        let lobby = lobbies
+            .get(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+
+        lobby.lobby.prepare_rom_relay_transfer(
+            connection_id,
+            proposal_id,
+            receiver_player_index,
+            limits,
+        )
+    }
+
+    async fn grant_lobby_rom_relay_transfer(
+        &self,
+        invite_code: InviteCode,
+        intent: LobbyRomRelayTransferIntent,
+        grants: LobbyFileRelayGrantPair,
+    ) -> Result<(), LobbyError> {
+        let lobbies = self.lobbies.read().await;
+        let lobby = lobbies
+            .get(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+
+        lobby.lobby.require_rom_relay_transfer_current(&intent)?;
+        lobby.emit_rom_transfer_grants(
+            intent.sender_connection_id,
+            intent.receiver_connection_id,
+            grants,
+        );
+
+        Ok(())
     }
 
     async fn publish_lobby_game_room(

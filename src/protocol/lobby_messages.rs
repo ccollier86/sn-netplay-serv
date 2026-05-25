@@ -6,6 +6,7 @@
 use crate::lobbies::{
     LobbyChatMessageView, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyView,
 };
+use crate::protocol::LobbyFileRelayGrant;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -39,6 +40,15 @@ pub enum LobbyClientMessage {
         lobby_epoch: u64,
         /// Selected game proposal to launch.
         proposal_id: Uuid,
+    },
+    /// Host asks the relay to prepare a temporary ROM transfer for one player.
+    RequestRomTransfer {
+        /// Lobby epoch observed by the client.
+        lobby_epoch: u64,
+        /// Selected game proposal being prepared.
+        proposal_id: Uuid,
+        /// Zero-based receiver player index.
+        receiver_player_index: u8,
     },
     /// Host publishes the direct gameplay room once it is ready.
     PublishGameRoom {
@@ -104,6 +114,20 @@ pub enum LobbyServerMessage {
     ChatMessage {
         /// Chat details.
         message: LobbyChatMessageView,
+    },
+    /// Private upload grant for the host.
+    RomTransferUploadGranted {
+        /// Current lobby epoch.
+        lobby_epoch: u64,
+        /// Private file relay grant.
+        grant: LobbyFileRelayGrant,
+    },
+    /// Private download grant for the receiver.
+    RomTransferDownloadReady {
+        /// Current lobby epoch.
+        lobby_epoch: u64,
+        /// Private file relay grant.
+        grant: LobbyFileRelayGrant,
     },
     /// Stable lobby protocol error.
     Error {

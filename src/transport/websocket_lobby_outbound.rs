@@ -84,6 +84,18 @@ fn lobby_error_message(error: LobbyError) -> LobbyServerMessage {
         LobbyError::PlayersNotReady => {
             lobby_static_error("lobbyPlayersNotReady", "Players are not ready yet.")
         }
+        LobbyError::RomRelayUnavailable => lobby_static_error(
+            "lobbyRomRelayUnavailable",
+            "Temporary session access is not available.",
+        ),
+        LobbyError::RomRelayUnsupported => lobby_static_error(
+            "lobbyRomRelayUnsupported",
+            "Temporary session access is not supported by every player.",
+        ),
+        LobbyError::RomRelayTooLarge => lobby_static_error(
+            "lobbyRomRelayTooLarge",
+            "This game is too large for temporary session access.",
+        ),
         LobbyError::InvalidPayload => {
             lobby_static_error("invalidLobbyPayload", "Lobby payload is invalid.")
         }

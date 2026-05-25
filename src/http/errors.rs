@@ -191,6 +191,21 @@ impl IntoResponse for HttpError {
                 "lobbyPlayersNotReady",
                 "Players are not ready yet.",
             ),
+            Self::Lobby(LobbyError::RomRelayUnavailable) => (
+                StatusCode::CONFLICT,
+                "lobbyRomRelayUnavailable",
+                "Temporary session access is not available.",
+            ),
+            Self::Lobby(LobbyError::RomRelayUnsupported) => (
+                StatusCode::CONFLICT,
+                "lobbyRomRelayUnsupported",
+                "Temporary session access is not supported by every player.",
+            ),
+            Self::Lobby(LobbyError::RomRelayTooLarge) => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "lobbyRomRelayTooLarge",
+                "This game is too large for temporary session access.",
+            ),
             Self::Lobby(LobbyError::InvalidPayload) => (
                 StatusCode::BAD_REQUEST,
                 "invalidLobbyPayload",

@@ -340,6 +340,21 @@ impl Lobby {
             .ok_or(LobbyError::UnknownConnection)
     }
 
+    /// Returns the current lobby epoch.
+    pub fn lobby_epoch(&self) -> u64 {
+        self.lobby_epoch
+    }
+
+    /// Returns this lobby's stable id.
+    pub(super) fn lobby_id(&self) -> RoomId {
+        self.lobby_id
+    }
+
+    /// Returns the current selected game proposal, if any.
+    pub(super) fn selected_game(&self) -> Option<&LobbyGameSelectionView> {
+        self.selected_game.as_ref()
+    }
+
     /// Returns the immutable lobby view for API clients.
     pub fn view(&self, capabilities: LobbyServerCapabilities) -> LobbyView {
         LobbyView {
@@ -364,7 +379,7 @@ impl Lobby {
         self.updated_at_ms = now_ms;
     }
 
-    fn slot(&self, player_index: PlayerIndex) -> Option<&LobbyPlayerSlot> {
+    pub(super) fn slot(&self, player_index: PlayerIndex) -> Option<&LobbyPlayerSlot> {
         self.players
             .iter()
             .find(|slot| slot.player_index == player_index)
@@ -376,7 +391,10 @@ impl Lobby {
             .find(|slot| slot.player_index == player_index)
     }
 
-    fn require_selected_proposal(&self, proposal_id: uuid::Uuid) -> Result<(), LobbyError> {
+    pub(super) fn require_selected_proposal(
+        &self,
+        proposal_id: uuid::Uuid,
+    ) -> Result<(), LobbyError> {
         match self.selected_game.as_ref() {
             Some(selected_game) if selected_game.proposal_id == proposal_id => Ok(()),
             _ => Err(LobbyError::StaleGameProposal),

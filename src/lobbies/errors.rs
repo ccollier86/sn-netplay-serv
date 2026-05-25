@@ -38,6 +38,15 @@ pub enum LobbyError {
     /// One or more connected players are not ready to launch.
     #[error("lobby players are not ready")]
     PlayersNotReady,
+    /// Temporary ROM relay is disabled or unavailable.
+    #[error("temporary rom relay is unavailable")]
+    RomRelayUnavailable,
+    /// One of the lobby clients cannot use temporary ROM relay.
+    #[error("temporary rom relay is unsupported by a client")]
+    RomRelayUnsupported,
+    /// Proposed ROM exceeds the relay limit.
+    #[error("temporary rom relay payload is too large")]
+    RomRelayTooLarge,
     /// Client supplied malformed lobby data.
     #[error("invalid lobby payload")]
     InvalidPayload,

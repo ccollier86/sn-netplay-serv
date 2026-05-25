@@ -4,14 +4,15 @@
 //! does not relay gameplay input or snapshot bytes.
 
 use crate::http::AppServices;
-use crate::lobbies::{JoinLobbyParams, LobbyEvent};
+use crate::lobbies::{JoinLobbyParams, LobbyEvent, MAX_LOBBY_PLAYERS};
 use crate::protocol::{LobbyClientMessage, LobbyServerMessage};
-use crate::rooms::{ConnectionId, InviteCode};
+use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
 use crate::transport::WebSocketLobbyJoinRequest;
 use crate::transport::websocket_lobby_outbound::{
     LobbySocketSender, send_lobby_error, send_lobby_server_message, send_lobby_static_error,
     send_lobby_upgrade_error,
 };
+use crate::transport::websocket_lobby_rom_relay_handler::handle_lobby_rom_relay_request;
 use crate::transport::websocket_peer_close::{peer_close_detail, peer_error_detail};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
@@ -131,7 +132,7 @@ async fn session_loop(
                 }
             }
             event = events.recv() => {
-                if !handle_lobby_event(sender, event).await {
+                if !handle_lobby_event(sender, connection_id, event).await {
                     break;
                 }
             }
@@ -273,6 +274,38 @@ async fn handle_lobby_message(
             )
             .await
         }
+        LobbyClientMessage::RequestRomTransfer {
+            lobby_epoch,
+            proposal_id,
+            receiver_player_index,
+        } => {
+            apply_lobby_result(
+                sender,
+                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
+            )
+            .await?;
+            let Some(receiver) = PlayerIndex::new(receiver_player_index, MAX_LOBBY_PLAYERS) else {
+                return send_lobby_static_error(
+                    sender,
+                    "invalidLobbyPlayerIndex",
+                    "Lobby player slot is invalid.",
+                )
+                .await;
+            };
+
+            apply_lobby_result(
+                sender,
+                handle_lobby_rom_relay_request(
+                    services,
+                    invite_code,
+                    connection_id,
+                    proposal_id,
+                    receiver,
+                )
+                .await,
+            )
+            .await
+        }
         LobbyClientMessage::PublishGameRoom {
             lobby_epoch,
             proposal_id,
@@ -394,6 +427,7 @@ async fn apply_lobby_result(
 
 async fn handle_lobby_event(
     sender: &mut LobbySocketSender,
+    connection_id: ConnectionId,
     event: Result<LobbyEvent, tokio::sync::broadcast::error::RecvError>,
 ) -> bool {
     let message = match event {
@@ -403,6 +437,26 @@ async fn handle_lobby_event(
             lobby,
         },
         Ok(LobbyEvent::ChatMessage(message)) => LobbyServerMessage::ChatMessage { message },
+        Ok(LobbyEvent::RomTransferUploadGranted {
+            source,
+            lobby_epoch,
+            grant,
+        }) => {
+            if source != connection_id {
+                return true;
+            }
+            LobbyServerMessage::RomTransferUploadGranted { lobby_epoch, grant }
+        }
+        Ok(LobbyEvent::RomTransferDownloadReady {
+            receiver,
+            lobby_epoch,
+            grant,
+        }) => {
+            if receiver != connection_id {
+                return true;
+            }
+            LobbyServerMessage::RomTransferDownloadReady { lobby_epoch, grant }
+        }
         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
             return send_lobby_static_error(sender, "eventLagged", "Lobby event stream lagged.")
                 .await

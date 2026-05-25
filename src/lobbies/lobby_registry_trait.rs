@@ -6,8 +6,10 @@
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, LobbyChatMessageView, LobbyError, LobbyEvent,
-    LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyView,
+    LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyRomRelayLimits,
+    LobbyRomRelayTransferIntent, LobbyView,
 };
+use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
 use tokio::sync::broadcast;
 
@@ -89,6 +91,24 @@ pub trait LobbyRegistry: Send + Sync {
         connection_id: ConnectionId,
         proposal_id: uuid::Uuid,
     ) -> Result<LobbyView, LobbyError>;
+
+    /// Validates a host-to-player temporary ROM transfer request.
+    async fn prepare_lobby_rom_relay_transfer(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+        receiver_player_index: PlayerIndex,
+        limits: LobbyRomRelayLimits,
+    ) -> Result<LobbyRomRelayTransferIntent, LobbyError>;
+
+    /// Sends private ROM transfer grants to the involved lobby sockets.
+    async fn grant_lobby_rom_relay_transfer(
+        &self,
+        invite_code: InviteCode,
+        intent: LobbyRomRelayTransferIntent,
+        grants: LobbyFileRelayGrantPair,
+    ) -> Result<(), LobbyError>;
 
     /// Publishes the direct gameplay room invite created by the host.
     async fn publish_lobby_game_room(

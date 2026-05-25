@@ -12,6 +12,15 @@ use crate::rate_limit::RateLimiter;
 use crate::rooms::RoomRegistry;
 use std::sync::Arc;
 
+/// Runtime file-relay policy used by transport handlers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileRelayPolicy {
+    /// Whether temporary ROM transfer tickets may be created.
+    pub temporary_roms_enabled: bool,
+    /// Maximum temporary ROM payload bytes accepted by netplay.
+    pub temporary_rom_max_bytes: u64,
+}
+
 /// Dependencies required by HTTP routes.
 #[derive(Clone)]
 pub struct AppServices {
@@ -23,6 +32,8 @@ pub struct AppServices {
     pub lobbies: Arc<dyn LobbyRegistry>,
     /// Trusted temporary file relay broker.
     pub file_relay: Arc<dyn FileRelayBroker>,
+    /// File-relay feature and size policy.
+    pub file_relay_policy: FileRelayPolicy,
     /// Public request limiter.
     pub rate_limiter: Arc<dyn RateLimiter>,
     /// Process metrics recorder.
@@ -40,6 +51,7 @@ impl AppServices {
         rooms: Arc<dyn RoomRegistry>,
         lobbies: Arc<dyn LobbyRegistry>,
         file_relay: Arc<dyn FileRelayBroker>,
+        file_relay_policy: FileRelayPolicy,
         rate_limiter: Arc<dyn RateLimiter>,
         metrics: Arc<dyn MetricsRecorder>,
         admin_authorizer: AdminAuthorizer,
@@ -50,6 +62,7 @@ impl AppServices {
             rooms,
             lobbies,
             file_relay,
+            file_relay_policy,
             rate_limiter,
             metrics,
             admin_authorizer,

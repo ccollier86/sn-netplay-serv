@@ -14,6 +14,7 @@ mod lobby_game;
 mod lobby_launch;
 mod lobby_player;
 mod lobby_registry_trait;
+mod lobby_rom_relay;
 mod lobby_view;
 mod stored_lobby;
 
@@ -32,6 +33,7 @@ pub use lobby_launch::{
 };
 pub use lobby_player::{LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerSlotView, LobbyPlayerStatus};
 pub use lobby_registry_trait::{LobbyEventReceiver, LobbyRegistry};
+pub use lobby_rom_relay::{LobbyRomRelayLimits, LobbyRomRelayTransferIntent};
 pub use lobby_view::LobbyView;
 pub(crate) use stored_lobby::StoredLobby;
 
@@ -77,3 +79,6 @@ pub struct LobbyJoin {
 #[cfg(test)]
 #[path = "lobby_registry_tests.rs"]
 mod lobby_registry_tests;
+#[cfg(test)]
+#[path = "lobby_rom_relay_tests.rs"]
+mod lobby_rom_relay_tests;

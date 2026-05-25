@@ -14,6 +14,8 @@ pub struct FileRelayConfig {
     pub broker: FileRelayBrokerConfig,
     /// Whether temporary ROM relay tickets may be created.
     pub temporary_roms_enabled: bool,
+    /// Maximum temporary ROM bytes accepted for one lobby transfer.
+    pub temporary_rom_max_bytes: u64,
     /// Whether large save-state relay tickets may be created.
     pub save_states_enabled: bool,
 }
@@ -26,6 +28,8 @@ impl FileRelayConfig {
         let request_timeout =
             optional_duration_millis_env("SB_NETPLAY_FILE_RELAY_TIMEOUT_MS", 2500)?;
         let temporary_roms_enabled = optional_bool_env("SB_NETPLAY_ROM_RELAY_ENABLED", false)?;
+        let temporary_rom_max_bytes =
+            optional_u64_env("SB_NETPLAY_ROM_RELAY_MAX_BYTES", 104_857_600)?;
         let save_states_enabled =
             optional_bool_env("SB_NETPLAY_FILE_RELAY_SAVE_STATES_ENABLED", true)?;
 
@@ -46,6 +50,7 @@ impl FileRelayConfig {
 
         Ok(Self {
             broker,
+            temporary_rom_max_bytes,
             temporary_roms_enabled,
             save_states_enabled,
         })
@@ -120,5 +125,16 @@ fn optional_duration_millis_env(
             .map_err(|_| ConfigError::InvalidUnsigned(name)),
         Ok(_) => Err(ConfigError::EmptyEnv(name)),
         Err(_) => Ok(Duration::from_millis(default_millis)),
+    }
+}
+
+fn optional_u64_env(name: &'static str, default: u64) -> Result<u64, ConfigError> {
+    match env::var(name) {
+        Ok(value) if !value.trim().is_empty() => value
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| ConfigError::InvalidUnsigned(name)),
+        Ok(_) => Err(ConfigError::EmptyEnv(name)),
+        Err(_) => Ok(default),
     }
 }

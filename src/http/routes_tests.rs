@@ -9,7 +9,7 @@ use crate::auth::{
 };
 use crate::file_relay::DisabledFileRelayBroker;
 use crate::http::AdminAuthorizer;
-use crate::http::services::AppServices;
+use crate::http::services::{AppServices, FileRelayPolicy};
 use crate::limits::MAX_CREATE_ROOM_BODY_BYTES;
 use crate::lobbies::InMemoryLobbyRegistry;
 use crate::observability::InMemoryMetrics;
@@ -506,6 +506,10 @@ fn limited_app(create_room_per_minute: u32) -> axum::Router {
             StaticInviteCodeGenerator,
         ))),
         Arc::new(DisabledFileRelayBroker),
+        FileRelayPolicy {
+            temporary_roms_enabled: false,
+            temporary_rom_max_bytes: 104_857_600,
+        },
         Arc::new(InMemoryRateLimiter::new(RateLimitPolicy {
             create_room_per_minute,
             websocket_join_per_minute: 30,
