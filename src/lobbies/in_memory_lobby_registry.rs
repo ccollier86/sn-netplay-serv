@@ -160,6 +160,8 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
     async fn reconnect_lobby_player(
         &self,
         invite_code: InviteCode,
+        player: VerifiedLicense,
+        params: JoinLobbyParams,
         player_index: PlayerIndex,
         lobby_epoch: u64,
         resume_token: String,
@@ -170,10 +172,13 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(LobbyError::NotFound)?;
         let player_index = lobby.lobby.reconnect_player(
+            &player,
             player_index,
             lobby_epoch,
             &resume_token,
             connection_id,
+            params.display_name,
+            params.capabilities,
             crate::rooms::current_timestamp_ms(),
         )?;
         lobby.emit_state_changed();
@@ -201,6 +206,24 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         {
             lobby.emit_state_changed();
         }
+
+        Ok(lobby.view())
+    }
+
+    async fn leave_lobby(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<LobbyView, LobbyError> {
+        let mut lobbies = self.lobbies.write().await;
+        let lobby = lobbies
+            .get_mut(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+
+        lobby
+            .lobby
+            .leave(connection_id, crate::rooms::current_timestamp_ms())?;
+        lobby.emit_state_changed();
 
         Ok(lobby.view())
     }

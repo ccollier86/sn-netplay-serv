@@ -3,8 +3,8 @@
 use crate::auth::{ClientKind, VerifiedLicense};
 use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyClientCapabilities, LobbyError,
-    LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyPlayerRole, LobbyRegistry,
-    LobbyServerCapabilities, LobbyStatus, MAX_LOBBY_PLAYERS,
+    LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyPlayerRole, LobbyPlayerStatus,
+    LobbyRegistry, LobbyServerCapabilities, LobbyStatus, MAX_LOBBY_PLAYERS,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, ResumeToken, ResumeTokenGenerator,
@@ -78,6 +78,86 @@ async fn joining_again_refreshes_existing_player_slot() {
 }
 
 #[tokio::test]
+async fn reconnect_reclaims_slot_with_prior_epoch_and_matching_identity() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let first_connection = ConnectionId::new();
+    let joined = registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_params(),
+            first_connection,
+        )
+        .await
+        .expect("joined");
+    let observed_epoch_before_disconnect = joined.lobby.lobby_epoch;
+
+    registry
+        .disconnect_lobby(invite.clone(), first_connection)
+        .await
+        .expect("disconnected");
+
+    let reconnected = registry
+        .reconnect_lobby_player(
+            invite,
+            license("guest"),
+            join_params(),
+            joined.player_index,
+            observed_epoch_before_disconnect,
+            joined.resume_token,
+            ConnectionId::new(),
+        )
+        .await
+        .expect("reconnected");
+
+    assert_eq!(reconnected.player_index.zero_based(), 1);
+    assert!(reconnected.lobby.players[1].connected);
+    assert_eq!(
+        reconnected.lobby.players[1].status,
+        LobbyPlayerStatus::Connected
+    );
+}
+
+#[tokio::test]
+async fn reconnect_rejects_valid_token_from_different_identity() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let joined = registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_params(),
+            ConnectionId::new(),
+        )
+        .await
+        .expect("joined");
+
+    let error = registry
+        .reconnect_lobby_player(
+            invite,
+            license("attacker"),
+            join_params(),
+            joined.player_index,
+            joined.lobby.lobby_epoch,
+            joined.resume_token,
+            ConnectionId::new(),
+        )
+        .await
+        .expect_err("identity mismatch");
+
+    assert!(matches!(error, LobbyError::PlayerSlotUnavailable));
+}
+
+#[tokio::test]
 async fn fifth_player_is_rejected() {
     let registry = registry();
     let host_join = registry
@@ -103,6 +183,64 @@ async fn fifth_player_is_rejected() {
         .expect_err("full");
 
     assert!(matches!(error, LobbyError::LobbyFull));
+}
+
+#[tokio::test]
+async fn intentional_guest_leave_frees_the_lobby_slot() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let guest_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_params(),
+            guest_connection,
+        )
+        .await
+        .expect("joined");
+
+    let lobby = registry
+        .leave_lobby(invite, guest_connection)
+        .await
+        .expect("left");
+
+    assert_eq!(lobby.status, LobbyStatus::Open);
+    assert!(!lobby.players[1].occupied);
+    assert_eq!(lobby.players[1].status, LobbyPlayerStatus::Empty);
+}
+
+#[tokio::test]
+async fn intentional_host_leave_closes_the_lobby() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+
+    let lobby = registry
+        .leave_lobby(invite, host_connection)
+        .await
+        .expect("closed");
+
+    assert_eq!(lobby.status, LobbyStatus::Closed);
+    assert_eq!(lobby.players[0].status, LobbyPlayerStatus::Disconnected);
+    assert!(!lobby.players[0].connected);
 }
 
 #[tokio::test]

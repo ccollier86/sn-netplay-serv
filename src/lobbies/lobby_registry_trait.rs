@@ -47,6 +47,8 @@ pub trait LobbyRegistry: Send + Sync {
     async fn reconnect_lobby_player(
         &self,
         invite_code: InviteCode,
+        player: VerifiedLicense,
+        params: JoinLobbyParams,
         player_index: PlayerIndex,
         lobby_epoch: u64,
         resume_token: String,
@@ -55,6 +57,13 @@ pub trait LobbyRegistry: Send + Sync {
 
     /// Marks a lobby WebSocket disconnected.
     async fn disconnect_lobby(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<LobbyView, LobbyError>;
+
+    /// Ends lobby membership for an intentional leave.
+    async fn leave_lobby(
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,

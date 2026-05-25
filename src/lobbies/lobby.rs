@@ -149,25 +149,40 @@ impl Lobby {
     /// Reclaims a lobby slot with a valid resume token.
     pub fn reconnect_player(
         &mut self,
+        license: &VerifiedLicense,
         player_index: PlayerIndex,
         lobby_epoch: u64,
         resume_token: &str,
         connection_id: ConnectionId,
+        display_name: Option<String>,
+        capabilities: LobbyClientCapabilities,
         now_ms: u128,
     ) -> Result<PlayerIndex, LobbyError> {
-        if self.lobby_epoch != lobby_epoch {
+        if self.status == LobbyStatus::Closed {
+            return Err(LobbyError::LobbyClosed);
+        }
+        if lobby_epoch > self.lobby_epoch {
             return Err(LobbyError::StaleLobbyEpoch);
         }
         let slot = self
             .slot_mut(player_index)
             .ok_or(LobbyError::PlayerSlotUnavailable)?;
+        if !slot.belongs_to(license) {
+            return Err(LobbyError::PlayerSlotUnavailable);
+        }
         if slot.resume_token_hash.as_deref() != Some(hash_resume_token(resume_token).as_str()) {
             return Err(LobbyError::ResumeTokenInvalid);
         }
 
-        slot.connection_id = Some(connection_id);
-        slot.status = LobbyPlayerStatus::Connected;
-        slot.last_seen_at_ms = Some(now_ms);
+        slot.occupy(
+            slot.role,
+            license,
+            connection_id,
+            display_name,
+            capabilities,
+            hash_resume_token(resume_token),
+            now_ms,
+        );
         self.bump(now_ms);
 
         Ok(player_index)
@@ -189,6 +204,35 @@ impl Lobby {
         self.bump(now_ms);
 
         true
+    }
+
+    /// Ends lobby membership for a socket that intentionally leaves.
+    pub fn leave(&mut self, connection_id: ConnectionId, now_ms: u128) -> Result<(), LobbyError> {
+        let player_index = self.player_index_for_connection(connection_id)?;
+        let role = self
+            .slot(player_index)
+            .ok_or(LobbyError::UnknownConnection)?
+            .role;
+
+        if role == LobbyPlayerRole::Host {
+            self.close(now_ms);
+            return Ok(());
+        }
+
+        if let Some(slot) = self.slot_mut(player_index) {
+            *slot = LobbyPlayerSlot::empty(player_index);
+        }
+        self.game_readiness
+            .retain(|readiness| readiness.player_index != player_index.zero_based());
+        self.pending_launch = None;
+        self.status = if self.selected_game.is_some() {
+            LobbyStatus::GameSelected
+        } else {
+            LobbyStatus::Open
+        };
+        self.bump(now_ms);
+
+        Ok(())
     }
 
     /// Selects or replaces the game proposal for this lobby.
@@ -377,6 +421,19 @@ impl Lobby {
         self.event_seq += 1;
         self.lobby_epoch += 1;
         self.updated_at_ms = now_ms;
+    }
+
+    fn close(&mut self, now_ms: u128) {
+        self.status = LobbyStatus::Closed;
+        self.pending_launch = None;
+        for slot in &mut self.players {
+            if slot.subject_key.is_some() {
+                slot.connection_id = None;
+                slot.status = LobbyPlayerStatus::Disconnected;
+                slot.last_seen_at_ms = Some(now_ms);
+            }
+        }
+        self.bump(now_ms);
     }
 
     pub(super) fn slot(&self, player_index: PlayerIndex) -> Option<&LobbyPlayerSlot> {

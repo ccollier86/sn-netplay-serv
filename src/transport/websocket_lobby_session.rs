@@ -51,6 +51,11 @@ pub async fn handle_websocket_lobby_session(
             .lobbies
             .reconnect_lobby_player(
                 request.invite_code.clone(),
+                request.license.clone(),
+                JoinLobbyParams {
+                    display_name: request.display_name.clone(),
+                    capabilities: request.capabilities.clone(),
+                },
                 player_index,
                 lobby_epoch,
                 resume_token,
@@ -62,10 +67,10 @@ pub async fn handle_websocket_lobby_session(
             .lobbies
             .connect_lobby(
                 request.invite_code.clone(),
-                request.license,
+                request.license.clone(),
                 JoinLobbyParams {
-                    display_name: request.display_name,
-                    capabilities: request.capabilities,
+                    display_name: request.display_name.clone(),
+                    capabilities: request.capabilities.clone(),
                 },
                 connection_id,
             )
@@ -392,7 +397,7 @@ async fn handle_lobby_message(
                 sender,
                 services
                     .lobbies
-                    .disconnect_lobby(invite_code.clone(), connection_id)
+                    .leave_lobby(invite_code.clone(), connection_id)
                     .await
                     .map(|_| ()),
             )
