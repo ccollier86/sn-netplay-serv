@@ -19,6 +19,20 @@ pub struct FileRelayPolicy {
     pub temporary_roms_enabled: bool,
     /// Maximum temporary ROM payload bytes accepted by netplay.
     pub temporary_rom_max_bytes: u64,
+    /// Whether large save-state transfer tickets may be created.
+    pub save_states_enabled: bool,
+}
+
+impl FileRelayPolicy {
+    /// Returns whether temporary ROM relay can be used for this request.
+    pub fn can_relay_temporary_roms(&self, broker: &dyn FileRelayBroker) -> bool {
+        self.temporary_roms_enabled && broker.is_enabled()
+    }
+
+    /// Returns whether large save-state relay can be used for this request.
+    pub fn can_relay_save_states(&self, broker: &dyn FileRelayBroker) -> bool {
+        self.save_states_enabled && broker.is_enabled()
+    }
 }
 
 /// Dependencies required by HTTP routes.
@@ -67,6 +81,50 @@ impl AppServices {
             metrics,
             admin_authorizer,
             trust_proxy_headers,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FileRelayPolicy;
+    use crate::file_relay::{
+        CreateFileRelayTransferRequest, CreateFileRelayTransferResponse, DisabledFileRelayBroker,
+        FileRelayBroker, FileRelayBrokerError,
+    };
+
+    #[test]
+    fn file_relay_policy_enforces_independent_feature_switches() {
+        let enabled_broker = EnabledFileRelayBroker;
+        let disabled_broker = DisabledFileRelayBroker;
+        let policy = FileRelayPolicy {
+            save_states_enabled: false,
+            temporary_rom_max_bytes: 1024,
+            temporary_roms_enabled: true,
+        };
+
+        assert!(policy.can_relay_temporary_roms(&enabled_broker));
+        assert!(!policy.can_relay_temporary_roms(&disabled_broker));
+        assert!(!policy.can_relay_save_states(&enabled_broker));
+    }
+
+    struct EnabledFileRelayBroker;
+
+    #[async_trait::async_trait]
+    impl FileRelayBroker for EnabledFileRelayBroker {
+        fn is_enabled(&self) -> bool {
+            true
+        }
+
+        fn public_base_url(&self) -> Option<&str> {
+            Some("https://relay.shadowboy.app")
+        }
+
+        async fn create_transfer(
+            &self,
+            _request: CreateFileRelayTransferRequest,
+        ) -> Result<CreateFileRelayTransferResponse, FileRelayBrokerError> {
+            Err(FileRelayBrokerError::RequestFailed)
         }
     }
 }

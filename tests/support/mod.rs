@@ -472,6 +472,7 @@ fn test_services(rooms: Arc<InMemoryRoomRegistry>) -> AppServices {
         ))),
         Arc::new(DisabledFileRelayBroker),
         FileRelayPolicy {
+            save_states_enabled: false,
             temporary_roms_enabled: false,
             temporary_rom_max_bytes: 104_857_600,
         },

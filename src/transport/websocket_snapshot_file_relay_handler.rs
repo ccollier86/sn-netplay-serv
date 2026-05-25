@@ -11,6 +11,7 @@ use crate::protocol::{
     SnapshotManifest,
 };
 use crate::rooms::{ConnectionId, InviteCode, RoomError, SnapshotFileRelayTransferIntent};
+use tracing::warn;
 
 const SNAPSHOT_FILE_RELAY_TTL_SECONDS: u64 = 180;
 
@@ -21,7 +22,10 @@ pub async fn handle_snapshot_file_relay_request(
     connection_id: ConnectionId,
     manifest: SnapshotManifest,
 ) -> Result<(), RoomError> {
-    if !services.file_relay.is_enabled() {
+    if !services
+        .file_relay_policy
+        .can_relay_save_states(services.file_relay.as_ref())
+    {
         return Err(RoomError::SnapshotFileRelayUnavailable);
     }
 
@@ -39,7 +43,10 @@ pub async fn handle_snapshot_file_relay_request(
         .file_relay
         .create_transfer(create_snapshot_file_relay_request(&intent, &manifest))
         .await
-        .map_err(|_| RoomError::SnapshotFileRelayUnavailable)?;
+        .map_err(|error| {
+            warn!(error = %error, "snapshot file relay transfer creation failed");
+            RoomError::SnapshotFileRelayUnavailable
+        })?;
     let grants = snapshot_file_relay_grants(response, relay_url, manifest.clone());
 
     services

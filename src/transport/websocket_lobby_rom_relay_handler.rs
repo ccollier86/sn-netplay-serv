@@ -9,6 +9,7 @@ use crate::http::AppServices;
 use crate::lobbies::{LobbyError, LobbyRomRelayLimits, LobbyRomRelayTransferIntent};
 use crate::protocol::{LobbyFileRelayGrant, LobbyFileRelayGrantPair, LobbyFileRelayGrantRole};
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
+use tracing::warn;
 use uuid::Uuid;
 
 const ROM_FILE_RELAY_TTL_SECONDS: u64 = 600;
@@ -21,7 +22,10 @@ pub async fn handle_lobby_rom_relay_request(
     proposal_id: Uuid,
     receiver_player_index: PlayerIndex,
 ) -> Result<(), LobbyError> {
-    if !services.file_relay_policy.temporary_roms_enabled || !services.file_relay.is_enabled() {
+    if !services
+        .file_relay_policy
+        .can_relay_temporary_roms(services.file_relay.as_ref())
+    {
         return Err(LobbyError::RomRelayUnavailable);
     }
 
@@ -46,7 +50,10 @@ pub async fn handle_lobby_rom_relay_request(
         .file_relay
         .create_transfer(create_rom_relay_request(&intent))
         .await
-        .map_err(|_| LobbyError::RomRelayUnavailable)?;
+        .map_err(|error| {
+            warn!(error = %error, "lobby ROM file relay transfer creation failed");
+            LobbyError::RomRelayUnavailable
+        })?;
     let grants = rom_relay_grants(response, relay_url, &intent);
 
     services

@@ -82,6 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         lobbies,
         file_relay_broker,
         FileRelayPolicy {
+            save_states_enabled: config.file_relay.save_states_enabled,
             temporary_roms_enabled: config.file_relay.temporary_roms_enabled,
             temporary_rom_max_bytes: config.file_relay.temporary_rom_max_bytes,
         },

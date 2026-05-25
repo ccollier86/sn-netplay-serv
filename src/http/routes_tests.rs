@@ -507,6 +507,7 @@ fn limited_app(create_room_per_minute: u32) -> axum::Router {
         ))),
         Arc::new(DisabledFileRelayBroker),
         FileRelayPolicy {
+            save_states_enabled: false,
             temporary_roms_enabled: false,
             temporary_rom_max_bytes: 104_857_600,
         },
