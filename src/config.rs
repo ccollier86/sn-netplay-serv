@@ -7,6 +7,7 @@ use std::env;
 use std::fmt;
 use std::net::{AddrParseError, SocketAddr};
 
+use crate::file_relay::FileRelayConfig;
 use crate::observability::{PostgresDsn, PostgresTableNames};
 use crate::rate_limit::RateLimitPolicy;
 use crate::rooms::RoomRecoveryConfig;
@@ -34,6 +35,8 @@ pub struct ServerConfig {
     pub telemetry: TelemetryConfig,
     /// Optional trusted voice broker used for LiveKit room orchestration.
     pub voice: VoiceConfig,
+    /// Optional trusted file relay used for temporary transfer tickets.
+    pub file_relay: FileRelayConfig,
 }
 
 impl ServerConfig {
@@ -84,6 +87,7 @@ impl ServerConfig {
         };
         let telemetry = TelemetryConfig::from_env()?;
         let voice = VoiceConfig::from_env()?;
+        let file_relay = FileRelayConfig::from_env()?;
 
         Ok(Self {
             bind_addr,
@@ -96,6 +100,7 @@ impl ServerConfig {
             log,
             telemetry,
             voice,
+            file_relay,
         })
     }
 }

@@ -7,6 +7,7 @@ use super::build_router;
 use crate::auth::{
     AuthError, ClientKind, LicenseAuthority, ProtectedClientAuthProof, VerifiedLicense,
 };
+use crate::file_relay::DisabledFileRelayBroker;
 use crate::http::AdminAuthorizer;
 use crate::http::services::AppServices;
 use crate::limits::MAX_CREATE_ROOM_BODY_BYTES;
@@ -504,6 +505,7 @@ fn limited_app(create_room_per_minute: u32) -> axum::Router {
         Arc::new(InMemoryLobbyRegistry::new(Arc::new(
             StaticInviteCodeGenerator,
         ))),
+        Arc::new(DisabledFileRelayBroker),
         Arc::new(InMemoryRateLimiter::new(RateLimitPolicy {
             create_room_per_minute,
             websocket_join_per_minute: 30,

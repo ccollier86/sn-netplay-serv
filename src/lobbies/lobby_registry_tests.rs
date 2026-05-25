@@ -3,7 +3,7 @@
 use crate::auth::{ClientKind, VerifiedLicense};
 use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyClientCapabilities, LobbyError,
-    LobbyPlayerRole, LobbyRegistry,
+    LobbyPlayerRole, LobbyRegistry, LobbyServerCapabilities, MAX_LOBBY_PLAYERS,
 };
 use crate::rooms::{InviteCode, InviteCodeGenerator, ResumeToken, ResumeTokenGenerator};
 use std::sync::Arc;
@@ -98,6 +98,24 @@ async fn fifth_player_is_rejected() {
         .expect_err("full");
 
     assert!(matches!(error, LobbyError::LobbyFull));
+}
+
+#[tokio::test]
+async fn lobby_view_reports_server_capabilities() {
+    let registry = InMemoryLobbyRegistry::with_generators_and_capabilities(
+        Arc::new(SequenceInviteCodeGenerator::default()),
+        Arc::new(SequenceResumeTokenGenerator::default()),
+        LobbyServerCapabilities::current(MAX_LOBBY_PLAYERS, true, true),
+    );
+
+    let join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+
+    assert!(join.lobby.capabilities.supports_temporary_session_rom_relay);
+    assert!(join.lobby.capabilities.supports_lobby_voice);
+    assert_eq!(join.lobby.capabilities.max_players, 4);
 }
 
 fn registry() -> InMemoryLobbyRegistry {

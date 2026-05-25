@@ -5,7 +5,8 @@
 
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
-    CreateLobbyParams, JoinLobbyParams, Lobby, LobbyError, LobbyJoin, LobbyRegistry, LobbyView,
+    CreateLobbyParams, JoinLobbyParams, Lobby, LobbyError, LobbyJoin, LobbyRegistry,
+    LobbyServerCapabilities, LobbyView, MAX_LOBBY_PLAYERS,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, ResumeTokenGenerator, UuidResumeTokenGenerator,
@@ -19,6 +20,7 @@ pub struct InMemoryLobbyRegistry {
     lobbies: RwLock<HashMap<String, Lobby>>,
     invite_code_generator: Arc<dyn InviteCodeGenerator>,
     resume_token_generator: Arc<dyn ResumeTokenGenerator>,
+    capabilities: LobbyServerCapabilities,
 }
 
 impl InMemoryLobbyRegistry {
@@ -28,6 +30,7 @@ impl InMemoryLobbyRegistry {
             lobbies: RwLock::new(HashMap::new()),
             invite_code_generator,
             resume_token_generator: Arc::new(UuidResumeTokenGenerator),
+            capabilities: LobbyServerCapabilities::current(MAX_LOBBY_PLAYERS, false, false),
         }
     }
 
@@ -40,6 +43,21 @@ impl InMemoryLobbyRegistry {
             lobbies: RwLock::new(HashMap::new()),
             invite_code_generator,
             resume_token_generator,
+            capabilities: LobbyServerCapabilities::current(MAX_LOBBY_PLAYERS, false, false),
+        }
+    }
+
+    /// Creates a registry with injectable generators and server capabilities.
+    pub fn with_generators_and_capabilities(
+        invite_code_generator: Arc<dyn InviteCodeGenerator>,
+        resume_token_generator: Arc<dyn ResumeTokenGenerator>,
+        capabilities: LobbyServerCapabilities,
+    ) -> Self {
+        Self {
+            lobbies: RwLock::new(HashMap::new()),
+            invite_code_generator,
+            resume_token_generator,
+            capabilities,
         }
     }
 }
@@ -63,7 +81,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             params.initial_game,
             crate::rooms::current_timestamp_ms(),
         );
-        let lobby_view = lobby.view();
+        let lobby_view = lobby.view(self.capabilities.clone());
 
         self.lobbies
             .write()
@@ -98,7 +116,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         )?;
 
         Ok(LobbyJoin {
-            lobby: lobby.view(),
+            lobby: lobby.view(self.capabilities.clone()),
             player_index,
             resume_token: resume_token.expose().to_string(),
         })
@@ -109,7 +127,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             .read()
             .await
             .get(invite_code.normalized())
-            .map(Lobby::view)
+            .map(|lobby| lobby.view(self.capabilities.clone()))
             .ok_or(LobbyError::NotFound)
     }
 }

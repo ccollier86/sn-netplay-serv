@@ -6,6 +6,7 @@ use reqwest::Client;
 use sb_netplay_serv::auth::{
     AuthError, ClientKind, LicenseAuthority, ProtectedClientAuthProof, VerifiedLicense,
 };
+use sb_netplay_serv::file_relay::DisabledFileRelayBroker;
 use sb_netplay_serv::http::{AdminAuthorizer, AppServices, build_router};
 use sb_netplay_serv::lobbies::InMemoryLobbyRegistry;
 use sb_netplay_serv::observability::InMemoryMetrics;
@@ -469,6 +470,7 @@ fn test_services(rooms: Arc<InMemoryRoomRegistry>) -> AppServices {
         Arc::new(InMemoryLobbyRegistry::new(Arc::new(
             StaticInviteCodeGenerator,
         ))),
+        Arc::new(DisabledFileRelayBroker),
         Arc::new(InMemoryRateLimiter::new(RateLimitPolicy {
             create_room_per_minute: 100,
             websocket_join_per_minute: 100,

@@ -53,11 +53,11 @@ pub struct LobbyServerCapabilities {
 
 impl LobbyServerCapabilities {
     /// Creates the current server capability view for a lobby.
-    pub fn current(max_players: u8) -> Self {
+    pub fn current(max_players: u8, temporary_session_rom_relay: bool, lobby_voice: bool) -> Self {
         Self {
             supports_lobby: true,
-            supports_temporary_session_rom_relay: false,
-            supports_lobby_voice: false,
+            supports_temporary_session_rom_relay: temporary_session_rom_relay,
+            supports_lobby_voice: lobby_voice,
             supports_multi_game_lobby: true,
             max_players,
         }

@@ -140,7 +140,7 @@ impl Lobby {
     }
 
     /// Returns the immutable lobby view for API clients.
-    pub fn view(&self) -> LobbyView {
+    pub fn view(&self, capabilities: LobbyServerCapabilities) -> LobbyView {
         LobbyView {
             lobby_id: self.lobby_id,
             event_seq: self.event_seq,
@@ -149,7 +149,7 @@ impl Lobby {
             created_at_ms: self.created_at_ms,
             updated_at_ms: self.updated_at_ms,
             status: self.status,
-            capabilities: LobbyServerCapabilities::current(MAX_LOBBY_PLAYERS),
+            capabilities,
             players: self.players.iter().map(LobbyPlayerSlot::view).collect(),
             selected_game: self.selected_game.clone(),
         }

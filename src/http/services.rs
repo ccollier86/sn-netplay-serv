@@ -4,6 +4,7 @@
 //! construction outside individual routes.
 
 use crate::auth::LicenseAuthority;
+use crate::file_relay::FileRelayBroker;
 use crate::http::AdminAuthorizer;
 use crate::lobbies::LobbyRegistry;
 use crate::observability::MetricsRecorder;
@@ -20,6 +21,8 @@ pub struct AppServices {
     pub rooms: Arc<dyn RoomRegistry>,
     /// Persistent multiplayer lobby registry.
     pub lobbies: Arc<dyn LobbyRegistry>,
+    /// Trusted temporary file relay broker.
+    pub file_relay: Arc<dyn FileRelayBroker>,
     /// Public request limiter.
     pub rate_limiter: Arc<dyn RateLimiter>,
     /// Process metrics recorder.
@@ -36,6 +39,7 @@ impl AppServices {
         license_authority: Arc<dyn LicenseAuthority>,
         rooms: Arc<dyn RoomRegistry>,
         lobbies: Arc<dyn LobbyRegistry>,
+        file_relay: Arc<dyn FileRelayBroker>,
         rate_limiter: Arc<dyn RateLimiter>,
         metrics: Arc<dyn MetricsRecorder>,
         admin_authorizer: AdminAuthorizer,
@@ -45,6 +49,7 @@ impl AppServices {
             license_authority,
             rooms,
             lobbies,
+            file_relay,
             rate_limiter,
             metrics,
             admin_authorizer,

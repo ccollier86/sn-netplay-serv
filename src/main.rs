@@ -6,8 +6,11 @@
 
 use sb_netplay_serv::auth::HttpLicenseAuthority;
 use sb_netplay_serv::config::{ServerConfig, VoiceBrokerConfig};
+use sb_netplay_serv::file_relay::{
+    DisabledFileRelayBroker, FileRelayBroker, FileRelayBrokerConfig, HttpFileRelayBroker,
+};
 use sb_netplay_serv::http::{AdminAuthorizer, AppServices, build_router};
-use sb_netplay_serv::lobbies::InMemoryLobbyRegistry;
+use sb_netplay_serv::lobbies::{InMemoryLobbyRegistry, LobbyServerCapabilities, MAX_LOBBY_PLAYERS};
 use sb_netplay_serv::observability::{
     InMemoryMetrics, ensure_telemetry_schema, init_tracing, spawn_telemetry_sink,
 };
@@ -41,6 +44,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             voice.request_timeout,
         )?),
     };
+    let file_relay_broker: Arc<dyn FileRelayBroker> = match config.file_relay.broker.clone() {
+        FileRelayBrokerConfig::Disabled => Arc::new(DisabledFileRelayBroker),
+        FileRelayBrokerConfig::Http(file_relay) => Arc::new(HttpFileRelayBroker::new(
+            file_relay.base_url,
+            file_relay.bearer_token,
+            file_relay.request_timeout,
+        )?),
+    };
+    let lobby_capabilities = LobbyServerCapabilities::current(
+        MAX_LOBBY_PLAYERS,
+        file_relay_broker.is_enabled() && config.file_relay.temporary_roms_enabled,
+        voice_broker.is_enabled(),
+    );
     let rooms = Arc::new(
         InMemoryRoomRegistry::with_dependencies_event_sink_and_voice(
             Arc::new(UuidInviteCodeGenerator),
@@ -51,9 +67,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             voice_broker,
         ),
     );
-    let lobbies = Arc::new(InMemoryLobbyRegistry::new(Arc::new(
-        UuidInviteCodeGenerator,
-    )));
+    let lobbies = Arc::new(InMemoryLobbyRegistry::with_generators_and_capabilities(
+        Arc::new(UuidInviteCodeGenerator),
+        Arc::new(sb_netplay_serv::rooms::UuidResumeTokenGenerator),
+        lobby_capabilities,
+    ));
     let rate_limiter = Arc::new(InMemoryRateLimiter::new(config.rate_limits));
     let admin_authorizer = AdminAuthorizer::new(config.admin_token.clone());
     let _room_expiration_task = spawn_room_expiration_task(rooms.clone());
@@ -62,6 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         license_authority,
         rooms,
         lobbies,
+        file_relay_broker,
         rate_limiter,
         metrics,
         admin_authorizer,
