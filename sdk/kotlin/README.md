@@ -20,6 +20,8 @@ transport, auth, emulator integration, and UI.
 - Voice helpers cover optional LiveKit grants. `RoomStateMachine` stores the
   local private grant at `state.voice.privateGrant`, request renewal uses
   `RefreshVoiceToken`, and diagnostics intentionally omit the token.
+- Android can leave voice completely off without adding the Voice SDK. See
+  `ANDROID_OPTIONAL_VOICE_HANDOFF.md`.
 
 Apps still own emulator-specific work: pausing the core, serializing/loading
 save states, computing state hashes, and displaying progress.
