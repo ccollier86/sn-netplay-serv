@@ -68,6 +68,7 @@ impl InMemoryRoomRegistry {
             resume_token.hash(),
             input_socket_token.hash(),
             now,
+            false,
         )?;
 
         stored_room.emit_state(now, "guestJoined", "guest joined room");
@@ -82,6 +83,7 @@ impl InMemoryRoomRegistry {
         invite_code: InviteCode,
         host: VerifiedLicense,
         connection_id: ConnectionId,
+        supports_state_file_relay: bool,
     ) -> Result<RoomJoin, RoomError> {
         let mut rooms = self.invite_codes.write().await;
         let stored_room = rooms
@@ -96,6 +98,7 @@ impl InMemoryRoomRegistry {
             resume_token.hash(),
             input_socket_token.hash(),
             now,
+            supports_state_file_relay,
         )?;
 
         stored_room.emit_state(now, "hostConnected", "host socket connected");
@@ -117,6 +120,7 @@ impl InMemoryRoomRegistry {
         invite_code: InviteCode,
         guest: VerifiedLicense,
         connection_id: ConnectionId,
+        supports_state_file_relay: bool,
     ) -> Result<RoomJoin, RoomError> {
         let mut rooms = self.invite_codes.write().await;
         let stored_room = rooms
@@ -131,6 +135,7 @@ impl InMemoryRoomRegistry {
             resume_token.hash(),
             input_socket_token.hash(),
             now,
+            supports_state_file_relay,
         )?;
 
         stored_room.emit_state(now, "guestConnected", "guest socket connected");
@@ -154,6 +159,7 @@ impl InMemoryRoomRegistry {
         room_epoch: u64,
         resume_token: String,
         connection_id: ConnectionId,
+        supports_state_file_relay: bool,
     ) -> Result<RoomJoin, RoomError> {
         let mut rooms = self.invite_codes.write().await;
         let stored_room = rooms
@@ -168,6 +174,7 @@ impl InMemoryRoomRegistry {
             room_epoch,
             connection_id,
             now,
+            supports_state_file_relay,
         )?;
         stored_room.emit_state(now, "playerReconnected", "player reconnected");
         let room = stored_room.view(now);

@@ -154,6 +154,7 @@ pub async fn websocket_room(
         reconnect_room_epoch: reconnect.as_ref().map(|value| value.room_epoch),
         resume_token: reconnect.map(|value| value.resume_token),
         role: query.role,
+        supports_state_file_relay: query.supports_state_file_relay.unwrap_or(false),
         license,
     };
 
@@ -402,6 +403,8 @@ pub struct WebSocketRoomQuery {
     room_epoch: Option<u64>,
     #[serde(default)]
     resume_token: Option<String>,
+    #[serde(default)]
+    supports_state_file_relay: Option<bool>,
 }
 
 #[derive(Deserialize)]

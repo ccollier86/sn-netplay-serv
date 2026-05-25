@@ -24,6 +24,7 @@ mod session_descriptor_error;
 mod session_mode;
 mod session_pause;
 mod snapshot;
+mod snapshot_file_relay;
 mod state_hash;
 mod voice_descriptor;
 
@@ -60,6 +61,9 @@ pub use session_pause::{
     SessionPauseHolder, SessionPauseReason, SessionPauseState, SessionPauseView,
 };
 pub use snapshot::{SnapshotChunk, SnapshotLimits, SnapshotManifest};
+pub use snapshot_file_relay::{
+    SnapshotFileRelayGrant, SnapshotFileRelayGrantPair, SnapshotFileRelayGrantRole,
+};
 pub use state_hash::{
     NearbyStateHashMatchView, PlayerStateHashView, StateHashMismatchView, StateHashReport,
 };

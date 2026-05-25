@@ -11,6 +11,7 @@ mod websocket_message_handler;
 mod websocket_outbound;
 mod websocket_peer_close;
 mod websocket_session;
+mod websocket_snapshot_file_relay_handler;
 mod websocket_voice_handler;
 
 pub use websocket_input_session::handle_websocket_input_session;

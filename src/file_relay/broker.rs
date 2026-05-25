@@ -11,6 +11,9 @@ pub trait FileRelayBroker: Send + Sync {
     /// Returns whether this broker can create transfer tickets.
     fn is_enabled(&self) -> bool;
 
+    /// Returns the public base URL clients should use for transfer IO.
+    fn public_base_url(&self) -> Option<&str>;
+
     /// Creates a temporary transfer ticket.
     async fn create_transfer(
         &self,
@@ -26,6 +29,10 @@ pub struct DisabledFileRelayBroker;
 impl FileRelayBroker for DisabledFileRelayBroker {
     fn is_enabled(&self) -> bool {
         false
+    }
+
+    fn public_base_url(&self) -> Option<&str> {
+        None
     }
 
     async fn create_transfer(

@@ -81,6 +81,10 @@ fn room_error_message(error: RoomError) -> ServerMessage {
         RoomError::SnapshotInvalid => {
             static_error("snapshotInvalid", "Snapshot payload is invalid.")
         }
+        RoomError::SnapshotFileRelayUnavailable => static_error(
+            "snapshotFileRelayUnavailable",
+            "Snapshot file relay is unavailable for this room.",
+        ),
         RoomError::LinkPacketInvalid => {
             static_error("linkPacketInvalid", "Link-cable packet is invalid.")
         }

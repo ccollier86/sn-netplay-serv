@@ -8,11 +8,12 @@ use crate::auth::VerifiedLicense;
 use crate::protocol::{
     ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
     LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason,
-    SnapshotChunk, SnapshotManifest, StateHashReport,
+    SnapshotChunk, SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, RoomDebugEvent, RoomError, RoomEvent, RoomInputEvent,
     RoomJoin, RoomRegistrySnapshot, RoomView, RoomVoiceTokenRefresh,
+    SnapshotFileRelayTransferIntent,
 };
 use tokio::sync::broadcast;
 
@@ -46,6 +47,7 @@ pub trait RoomRegistry: Send + Sync {
         invite_code: InviteCode,
         host: VerifiedLicense,
         connection_id: ConnectionId,
+        supports_state_file_relay: bool,
     ) -> Result<RoomJoin, RoomError>;
 
     /// Adds a verified guest socket and returns the joined room state.
@@ -54,6 +56,7 @@ pub trait RoomRegistry: Send + Sync {
         invite_code: InviteCode,
         guest: VerifiedLicense,
         connection_id: ConnectionId,
+        supports_state_file_relay: bool,
     ) -> Result<RoomJoin, RoomError>;
 
     /// Reclaims an occupied player slot with a valid resume token.
@@ -64,6 +67,7 @@ pub trait RoomRegistry: Send + Sync {
         room_epoch: u64,
         resume_token: String,
         connection_id: ConnectionId,
+        supports_state_file_relay: bool,
     ) -> Result<RoomJoin, RoomError>;
 
     /// Marks a socket connection as disconnected.
@@ -161,6 +165,32 @@ pub trait RoomRegistry: Send + Sync {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        manifest: SnapshotManifest,
+    ) -> Result<(), RoomError>;
+
+    /// Validates a host request for large snapshot file relay.
+    async fn prepare_snapshot_file_relay(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        manifest: SnapshotManifest,
+    ) -> Result<SnapshotFileRelayTransferIntent, RoomError>;
+
+    /// Stores file-relay grants and privately grants the host upload.
+    async fn grant_snapshot_file_relay_upload(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        manifest: SnapshotManifest,
+        grant_pair: SnapshotFileRelayGrantPair,
+    ) -> Result<(), RoomError>;
+
+    /// Completes a file-relay upload and privately grants the guest download.
+    async fn relay_snapshot_file_upload_complete(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        transfer_id: String,
         manifest: SnapshotManifest,
     ) -> Result<(), RoomError>;
 

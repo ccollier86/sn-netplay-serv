@@ -6,10 +6,12 @@
 use super::InMemoryRoomRegistry;
 use crate::protocol::{
     ClientNetworkQualityReport, CompatibilityFingerprint, LinkCableCompatibility, SnapshotChunk,
-    SnapshotLimits, SnapshotManifest,
+    SnapshotFileRelayGrantPair, SnapshotLimits, SnapshotManifest,
 };
 use crate::rooms::stored_room::StoredRoom;
-use crate::rooms::{ConnectionId, InviteCode, RoomError, RoomView};
+use crate::rooms::{
+    ConnectionId, InviteCode, RoomError, RoomView, SnapshotFileRelayTransferIntent,
+};
 
 impl InMemoryRoomRegistry {
     /// Stores controller-netplay compatibility from one connection.
@@ -144,6 +146,79 @@ impl InMemoryRoomRegistry {
         )?;
         let now = self.clock.now();
         stored_room.emit_snapshot_complete(now, connection_id, manifest);
+        self.record_recent_events(stored_room.debug_events(1));
+
+        Ok(())
+    }
+
+    /// Validates a large host snapshot before a file-relay grant is created.
+    pub(super) async fn prepare_snapshot_file_relay_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        manifest: SnapshotManifest,
+    ) -> Result<SnapshotFileRelayTransferIntent, RoomError> {
+        let rooms = self.invite_codes.read().await;
+        let stored_room = rooms
+            .get(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+
+        stored_room.room.prepare_snapshot_file_relay_transfer(
+            connection_id,
+            &manifest,
+            SnapshotLimits::default(),
+        )
+    }
+
+    /// Stores a file-relay transfer and sends the host's upload grant.
+    pub(super) async fn grant_snapshot_file_relay_upload_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        manifest: SnapshotManifest,
+        grant_pair: SnapshotFileRelayGrantPair,
+    ) -> Result<(), RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+
+        let upload_grant = stored_room.room.accept_snapshot_file_relay_grant(
+            connection_id,
+            &manifest,
+            grant_pair,
+            SnapshotLimits::default(),
+        )?;
+        let now = self.clock.now();
+        stored_room.emit_snapshot_file_relay_upload_granted(now, connection_id, upload_grant);
+        self.record_recent_events(stored_room.debug_events(1));
+
+        Ok(())
+    }
+
+    /// Completes a file-relay upload and sends the guest's download grant.
+    pub(super) async fn relay_snapshot_file_upload_complete_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        transfer_id: String,
+        manifest: SnapshotManifest,
+    ) -> Result<(), RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+
+        let (receiver, download_grant) = stored_room
+            .room
+            .accept_snapshot_file_relay_upload_complete(
+                connection_id,
+                &transfer_id,
+                &manifest,
+                SnapshotLimits::default(),
+            )?;
+        let now = self.clock.now();
+        stored_room.emit_snapshot_file_relay_download_ready(now, receiver, download_grant);
         self.record_recent_events(stored_room.debug_events(1));
 
         Ok(())

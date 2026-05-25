@@ -16,6 +16,7 @@ const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct HttpFileRelayBroker {
     client: reqwest::Client,
     base_url: Url,
+    public_base_url: String,
     bearer_token: String,
 }
 
@@ -33,9 +34,12 @@ impl HttpFileRelayBroker {
             .map_err(|_| FileRelayBrokerError::RequestFailed)?;
         let base_url = parse_base_url(base_url.as_ref())?;
 
+        let public_base_url = base_url.as_str().trim_end_matches('/').to_string();
+
         Ok(Self {
             client,
             base_url,
+            public_base_url,
             bearer_token: bearer_token.into(),
         })
     }
@@ -51,6 +55,10 @@ impl HttpFileRelayBroker {
 impl FileRelayBroker for HttpFileRelayBroker {
     fn is_enabled(&self) -> bool {
         true
+    }
+
+    fn public_base_url(&self) -> Option<&str> {
+        Some(&self.public_base_url)
     }
 
     async fn create_transfer(

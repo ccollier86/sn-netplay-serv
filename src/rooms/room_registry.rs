@@ -8,13 +8,14 @@ use crate::auth::VerifiedLicense;
 use crate::protocol::{
     ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
     LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason,
-    SnapshotChunk, SnapshotManifest, StateHashReport,
+    SnapshotChunk, SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
     Clock, ConnectionId, InviteCode, InviteCodeGenerator, NoopRoomDebugEventSink, PlayerIndex,
     ResumeTokenGenerator, RoomDebugEvent, RoomDebugEventLog, RoomDebugEventSink, RoomError,
     RoomEventReceiver, RoomJoin, RoomPerformanceSample, RoomRecoveryConfig, RoomRegistry,
-    RoomRegistrySnapshot, RoomView, SystemClock, UuidResumeTokenGenerator,
+    RoomRegistrySnapshot, RoomView, SnapshotFileRelayTransferIntent, SystemClock,
+    UuidResumeTokenGenerator,
 };
 use crate::voice::{DisabledVoiceBroker, VoiceBroker};
 use std::collections::HashMap;
@@ -195,8 +196,9 @@ impl RoomRegistry for InMemoryRoomRegistry {
         invite_code: InviteCode,
         host: VerifiedLicense,
         connection_id: ConnectionId,
+        supports_state_file_relay: bool,
     ) -> Result<RoomJoin, RoomError> {
-        self.connect_host_impl(invite_code, host, connection_id)
+        self.connect_host_impl(invite_code, host, connection_id, supports_state_file_relay)
             .await
     }
 
@@ -205,8 +207,9 @@ impl RoomRegistry for InMemoryRoomRegistry {
         invite_code: InviteCode,
         guest: VerifiedLicense,
         connection_id: ConnectionId,
+        supports_state_file_relay: bool,
     ) -> Result<RoomJoin, RoomError> {
-        self.connect_guest_impl(invite_code, guest, connection_id)
+        self.connect_guest_impl(invite_code, guest, connection_id, supports_state_file_relay)
             .await
     }
 
@@ -217,6 +220,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
         room_epoch: u64,
         resume_token: String,
         connection_id: ConnectionId,
+        supports_state_file_relay: bool,
     ) -> Result<RoomJoin, RoomError> {
         self.reconnect_player_impl(
             invite_code,
@@ -224,6 +228,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
             room_epoch,
             resume_token,
             connection_id,
+            supports_state_file_relay,
         )
         .await
     }
@@ -364,6 +369,43 @@ impl RoomRegistry for InMemoryRoomRegistry {
     ) -> Result<(), RoomError> {
         self.relay_snapshot_complete_impl(invite_code, connection_id, manifest)
             .await
+    }
+
+    async fn prepare_snapshot_file_relay(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        manifest: SnapshotManifest,
+    ) -> Result<SnapshotFileRelayTransferIntent, RoomError> {
+        self.prepare_snapshot_file_relay_impl(invite_code, connection_id, manifest)
+            .await
+    }
+
+    async fn grant_snapshot_file_relay_upload(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        manifest: SnapshotManifest,
+        grant_pair: SnapshotFileRelayGrantPair,
+    ) -> Result<(), RoomError> {
+        self.grant_snapshot_file_relay_upload_impl(invite_code, connection_id, manifest, grant_pair)
+            .await
+    }
+
+    async fn relay_snapshot_file_upload_complete(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        transfer_id: String,
+        manifest: SnapshotManifest,
+    ) -> Result<(), RoomError> {
+        self.relay_snapshot_file_upload_complete_impl(
+            invite_code,
+            connection_id,
+            transfer_id,
+            manifest,
+        )
+        .await
     }
 
     async fn relay_input_frame(

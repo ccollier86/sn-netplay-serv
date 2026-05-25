@@ -8,13 +8,13 @@ use crate::auth::VerifiedLicense;
 use crate::limits::MVP_ROOM_CAPACITY;
 use crate::protocol::{
     ClientNetworkQualityReport, CompatibilityFingerprint, InputDelayChange, NetplayProtocolView,
-    NetplaySessionDescriptor, NetplaySessionMode, SnapshotChunk, SnapshotLimits, SnapshotManifest,
+    NetplaySessionDescriptor, NetplaySessionMode,
 };
 use crate::rooms::{
     AdaptiveInputDelayPolicy, ConnectionId, InviteCode, LinkCableRoomState, PlayerIndex,
-    PlayerRole, PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus, ResumeTokenHash,
-    RoomError, RoomId, RoomStatus, RoomView, RoomVoiceState, SessionPauseStateTracker,
-    SnapshotTransferState,
+    PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus, ResumeTokenHash, RoomError,
+    RoomId, RoomStatus, RoomView, RoomVoiceState, SessionPauseStateTracker,
+    SnapshotFileRelayTransferState, SnapshotTransferState,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
@@ -35,10 +35,11 @@ pub struct NetplayRoom {
     pub(super) last_input_frames: HashMap<PlayerIndex, u64>,
     pub(super) next_input_frames: HashMap<PlayerIndex, u64>,
     pub(super) link_cable_state: LinkCableRoomState,
-    host_snapshot_completed: bool,
+    pub(super) host_snapshot_completed: bool,
     pub(super) next_pause_sequence: u64,
     pub(super) pause_state: Option<SessionPauseStateTracker>,
-    snapshot_transfer: Option<SnapshotTransferState>,
+    pub(super) snapshot_transfer: Option<SnapshotTransferState>,
+    pub(super) snapshot_file_relay_transfer: Option<SnapshotFileRelayTransferState>,
     pub(super) sync_start_frame: u64,
     pub(super) room_frame: u64,
     pub(super) released_frame: Option<u64>,
@@ -112,6 +113,7 @@ impl NetplayRoom {
             next_pause_sequence: 1,
             pause_state: None,
             snapshot_transfer: None,
+            snapshot_file_relay_transfer: None,
             sync_start_frame: 0,
             room_frame: 0,
             released_frame: None,
@@ -166,6 +168,7 @@ impl NetplayRoom {
             self.compatibility.remove(&player_index);
             self.ready_players.remove(&player_index);
             self.snapshot_transfer = None;
+            self.snapshot_file_relay_transfer = None;
             self.status = RoomStatus::CheckingCompatibility;
             self.set_player_status(player_index, PlayerStatus::CompatibilityFailed);
             return Err(RoomError::CompatibilityMismatch);
@@ -260,43 +263,6 @@ impl NetplayRoom {
         self.sync_start_frame
     }
 
-    /// Validates host snapshot chunk relay.
-    pub fn accept_snapshot_chunk(
-        &mut self,
-        connection_id: ConnectionId,
-        chunk: &SnapshotChunk,
-        limits: SnapshotLimits,
-    ) -> Result<(), RoomError> {
-        self.validate_host_snapshot_sender(connection_id)?;
-        self.validate_snapshot_repair_frame(chunk.repair_frame)?;
-        if self.host_snapshot_completed {
-            return Err(RoomError::SnapshotInvalid);
-        }
-        self.snapshot_transfer
-            .get_or_insert_with(SnapshotTransferState::new)
-            .accept_chunk(chunk, limits)
-    }
-
-    /// Validates host snapshot completion metadata.
-    pub fn accept_snapshot_complete(
-        &mut self,
-        connection_id: ConnectionId,
-        manifest: &SnapshotManifest,
-        limits: SnapshotLimits,
-    ) -> Result<(), RoomError> {
-        self.validate_host_snapshot_sender(connection_id)?;
-        self.validate_snapshot_repair_frame(manifest.repair_frame)?;
-        let transfer = self
-            .snapshot_transfer
-            .as_ref()
-            .ok_or(RoomError::SnapshotInvalid)?;
-        transfer.complete(manifest, limits)?;
-        self.snapshot_transfer = None;
-        self.host_snapshot_completed = true;
-
-        Ok(())
-    }
-
     /// Creates a serializable view for HTTP and WebSocket responses.
     pub fn view(&self) -> RoomView {
         self.view_for_event(0, Instant::now())
@@ -332,6 +298,7 @@ impl NetplayRoom {
                     occupied: !slot.is_empty(),
                     control_connected: slot.connection_id.is_some(),
                     input_connected: slot.input_connection_id.is_some(),
+                    supports_state_file_relay: slot.supports_state_file_relay,
                     last_seen_age_ms: slot
                         .last_seen_at
                         .map(|last_seen| now.saturating_duration_since(last_seen).as_millis()),
@@ -382,37 +349,6 @@ impl NetplayRoom {
             .iter()
             .find(|slot| slot.input_connection_id == Some(connection_id))
             .map(|slot| slot.player_index)
-    }
-
-    fn role_for_connection(&self, connection_id: ConnectionId) -> Option<PlayerRole> {
-        self.players
-            .iter()
-            .find(|slot| slot.connection_id == Some(connection_id))
-            .map(|slot| slot.role)
-    }
-
-    fn validate_host_snapshot_sender(&self, connection_id: ConnectionId) -> Result<(), RoomError> {
-        if self.session.mode != NetplaySessionMode::ControllerNetplay {
-            return Err(RoomError::RoomNotReady);
-        }
-
-        if self.status != RoomStatus::SyncingState && self.status != RoomStatus::Ready {
-            return Err(RoomError::RoomNotReady);
-        }
-
-        match self.role_for_connection(connection_id) {
-            Some(PlayerRole::Host) => Ok(()),
-            Some(PlayerRole::Guest) => Err(RoomError::HostOnly),
-            None => Err(RoomError::UnknownConnection),
-        }
-    }
-
-    fn validate_snapshot_repair_frame(&self, repair_frame: u64) -> Result<(), RoomError> {
-        if repair_frame == self.sync_start_frame {
-            Ok(())
-        } else {
-            Err(RoomError::SnapshotInvalid)
-        }
     }
 
     pub(super) fn connected_player_indices(&self) -> Vec<PlayerIndex> {
@@ -468,6 +404,7 @@ impl NetplayRoom {
         self.host_snapshot_completed = false;
         self.pause_state = None;
         self.snapshot_transfer = None;
+        self.snapshot_file_relay_transfer = None;
         self.sync_start_frame = start_frame;
         self.room_frame = start_frame;
         self.released_frame = None;

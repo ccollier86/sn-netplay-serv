@@ -32,6 +32,8 @@ pub struct WebSocketJoinRequest {
     pub reconnect_room_epoch: Option<u64>,
     /// Opaque resume token supplied for reconnect.
     pub resume_token: Option<String>,
+    /// Whether this socket can use file relay for large sync state.
+    pub supports_state_file_relay: bool,
     /// Verified Desktop install/license identity.
     pub license: VerifiedLicense,
 }

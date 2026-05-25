@@ -5,7 +5,7 @@
 
 use crate::protocol::{
     InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket, ServerFrame, SessionPauseView,
-    SnapshotChunk, SnapshotManifest, StateHashMismatchView,
+    SnapshotChunk, SnapshotFileRelayGrant, SnapshotManifest, StateHashMismatchView,
 };
 use crate::rooms::{ConnectionId, RoomView};
 
@@ -74,6 +74,28 @@ pub enum RoomEvent {
         session_epoch: u64,
         /// Validated snapshot manifest.
         manifest: SnapshotManifest,
+    },
+    /// Host should upload a large snapshot through the file relay.
+    SnapshotFileRelayUploadGranted {
+        /// Connection that requested the file relay.
+        source: ConnectionId,
+        /// Room epoch the snapshot belongs to.
+        room_epoch: u64,
+        /// Session epoch the snapshot belongs to.
+        session_epoch: u64,
+        /// Private upload grant for the source connection.
+        grant: SnapshotFileRelayGrant,
+    },
+    /// Guest can download a large snapshot through the file relay.
+    SnapshotFileRelayDownloadReady {
+        /// Connection that should download the file.
+        receiver: ConnectionId,
+        /// Room epoch the snapshot belongs to.
+        room_epoch: u64,
+        /// Session epoch the snapshot belongs to.
+        session_epoch: u64,
+        /// Private download grant for the receiver connection.
+        grant: SnapshotFileRelayGrant,
     },
     /// One player intentionally left the room.
     PlayerExited {

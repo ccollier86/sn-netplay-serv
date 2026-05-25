@@ -47,6 +47,9 @@ pub enum RoomError {
     /// Snapshot payload failed relay validation.
     #[error("snapshot payload is invalid")]
     SnapshotInvalid,
+    /// Large snapshot file relay is unavailable for this room or server.
+    #[error("snapshot file relay is unavailable")]
+    SnapshotFileRelayUnavailable,
     /// Link-cable packet failed relay validation.
     #[error("link-cable packet is invalid")]
     LinkPacketInvalid,
