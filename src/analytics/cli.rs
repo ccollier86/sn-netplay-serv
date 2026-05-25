@@ -1,6 +1,10 @@
 //! Command-line entry point for netplay analytics tools.
 
 use crate::analytics::config::AnalyticsConfig;
+use crate::analytics::file_relay_query::{FileRelayAnalyticsDb, FileRelayEventFilter};
+use crate::analytics::file_relay_report::{
+    build_file_relay_report, print_file_relay_events, print_file_relay_report,
+};
 use crate::analytics::live::{LiveDiagnosticsClient, LiveDiagnosticsConfig};
 use crate::analytics::query::{AnalyticsDb, SessionKey};
 use crate::analytics::report::{build_fleet_report, build_session_reports, print_report};
@@ -25,8 +29,11 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             run_live(&args).await?;
         }
         "schema" => {
-            let db = connect_db().await?;
+            let config = AnalyticsConfig::from_env()?;
+            let db = AnalyticsDb::connect(config.clone()).await?;
+            let file_relay_db = FileRelayAnalyticsDb::connect(config).await?;
             db.apply_schema().await?;
+            file_relay_db.apply_schema().await?;
             println!("analytics schema applied");
         }
         "probe" => {
@@ -67,9 +74,37 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             let db = connect_db().await?;
             run_raw(&db, &args).await?;
         }
+        "file-relay" => {
+            let config = AnalyticsConfig::from_env()?;
+            let db = FileRelayAnalyticsDb::connect(config).await?;
+            run_file_relay(&db, &args).await?;
+        }
         _ => {
             print_help();
         }
+    }
+
+    Ok(())
+}
+
+async fn run_file_relay(
+    db: &FileRelayAnalyticsDb,
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let limit = option_usize(args, "--limit").unwrap_or(100);
+    let filter = FileRelayEventFilter {
+        room_id: option_string(args, "--room"),
+        transfer_id: option_string(args, "--transfer"),
+    };
+    let events = db.recent_events(filter, limit).await?;
+
+    match args.get(1).map(String::as_str) {
+        Some("raw") => print_file_relay_events(&events),
+        Some("report") => {
+            let report = build_file_relay_report(&events);
+            print_file_relay_report(&report, &events);
+        }
+        _ => print_help(),
     }
 
     Ok(())
@@ -217,6 +252,12 @@ fn print_help() {
     println!("  report --limit 25");
     println!("  raw recent --limit 5");
     println!("  raw session --room <room_uuid> [--epoch <session_epoch>] [--limit 25]");
+    println!(
+        "  file-relay report [--room <room_or_lobby_id>] [--transfer <transfer_id>] [--limit 100]"
+    );
+    println!(
+        "  file-relay raw [--room <room_or_lobby_id>] [--transfer <transfer_id>] [--limit 100]"
+    );
 }
 
 async fn run_probe(
