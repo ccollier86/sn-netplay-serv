@@ -299,6 +299,26 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         Ok(lobby.view())
     }
 
+    async fn return_lobby_from_game(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+    ) -> Result<LobbyView, LobbyError> {
+        let mut lobbies = self.lobbies.write().await;
+        let lobby = lobbies
+            .get_mut(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+        lobby.lobby.return_to_lobby(
+            connection_id,
+            proposal_id,
+            crate::rooms::current_timestamp_ms(),
+        )?;
+        lobby.emit_state_changed();
+
+        Ok(lobby.view())
+    }
+
     async fn send_lobby_chat(
         &self,
         invite_code: InviteCode,

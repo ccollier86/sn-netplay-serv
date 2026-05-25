@@ -306,6 +306,28 @@ impl Lobby {
         Ok(launch)
     }
 
+    /// Clears an active child game and returns players to lobby readiness.
+    pub fn return_to_lobby(
+        &mut self,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+        now_ms: u128,
+    ) -> Result<(), LobbyError> {
+        self.player_index_for_connection(connection_id)?;
+        self.require_selected_proposal(proposal_id)?;
+
+        self.game_readiness.clear();
+        self.pending_launch = None;
+        self.status = if self.selected_game.is_some() {
+            LobbyStatus::GameSelected
+        } else {
+            LobbyStatus::Open
+        };
+        self.bump(now_ms);
+
+        Ok(())
+    }
+
     /// Returns the player index assigned to a lobby connection.
     pub fn player_index_for_connection(
         &self,

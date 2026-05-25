@@ -308,7 +308,7 @@ async fn host_launch_requires_connected_players_ready() {
 
     let published = registry
         .publish_lobby_game_room(
-            invite,
+            invite.clone(),
             host_connection,
             selected.proposal_id,
             InviteCode::parse("AB23-CD").expect("room invite"),
@@ -323,6 +323,15 @@ async fn host_launch_requires_connected_players_ready() {
         crate::lobbies::LobbyGameLaunchStatus::Ready
     );
     assert_eq!(pending_launch.room_invite_code.as_deref(), Some("AB23-CD"));
+
+    let returned = registry
+        .return_lobby_from_game(invite, guest_connection, selected.proposal_id)
+        .await
+        .expect("returned");
+
+    assert_eq!(returned.status, LobbyStatus::GameSelected);
+    assert!(returned.pending_launch.is_none());
+    assert!(returned.game_readiness.is_empty());
 }
 
 #[tokio::test]

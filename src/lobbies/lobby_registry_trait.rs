@@ -99,6 +99,14 @@ pub trait LobbyRegistry: Send + Sync {
         room_invite_code: InviteCode,
     ) -> Result<LobbyView, LobbyError>;
 
+    /// Clears the active child game and returns players to lobby setup.
+    async fn return_lobby_from_game(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+    ) -> Result<LobbyView, LobbyError>;
+
     /// Sends a sanitized lobby chat message.
     async fn send_lobby_chat(
         &self,

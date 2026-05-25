@@ -49,6 +49,13 @@ pub enum LobbyClientMessage {
         /// User-facing gameplay room invite code.
         room_invite_code: String,
     },
+    /// Client reports that the launched child game has ended.
+    ReturnToLobby {
+        /// Lobby epoch observed by the client.
+        lobby_epoch: u64,
+        /// Selected game proposal that was active.
+        proposal_id: Uuid,
+    },
     /// Sends a lobby-scoped chat message.
     Chat {
         /// Lobby epoch observed by the client.

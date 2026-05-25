@@ -310,6 +310,25 @@ async fn handle_lobby_message(
             )
             .await
         }
+        LobbyClientMessage::ReturnToLobby {
+            lobby_epoch,
+            proposal_id,
+        } => {
+            apply_lobby_result(
+                sender,
+                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
+            )
+            .await?;
+            apply_lobby_result(
+                sender,
+                services
+                    .lobbies
+                    .return_lobby_from_game(invite_code.clone(), connection_id, proposal_id)
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
         LobbyClientMessage::Chat { lobby_epoch, body } => {
             apply_lobby_result(
                 sender,
