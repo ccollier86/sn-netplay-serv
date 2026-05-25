@@ -28,7 +28,7 @@ impl LobbyClientCapabilities {
     pub fn desktop_default() -> Self {
         Self {
             supports_lobby: true,
-            supports_temporary_session_rom_relay: true,
+            supports_temporary_session_rom_relay: false,
             supports_lobby_voice: true,
             supports_multi_game_lobby: true,
         }
