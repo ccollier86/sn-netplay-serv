@@ -536,6 +536,7 @@ fn create_params() -> CreateLobbyParams {
         display_name: Some("Host".to_string()),
         capabilities: LobbyClientCapabilities::desktop_default(),
         initial_game: None,
+        voice: None,
     }
 }
 

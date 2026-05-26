@@ -206,6 +206,11 @@ impl IntoResponse for HttpError {
                 "lobbyRomRelayTooLarge",
                 "This game is too large for temporary session access.",
             ),
+            Self::Lobby(LobbyError::VoiceUnavailable) => (
+                StatusCode::CONFLICT,
+                "lobbyVoiceUnavailable",
+                "Voice chat is unavailable.",
+            ),
             Self::Lobby(LobbyError::InvalidPayload) => (
                 StatusCode::BAD_REQUEST,
                 "invalidLobbyPayload",

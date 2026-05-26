@@ -10,7 +10,8 @@ use crate::lobbies::{
     LobbyPlayerSlot, LobbyPlayerStatus, LobbyServerCapabilities, LobbyView,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, PlayerIndex, ResumeTokenHash, RoomId, hash_resume_token,
+    ConnectionId, InviteCode, PlayerIndex, ResumeTokenHash, RoomId, RoomVoiceState,
+    hash_resume_token,
 };
 use serde::Serialize;
 
@@ -45,6 +46,7 @@ pub struct Lobby {
     selected_game: Option<LobbyGameSelectionView>,
     game_readiness: Vec<LobbyGameReadinessView>,
     pending_launch: Option<LobbyGameLaunchView>,
+    pub(crate) voice: Option<RoomVoiceState>,
 }
 
 impl Lobby {
@@ -91,6 +93,7 @@ impl Lobby {
             selected_game,
             game_readiness: Vec::new(),
             pending_launch: None,
+            voice: None,
         }
     }
 
@@ -394,6 +397,16 @@ impl Lobby {
         self.lobby_id
     }
 
+    /// Returns this lobby's invite code.
+    pub(super) fn invite_code(&self) -> &InviteCode {
+        &self.invite_code
+    }
+
+    /// Returns this lobby's lifecycle status.
+    pub(super) fn status(&self) -> LobbyStatus {
+        self.status
+    }
+
     /// Returns the current selected game proposal, if any.
     pub(super) fn selected_game(&self) -> Option<&LobbyGameSelectionView> {
         self.selected_game.as_ref()
@@ -414,6 +427,7 @@ impl Lobby {
             selected_game: self.selected_game.clone(),
             game_readiness: self.game_readiness.clone(),
             pending_launch: self.pending_launch.clone(),
+            voice: self.voice.as_ref().map(RoomVoiceState::view),
         }
     }
 

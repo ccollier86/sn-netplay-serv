@@ -7,7 +7,7 @@ use crate::lobbies::{
     LobbyGameLaunchView, LobbyGameReadinessView, LobbyGameSelectionView, LobbyPlayerSlotView,
     LobbyServerCapabilities, LobbyStatus,
 };
-use crate::rooms::RoomId;
+use crate::rooms::{RoomId, RoomVoiceView};
 use serde::Serialize;
 
 /// Current lobby state returned by REST and future lobby WebSocket messages.
@@ -41,4 +41,7 @@ pub struct LobbyView {
     /// Host launch signal for the selected game.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_launch: Option<LobbyGameLaunchView>,
+    /// Lobby-scoped voice room metadata safe to broadcast.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voice: Option<RoomVoiceView>,
 }

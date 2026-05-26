@@ -15,16 +15,18 @@ use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeTokenGenerator,
     UuidResumeTokenGenerator,
 };
+use crate::voice::{DisabledVoiceBroker, VoiceBroker};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Thread-safe in-memory lobby registry.
 pub struct InMemoryLobbyRegistry {
-    lobbies: RwLock<HashMap<String, StoredLobby>>,
+    pub(super) lobbies: RwLock<HashMap<String, StoredLobby>>,
     invite_code_generator: Arc<dyn InviteCodeGenerator>,
     resume_token_generator: Arc<dyn ResumeTokenGenerator>,
-    capabilities: LobbyServerCapabilities,
+    pub(super) capabilities: LobbyServerCapabilities,
+    pub(super) voice_broker: Arc<dyn VoiceBroker>,
 }
 
 impl InMemoryLobbyRegistry {
@@ -35,6 +37,7 @@ impl InMemoryLobbyRegistry {
             invite_code_generator,
             resume_token_generator: Arc::new(UuidResumeTokenGenerator),
             capabilities: LobbyServerCapabilities::current(MAX_LOBBY_PLAYERS, false, false),
+            voice_broker: Arc::new(DisabledVoiceBroker),
         }
     }
 
@@ -48,6 +51,7 @@ impl InMemoryLobbyRegistry {
             invite_code_generator,
             resume_token_generator,
             capabilities: LobbyServerCapabilities::current(MAX_LOBBY_PLAYERS, false, false),
+            voice_broker: Arc::new(DisabledVoiceBroker),
         }
     }
 
@@ -62,6 +66,23 @@ impl InMemoryLobbyRegistry {
             invite_code_generator,
             resume_token_generator,
             capabilities,
+            voice_broker: Arc::new(DisabledVoiceBroker),
+        }
+    }
+
+    /// Creates a registry with injectable generators, capabilities, and voice broker.
+    pub fn with_generators_capabilities_and_voice(
+        invite_code_generator: Arc<dyn InviteCodeGenerator>,
+        resume_token_generator: Arc<dyn ResumeTokenGenerator>,
+        capabilities: LobbyServerCapabilities,
+        voice_broker: Arc<dyn VoiceBroker>,
+    ) -> Self {
+        Self {
+            lobbies: RwLock::new(HashMap::new()),
+            invite_code_generator,
+            resume_token_generator,
+            capabilities,
+            voice_broker,
         }
     }
 }
@@ -75,16 +96,27 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
     ) -> Result<LobbyJoin, LobbyError> {
         let invite_code = self.invite_code_generator.generate();
         let resume_token = self.resume_token_generator.generate();
-        let lobby = Lobby::new(
+        let mut lobby = Lobby::new(
             invite_code.clone(),
             &host,
             ConnectionId::new(),
-            params.display_name,
-            params.capabilities,
+            params.display_name.clone(),
+            params.capabilities.clone(),
             resume_token.hash(),
             params.initial_game,
             crate::rooms::current_timestamp_ms(),
         );
+        if let Some(voice) = self
+            .create_voice_state_for_lobby(
+                &lobby,
+                params.voice.as_ref(),
+                params.capabilities.supports_lobby_voice,
+            )
+            .await
+        {
+            lobby.set_voice_state(voice);
+        }
+        let voice = lobby.voice_grant_for(crate::rooms::PlayerIndex::ONE);
         let stored_lobby = StoredLobby::new(lobby, self.capabilities.clone());
         let lobby_view = stored_lobby.view();
 
@@ -97,6 +129,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             lobby: lobby_view,
             player_index: crate::rooms::PlayerIndex::ONE,
             resume_token: resume_token.expose().to_string(),
+            voice,
         })
     }
 
@@ -125,6 +158,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             lobby: lobby.view(),
             player_index,
             resume_token: resume_token.expose().to_string(),
+            voice: lobby.lobby.voice_grant_for(player_index),
         })
     }
 
@@ -154,6 +188,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             lobby: lobby.view(),
             player_index,
             resume_token: resume_token.expose().to_string(),
+            voice: lobby.lobby.voice_grant_for(player_index),
         })
     }
 
@@ -187,6 +222,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             lobby: lobby.view(),
             player_index,
             resume_token,
+            voice: lobby.lobby.voice_grant_for(player_index),
         })
     }
 
@@ -223,7 +259,13 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         lobby
             .lobby
             .leave(connection_id, crate::rooms::current_timestamp_ms())?;
+        let voice_cleanup = if lobby.lobby.status() == crate::lobbies::LobbyStatus::Closed {
+            lobby.lobby.take_voice_room_id_for_cleanup()
+        } else {
+            None
+        };
         lobby.emit_state_changed();
+        self.cleanup_lobby_voice_room(voice_cleanup, "lobby-left");
 
         Ok(lobby.view())
     }
@@ -405,6 +447,15 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         lobby.emit_chat_message(chat.clone());
 
         Ok(chat)
+    }
+
+    async fn refresh_lobby_voice_token(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<crate::lobbies::LobbyVoiceTokenRefresh, LobbyError> {
+        self.refresh_lobby_voice_token_impl(invite_code, connection_id)
+            .await
     }
 
     async fn lobby_view(&self, invite_code: InviteCode) -> Result<LobbyView, LobbyError> {

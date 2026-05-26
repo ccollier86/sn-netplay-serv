@@ -47,6 +47,9 @@ pub enum LobbyError {
     /// Proposed ROM exceeds the relay limit.
     #[error("temporary rom relay payload is too large")]
     RomRelayTooLarge,
+    /// Lobby voice is disabled or unavailable.
+    #[error("lobby voice is unavailable")]
+    VoiceUnavailable,
     /// Client supplied malformed lobby data.
     #[error("invalid lobby payload")]
     InvalidPayload,

@@ -92,6 +92,7 @@ pub async fn handle_websocket_lobby_session(
             lobby_epoch: join.lobby.lobby_epoch,
             your_player_index: join.player_index.zero_based(),
             resume_token: join.resume_token,
+            voice: join.voice,
             lobby: join.lobby,
         },
     )
@@ -382,6 +383,31 @@ async fn handle_lobby_message(
                     .map(|_| ()),
             )
             .await
+        }
+        LobbyClientMessage::RefreshVoiceToken { lobby_epoch } => {
+            apply_lobby_result(
+                sender,
+                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
+            )
+            .await?;
+            match services
+                .lobbies
+                .refresh_lobby_voice_token(invite_code.clone(), connection_id)
+                .await
+            {
+                Ok(refresh) => {
+                    send_lobby_server_message(
+                        sender,
+                        &LobbyServerMessage::VoiceTokenRefreshed {
+                            event_seq: refresh.event_seq,
+                            lobby_epoch: refresh.lobby_epoch,
+                            voice: refresh.voice,
+                        },
+                    )
+                    .await
+                }
+                Err(error) => send_lobby_error(sender, error).await,
+            }
         }
         LobbyClientMessage::Leave {
             lobby_epoch,

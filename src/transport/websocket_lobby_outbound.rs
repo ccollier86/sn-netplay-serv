@@ -96,6 +96,9 @@ fn lobby_error_message(error: LobbyError) -> LobbyServerMessage {
             "lobbyRomRelayTooLarge",
             "This game is too large for temporary session access.",
         ),
+        LobbyError::VoiceUnavailable => {
+            lobby_static_error("lobbyVoiceUnavailable", "Voice chat is unavailable.")
+        }
         LobbyError::InvalidPayload => {
             lobby_static_error("invalidLobbyPayload", "Lobby payload is invalid.")
         }

@@ -7,6 +7,7 @@ use crate::lobbies::{
     LobbyChatMessageView, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyView,
 };
 use crate::protocol::LobbyFileRelayGrant;
+use crate::rooms::PlayerVoiceJoinGrant;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -73,6 +74,11 @@ pub enum LobbyClientMessage {
         /// Chat body.
         body: String,
     },
+    /// Requests a fresh private token for the lobby voice room.
+    RefreshVoiceToken {
+        /// Lobby epoch observed by the client.
+        lobby_epoch: u64,
+    },
     /// Client intentionally leaves the lobby.
     Leave {
         /// Lobby epoch observed by the client.
@@ -100,6 +106,9 @@ pub enum LobbyServerMessage {
         resume_token: String,
         /// Current lobby state.
         lobby: LobbyView,
+        /// Optional player-specific voice grant.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        voice: Option<PlayerVoiceJoinGrant>,
     },
     /// Lobby state changed.
     LobbyStateChanged {
@@ -128,6 +137,15 @@ pub enum LobbyServerMessage {
         lobby_epoch: u64,
         /// Private file relay grant.
         grant: LobbyFileRelayGrant,
+    },
+    /// Private refreshed voice token for this lobby socket.
+    VoiceTokenRefreshed {
+        /// Current lobby event sequence.
+        event_seq: u64,
+        /// Current lobby epoch.
+        lobby_epoch: u64,
+        /// Fresh private voice grant.
+        voice: PlayerVoiceJoinGrant,
     },
     /// Stable lobby protocol error.
     Error {

@@ -14,10 +14,13 @@ mod lobby_game;
 mod lobby_launch;
 mod lobby_player;
 mod lobby_registry_trait;
+mod lobby_registry_voice_ops;
 mod lobby_rom_relay;
 mod lobby_view;
+mod lobby_voice_ops;
 mod stored_lobby;
 
+use crate::protocol::NetplayVoiceDescriptor;
 use crate::rooms::PlayerIndex;
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +53,9 @@ pub struct CreateLobbyParams {
     /// Optional first game selected for the lobby.
     #[serde(default)]
     pub initial_game: Option<LobbyGameCandidate>,
+    /// Optional lobby-scoped voice request.
+    #[serde(default)]
+    pub voice: Option<NetplayVoiceDescriptor>,
 }
 
 /// Parameters used by a player joining a lobby.
@@ -74,11 +80,28 @@ pub struct LobbyJoin {
     pub player_index: PlayerIndex,
     /// Raw resume token sent once to this client.
     pub resume_token: String,
+    /// Optional player-specific voice grant. Never broadcast this in lobby views.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voice: Option<crate::rooms::PlayerVoiceJoinGrant>,
+}
+
+/// Result returned after refreshing one lobby voice token.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LobbyVoiceTokenRefresh {
+    /// Current lobby event sequence.
+    pub event_seq: u64,
+    /// Current lobby epoch.
+    pub lobby_epoch: u64,
+    /// Fresh player-specific voice grant.
+    pub voice: crate::rooms::PlayerVoiceJoinGrant,
 }
 
 #[cfg(test)]
 #[path = "lobby_registry_tests.rs"]
 mod lobby_registry_tests;
+#[cfg(test)]
+#[path = "lobby_registry_voice_tests.rs"]
+mod lobby_registry_voice_tests;
 #[cfg(test)]
 #[path = "lobby_rom_relay_tests.rs"]
 mod lobby_rom_relay_tests;

@@ -94,6 +94,7 @@ fn create_params() -> CreateLobbyParams {
             rom_size_bytes: Some(32_768),
             start_state_label: None,
         }),
+        voice: None,
     }
 }
 

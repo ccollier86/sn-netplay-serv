@@ -13,6 +13,7 @@ use crate::lobbies::{
 };
 use crate::protocol::validate_client_protocol_version;
 use crate::rate_limit::RateLimitAction;
+use crate::rooms::PlayerVoiceJoinGrant;
 use crate::rooms::{InviteCode, PlayerIndex};
 use crate::transport::{WebSocketLobbyJoinRequest, handle_websocket_lobby_session};
 use axum::Json;
@@ -201,6 +202,9 @@ pub struct LobbySessionResponse {
     pub player_index: u8,
     /// One-use resume token for this player's lobby slot.
     pub resume_token: String,
+    /// Optional private voice grant for this player.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voice: Option<PlayerVoiceJoinGrant>,
 }
 
 impl From<LobbyJoin> for LobbySessionResponse {
@@ -209,6 +213,7 @@ impl From<LobbyJoin> for LobbySessionResponse {
             lobby: value.lobby,
             player_index: value.player_index.zero_based(),
             resume_token: value.resume_token,
+            voice: value.voice,
         }
     }
 }

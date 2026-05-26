@@ -7,7 +7,7 @@ use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, LobbyChatMessageView, LobbyError, LobbyEvent,
     LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyRomRelayLimits,
-    LobbyRomRelayTransferIntent, LobbyView,
+    LobbyRomRelayTransferIntent, LobbyView, LobbyVoiceTokenRefresh,
 };
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
@@ -143,6 +143,13 @@ pub trait LobbyRegistry: Send + Sync {
         connection_id: ConnectionId,
         body: String,
     ) -> Result<LobbyChatMessageView, LobbyError>;
+
+    /// Refreshes a private voice token for one lobby connection.
+    async fn refresh_lobby_voice_token(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<LobbyVoiceTokenRefresh, LobbyError>;
 
     /// Returns the current lobby view.
     async fn lobby_view(&self, invite_code: InviteCode) -> Result<LobbyView, LobbyError>;
