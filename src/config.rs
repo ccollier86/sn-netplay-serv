@@ -7,6 +7,7 @@ use std::env;
 use std::fmt;
 use std::net::{AddrParseError, SocketAddr};
 
+use crate::file_relay::FileRelayConfig;
 use crate::observability::{PostgresDsn, PostgresTableNames};
 use crate::rate_limit::RateLimitPolicy;
 use crate::rooms::RoomRecoveryConfig;
@@ -34,6 +35,8 @@ pub struct ServerConfig {
     pub telemetry: TelemetryConfig,
     /// Optional trusted voice broker used for LiveKit room orchestration.
     pub voice: VoiceConfig,
+    /// Optional trusted file relay used for temporary transfer tickets.
+    pub file_relay: FileRelayConfig,
 }
 
 impl ServerConfig {
@@ -84,6 +87,7 @@ impl ServerConfig {
         };
         let telemetry = TelemetryConfig::from_env()?;
         let voice = VoiceConfig::from_env()?;
+        let file_relay = FileRelayConfig::from_env()?;
 
         Ok(Self {
             bind_addr,
@@ -96,6 +100,7 @@ impl ServerConfig {
             log,
             telemetry,
             voice,
+            file_relay,
         })
     }
 }
@@ -276,6 +281,8 @@ fn postgres_table_names_from_env() -> Result<PostgresTableNames, ConfigError> {
         events: optional_env("SB_NETPLAY_POSTGRES_EVENTS_TABLE")?
             .or(legacy_events_table)
             .unwrap_or_else(|| "netplay_room_events".to_string()),
+        lobby_events: optional_env("SB_NETPLAY_POSTGRES_LOBBY_EVENTS_TABLE")?
+            .unwrap_or_else(|| "netplay_lobby_events".to_string()),
         performance_samples: optional_env("SB_NETPLAY_POSTGRES_PERFORMANCE_TABLE")?
             .unwrap_or_else(|| "netplay_performance_samples".to_string()),
     })

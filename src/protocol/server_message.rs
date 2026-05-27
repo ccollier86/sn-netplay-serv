@@ -5,7 +5,7 @@
 
 use crate::protocol::{
     InputDelayChange, InputFrame, LinkCablePacket, SessionPauseView, SnapshotChunk,
-    SnapshotManifest, StateHashMismatchView,
+    SnapshotFileRelayGrant, SnapshotManifest, StateHashMismatchView,
 };
 use crate::rooms::{PlayerVoiceJoinGrant, RoomView};
 use serde::Serialize;
@@ -94,6 +94,24 @@ pub enum ServerMessage {
         session_epoch: u64,
         /// Snapshot manifest.
         manifest: SnapshotManifest,
+    },
+    /// Private host grant for uploading a large snapshot through the file relay.
+    SnapshotFileRelayUploadGranted {
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Upload grant for this client.
+        grant: SnapshotFileRelayGrant,
+    },
+    /// Private guest grant for downloading a large snapshot from the file relay.
+    SnapshotFileRelayDownloadReady {
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Download grant for this client.
+        grant: SnapshotFileRelayGrant,
     },
     /// Session pause was scheduled for a future canonical frame.
     SessionPauseScheduled {

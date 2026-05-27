@@ -69,11 +69,11 @@ async fn voice_join_returns_only_the_matching_player_grant() {
     let invite = InviteCode::parse(view.invite_code).expect("invite");
 
     let host_join = registry
-        .connect_host(invite.clone(), license("host"), host_connection)
+        .connect_host(invite.clone(), license("host"), host_connection, false)
         .await
         .expect("host join");
     let guest_join = registry
-        .connect_guest(invite, license("guest"), guest_connection)
+        .connect_guest(invite, license("guest"), guest_connection, false)
         .await
         .expect("guest join");
 
@@ -102,7 +102,7 @@ async fn voice_broker_failure_keeps_room_playable_without_grants() {
     let invite = InviteCode::parse(view.invite_code).expect("invite");
 
     let guest_join = registry
-        .connect_guest(invite, license("guest"), ConnectionId::new())
+        .connect_guest(invite, license("guest"), ConnectionId::new(), false)
         .await
         .expect("guest join");
 
@@ -130,11 +130,11 @@ async fn voice_room_is_closed_when_player_exits() {
         .expect("room");
     let invite = InviteCode::parse(view.invite_code).expect("invite");
     registry
-        .connect_host(invite.clone(), license("host"), host_connection)
+        .connect_host(invite.clone(), license("host"), host_connection, false)
         .await
         .expect("host join");
     registry
-        .connect_guest(invite.clone(), license("guest"), guest_connection)
+        .connect_guest(invite.clone(), license("guest"), guest_connection, false)
         .await
         .expect("guest join");
 
@@ -171,11 +171,11 @@ async fn voice_token_refresh_updates_only_requesting_player_grant() {
         .expect("room");
     let invite = InviteCode::parse(view.invite_code).expect("invite");
     registry
-        .connect_host(invite.clone(), license("host"), host_connection)
+        .connect_host(invite.clone(), license("host"), host_connection, false)
         .await
         .expect("host join");
     let guest_join = registry
-        .connect_guest(invite.clone(), license("guest"), guest_connection)
+        .connect_guest(invite.clone(), license("guest"), guest_connection, false)
         .await
         .expect("guest join");
 

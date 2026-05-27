@@ -65,9 +65,20 @@ impl LiveDiagnosticsClient {
         self.get_json("/internal/rooms").await
     }
 
+    /// Fetches active lobbies from the live relay.
+    pub(crate) async fn lobbies(&self) -> Result<Value, LiveDiagnosticsError> {
+        self.get_json("/internal/lobbies").await
+    }
+
     /// Fetches one active room by invite code.
     pub async fn room(&self, invite_code: &str) -> Result<Value, LiveDiagnosticsError> {
         self.get_json(&format!("/internal/rooms/{}", encode_path(invite_code)))
+            .await
+    }
+
+    /// Fetches one active lobby by invite code.
+    pub(crate) async fn lobby(&self, invite_code: &str) -> Result<Value, LiveDiagnosticsError> {
+        self.get_json(&format!("/internal/lobbies/{}", encode_path(invite_code)))
             .await
     }
 
@@ -75,6 +86,18 @@ impl LiveDiagnosticsClient {
     pub async fn recent_events(&self, limit: usize) -> Result<Value, LiveDiagnosticsError> {
         self.get_json(&format!(
             "/internal/recent-events?limit={}",
+            bounded_limit(limit)
+        ))
+        .await
+    }
+
+    /// Fetches recent lobby events across live lobbies.
+    pub(crate) async fn recent_lobby_events(
+        &self,
+        limit: usize,
+    ) -> Result<Value, LiveDiagnosticsError> {
+        self.get_json(&format!(
+            "/internal/recent-lobby-events?limit={}",
             bounded_limit(limit)
         ))
         .await
@@ -88,6 +111,20 @@ impl LiveDiagnosticsClient {
     ) -> Result<Value, LiveDiagnosticsError> {
         self.get_json(&format!(
             "/internal/rooms/{}/events?limit={}",
+            encode_path(invite_code),
+            bounded_limit(limit)
+        ))
+        .await
+    }
+
+    /// Fetches recent events for one live lobby by invite code.
+    pub(crate) async fn lobby_events(
+        &self,
+        invite_code: &str,
+        limit: usize,
+    ) -> Result<Value, LiveDiagnosticsError> {
+        self.get_json(&format!(
+            "/internal/lobbies/{}/events?limit={}",
             encode_path(invite_code),
             bounded_limit(limit)
         ))

@@ -66,6 +66,27 @@ pub enum ClientMessage {
         /// Snapshot manifest.
         manifest: SnapshotManifest,
     },
+    /// Host asks the relay to create a temporary file-relay upload for a large
+    /// save-state snapshot.
+    SnapshotFileRelayRequested {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+        /// Snapshot manifest.
+        manifest: SnapshotManifest,
+    },
+    /// Host finished uploading a previously granted file-relay snapshot.
+    SnapshotFileRelayUploadComplete {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+        /// File relay transfer id.
+        transfer_id: String,
+        /// Snapshot manifest.
+        manifest: SnapshotManifest,
+    },
     /// Frame-numbered input from the local player.
     InputFrame {
         /// Current room epoch observed by the client.

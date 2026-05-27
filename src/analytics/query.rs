@@ -30,6 +30,18 @@ pub struct EventRow {
     pub detail: String,
 }
 
+/// Sanitized persistent lobby event row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LobbyEventRow {
+    pub timestamp_ms: u64,
+    pub lobby_id: String,
+    pub invite_code: String,
+    pub event_seq: u64,
+    pub lobby_epoch: u64,
+    pub kind: String,
+    pub detail: String,
+}
+
 /// Sanitized runtime performance sample row.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SampleRow {
@@ -86,7 +98,11 @@ impl AnalyticsDb {
 
     /// Removes synthetic telemetry probe rows from operator reports.
     pub async fn delete_probe_rows(&self) -> Result<(), AnalyticsDbError> {
-        for table in [&self.tables.events, &self.tables.performance_samples] {
+        for table in [
+            &self.tables.events,
+            &self.tables.lobby_events,
+            &self.tables.performance_samples,
+        ] {
             let query = format!(
                 "DELETE FROM {} WHERE invite_code = 'PROB-E1'",
                 quote_identifier(table)
@@ -171,6 +187,27 @@ impl AnalyticsDb {
             .collect::<Result<Vec<_>, _>>()
     }
 
+    /// Returns recent lobby events across all active lobby telemetry rows.
+    pub async fn recent_lobby_events(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<LobbyEventRow>, AnalyticsDbError> {
+        self.query_lobby_events(None, limit).await
+    }
+
+    /// Returns recent lobby events for one invite code.
+    pub async fn lobby_events_for_invite(
+        &self,
+        invite_code: &str,
+        limit: usize,
+    ) -> Result<Vec<LobbyEventRow>, AnalyticsDbError> {
+        self.query_lobby_events(
+            Some(format!("WHERE invite_code = '{}'", escape_sql(invite_code))),
+            limit,
+        )
+        .await
+    }
+
     async fn query_sessions(
         &self,
         where_clause: Option<String>,
@@ -199,6 +236,26 @@ impl AnalyticsDb {
             .map(session_row)
             .collect::<Result<Vec<_>, _>>()
     }
+
+    async fn query_lobby_events(
+        &self,
+        where_clause: Option<String>,
+        limit: usize,
+    ) -> Result<Vec<LobbyEventRow>, AnalyticsDbError> {
+        let query = format!(
+            "SELECT timestamp_ms::text, lobby_id::text, invite_code, \
+             event_seq::text, lobby_epoch::text, kind, detail \
+             FROM {} {} ORDER BY timestamp_ms DESC, event_seq DESC LIMIT {}",
+            quote_identifier(&self.tables.lobby_events),
+            where_clause.unwrap_or_default(),
+            limit.clamp(1, 500),
+        );
+        let rows = simple_rows(self.client.simple_query(&query).await?);
+
+        rows.into_iter()
+            .map(lobby_event_row)
+            .collect::<Result<Vec<_>, _>>()
+    }
 }
 
 fn session_row(row: tokio_postgres::SimpleQueryRow) -> Result<SessionKey, AnalyticsDbError> {
@@ -221,6 +278,18 @@ fn event_row(row: tokio_postgres::SimpleQueryRow) -> Result<EventRow, AnalyticsD
         session_epoch: parse_u64(required_cell(&row, 5, "session_epoch")?, "session_epoch")?,
         kind: required_cell(&row, 6, "kind")?.to_string(),
         detail: required_cell(&row, 7, "detail")?.to_string(),
+    })
+}
+
+fn lobby_event_row(row: tokio_postgres::SimpleQueryRow) -> Result<LobbyEventRow, AnalyticsDbError> {
+    Ok(LobbyEventRow {
+        timestamp_ms: parse_u64(required_cell(&row, 0, "timestamp_ms")?, "timestamp_ms")?,
+        lobby_id: required_cell(&row, 1, "lobby_id")?.to_string(),
+        invite_code: required_cell(&row, 2, "invite_code")?.to_string(),
+        event_seq: parse_u64(required_cell(&row, 3, "event_seq")?, "event_seq")?,
+        lobby_epoch: parse_u64(required_cell(&row, 4, "lobby_epoch")?, "lobby_epoch")?,
+        kind: required_cell(&row, 5, "kind")?.to_string(),
+        detail: required_cell(&row, 6, "detail")?.to_string(),
     })
 }
 

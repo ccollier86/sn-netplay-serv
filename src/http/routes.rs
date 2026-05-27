@@ -6,10 +6,14 @@
 use crate::http::client_auth_headers::client_auth_proof;
 use crate::http::client_identity::request_rate_limit_key;
 use crate::http::errors::HttpError;
+use crate::http::lobby_routes::{
+    LobbyStatusResponse, create_lobby, join_lobby, lobby_status, websocket_lobby,
+};
 use crate::http::services::AppServices;
 use crate::limits::{
     MAX_CREATE_ROOM_BODY_BYTES, MAX_WEBSOCKET_FRAME_BYTES, MAX_WEBSOCKET_MESSAGE_BYTES,
 };
+use crate::lobbies::{LobbyDebugEvent, LobbyRegistrySnapshot};
 use crate::observability::MetricsSnapshot;
 use crate::protocol::{
     NetplayClientKind, NetplaySessionDescriptor, validate_client_protocol_version,
@@ -41,6 +45,10 @@ pub fn build_router(services: AppServices) -> Router {
         .route("/health", get(health))
         .route("/v1/rooms", post(create_room))
         .route("/v1/rooms/{invite_code}/status", get(room_status))
+        .route("/v1/lobbies", post(create_lobby))
+        .route("/v1/lobbies/{invite_code}/join", post(join_lobby))
+        .route("/v1/lobbies/{invite_code}/status", get(lobby_status))
+        .route("/v1/lobbies/ws", get(websocket_lobby))
         .route("/v1/ws", get(websocket_room))
         .route("/v1/ws/input", get(websocket_input_room))
         .route("/internal/metrics", get(internal_metrics))
@@ -51,6 +59,16 @@ pub fn build_router(services: AppServices) -> Router {
             get(internal_room_events),
         )
         .route("/internal/recent-events", get(internal_recent_events))
+        .route("/internal/lobbies", get(internal_lobbies))
+        .route("/internal/lobbies/{invite_code}", get(internal_lobby))
+        .route(
+            "/internal/lobbies/{invite_code}/events",
+            get(internal_lobby_events),
+        )
+        .route(
+            "/internal/recent-lobby-events",
+            get(internal_recent_lobby_events),
+        )
         .layer(DefaultBodyLimit::max(MAX_CREATE_ROOM_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .with_state(services)
@@ -149,6 +167,7 @@ pub async fn websocket_room(
         reconnect_room_epoch: reconnect.as_ref().map(|value| value.room_epoch),
         resume_token: reconnect.map(|value| value.resume_token),
         role: query.role,
+        supports_state_file_relay: query.supports_state_file_relay.unwrap_or(false),
         license,
     };
 
@@ -284,6 +303,58 @@ pub async fn internal_recent_events(
     Ok(Json(EventLogResponse { events }))
 }
 
+/// Returns current active lobby views for authenticated operators.
+pub async fn internal_lobbies(
+    State(services): State<AppServices>,
+    headers: HeaderMap,
+) -> Result<Json<LobbyRegistrySnapshot>, HttpError> {
+    services.admin_authorizer.verify(&headers)?;
+
+    Ok(Json(services.lobbies.snapshot().await))
+}
+
+/// Returns one active lobby view for authenticated operators.
+pub async fn internal_lobby(
+    State(services): State<AppServices>,
+    Path(invite_code): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<LobbyStatusResponse>, HttpError> {
+    services.admin_authorizer.verify(&headers)?;
+    let invite_code = InviteCode::parse(invite_code)?;
+    let lobby = services.lobbies.lobby_view(invite_code).await?;
+
+    Ok(Json(LobbyStatusResponse { lobby }))
+}
+
+/// Returns sanitized event history for one active lobby.
+pub async fn internal_lobby_events(
+    State(services): State<AppServices>,
+    Path(invite_code): Path<String>,
+    Query(query): Query<EventLogQuery>,
+    headers: HeaderMap,
+) -> Result<Json<LobbyEventLogResponse>, HttpError> {
+    services.admin_authorizer.verify(&headers)?;
+    let invite_code = InviteCode::parse(invite_code)?;
+    let events = services
+        .lobbies
+        .lobby_events(invite_code, query.limit())
+        .await?;
+
+    Ok(Json(LobbyEventLogResponse { events }))
+}
+
+/// Returns sanitized event history across active lobbies.
+pub async fn internal_recent_lobby_events(
+    State(services): State<AppServices>,
+    Query(query): Query<EventLogQuery>,
+    headers: HeaderMap,
+) -> Result<Json<LobbyEventLogResponse>, HttpError> {
+    services.admin_authorizer.verify(&headers)?;
+    let events = services.lobbies.recent_events(query.limit()).await;
+
+    Ok(Json(LobbyEventLogResponse { events }))
+}
+
 fn enforce_rate_limit(
     services: &AppServices,
     action: RateLimitAction,
@@ -360,6 +431,14 @@ pub struct EventLogResponse {
     pub events: Vec<RoomDebugEvent>,
 }
 
+/// Lobby event log response body.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LobbyEventLogResponse {
+    /// Sanitized lobby events.
+    pub events: Vec<LobbyDebugEvent>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventLogQuery {
@@ -397,6 +476,8 @@ pub struct WebSocketRoomQuery {
     room_epoch: Option<u64>,
     #[serde(default)]
     resume_token: Option<String>,
+    #[serde(default)]
+    supports_state_file_relay: Option<bool>,
 }
 
 #[derive(Deserialize)]

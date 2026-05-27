@@ -6,7 +6,9 @@ use reqwest::Client;
 use sb_netplay_serv::auth::{
     AuthError, ClientKind, LicenseAuthority, ProtectedClientAuthProof, VerifiedLicense,
 };
-use sb_netplay_serv::http::{AdminAuthorizer, AppServices, build_router};
+use sb_netplay_serv::file_relay::DisabledFileRelayBroker;
+use sb_netplay_serv::http::{AdminAuthorizer, AppServices, FileRelayPolicy, build_router};
+use sb_netplay_serv::lobbies::InMemoryLobbyRegistry;
 use sb_netplay_serv::observability::InMemoryMetrics;
 use sb_netplay_serv::protocol::{
     InputFrame, InputFrameBatch, NETPLAY_PROTOCOL_VERSION, decode_input_frame_batch,
@@ -465,6 +467,15 @@ fn test_services(rooms: Arc<InMemoryRoomRegistry>) -> AppServices {
     AppServices::new(
         Arc::new(FakeLicenseAuthority),
         rooms,
+        Arc::new(InMemoryLobbyRegistry::new(Arc::new(
+            StaticInviteCodeGenerator,
+        ))),
+        Arc::new(DisabledFileRelayBroker),
+        FileRelayPolicy {
+            save_states_enabled: false,
+            temporary_roms_enabled: false,
+            temporary_rom_max_bytes: 104_857_600,
+        },
         Arc::new(InMemoryRateLimiter::new(RateLimitPolicy {
             create_room_per_minute: 100,
             websocket_join_per_minute: 100,

@@ -1,13 +1,15 @@
 //! Postgres schema and insert helpers for netplay analytics.
 
 use crate::observability::telemetry_event::{
-    NetplayPerformanceSample, NetplayTelemetryEvent, NetplayTelemetryRecord,
+    NetplayLobbyTelemetryEvent, NetplayPerformanceSample, NetplayTelemetryEvent,
+    NetplayTelemetryRecord,
 };
 
 /// Postgres table names used by telemetry and analytics tools.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PostgresTableNames {
     pub events: String,
+    pub lobby_events: String,
     pub performance_samples: String,
 }
 
@@ -15,6 +17,7 @@ pub struct PostgresTableNames {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PostgresTelemetryBatch {
     pub events: Vec<NetplayTelemetryEvent>,
+    pub lobby_events: Vec<NetplayLobbyTelemetryEvent>,
     pub performance_samples: Vec<NetplayPerformanceSample>,
 }
 
@@ -22,6 +25,7 @@ pub struct PostgresTelemetryBatch {
 pub fn create_table_queries(tables: &PostgresTableNames) -> Vec<String> {
     vec![
         create_events_table_query(&tables.events),
+        create_lobby_events_table_query(&tables.lobby_events),
         create_performance_samples_table_query(&tables.performance_samples),
         add_column_query(&tables.events, "timestamp_ms", "BIGINT"),
         add_column_query(&tables.events, "room_id", "UUID"),
@@ -31,6 +35,13 @@ pub fn create_table_queries(tables: &PostgresTableNames) -> Vec<String> {
         add_column_query(&tables.events, "session_epoch", "BIGINT"),
         add_column_query(&tables.events, "kind", "TEXT"),
         add_column_query(&tables.events, "detail", "TEXT"),
+        add_column_query(&tables.lobby_events, "timestamp_ms", "BIGINT"),
+        add_column_query(&tables.lobby_events, "lobby_id", "UUID"),
+        add_column_query(&tables.lobby_events, "invite_code", "TEXT"),
+        add_column_query(&tables.lobby_events, "event_seq", "BIGINT"),
+        add_column_query(&tables.lobby_events, "lobby_epoch", "BIGINT"),
+        add_column_query(&tables.lobby_events, "kind", "TEXT"),
+        add_column_query(&tables.lobby_events, "detail", "TEXT"),
         add_column_query(&tables.performance_samples, "timestamp_ms", "BIGINT"),
         add_column_query(&tables.performance_samples, "room_id", "UUID"),
         add_column_query(&tables.performance_samples, "invite_code", "TEXT"),
@@ -57,6 +68,7 @@ pub fn create_table_queries(tables: &PostgresTableNames) -> Vec<String> {
         add_column_query(&tables.performance_samples, "late_input_frames", "INTEGER"),
         add_column_query(&tables.performance_samples, "audio_underruns", "INTEGER"),
         create_events_session_index_query(&tables.events),
+        create_lobby_events_index_query(&tables.lobby_events),
         create_samples_session_index_query(&tables.performance_samples),
     ]
 }
@@ -68,6 +80,7 @@ pub fn split_batch(batch: &[NetplayTelemetryRecord]) -> PostgresTelemetryBatch {
     for record in batch {
         match record {
             NetplayTelemetryRecord::RoomEvent(event) => grouped.events.push(event.clone()),
+            NetplayTelemetryRecord::LobbyEvent(event) => grouped.lobby_events.push(event.clone()),
             NetplayTelemetryRecord::PerformanceSample(sample) => {
                 grouped.performance_samples.push(sample.clone())
             }
@@ -75,6 +88,21 @@ pub fn split_batch(batch: &[NetplayTelemetryRecord]) -> PostgresTelemetryBatch {
     }
 
     grouped
+}
+
+fn create_lobby_events_table_query(table: &str) -> String {
+    format!(
+        "CREATE TABLE IF NOT EXISTS {} (\
+         timestamp_ms BIGINT NOT NULL, \
+         lobby_id UUID NOT NULL, \
+         invite_code TEXT NOT NULL, \
+         event_seq BIGINT NOT NULL, \
+         lobby_epoch BIGINT NOT NULL, \
+         kind TEXT NOT NULL, \
+         detail TEXT NOT NULL\
+         )",
+        quote_identifier(table)
+    )
 }
 
 fn create_events_table_query(table: &str) -> String {
@@ -131,6 +159,15 @@ fn create_events_session_index_query(table: &str) -> String {
     )
 }
 
+fn create_lobby_events_index_query(table: &str) -> String {
+    format!(
+        "CREATE INDEX IF NOT EXISTS {} ON {} \
+         (lobby_id, lobby_epoch, timestamp_ms, event_seq)",
+        quote_identifier(&format!("{table}_lobby_idx")),
+        quote_identifier(table)
+    )
+}
+
 fn create_samples_session_index_query(table: &str) -> String {
     format!(
         "CREATE INDEX IF NOT EXISTS {} ON {} \
@@ -183,6 +220,15 @@ mod tests {
                 kind: "sessionStarted".to_string(),
                 detail: "session started".to_string(),
             }),
+            NetplayTelemetryRecord::LobbyEvent(NetplayLobbyTelemetryEvent {
+                timestamp_ms: 1,
+                lobby_id: room_id,
+                invite_code: "AB23-CD".to_string(),
+                event_seq: 3,
+                lobby_epoch: 2,
+                kind: "lobbyCreated".to_string(),
+                detail: "lobby created".to_string(),
+            }),
             NetplayTelemetryRecord::PerformanceSample(NetplayPerformanceSample {
                 timestamp_ms: 1,
                 room_id,
@@ -211,6 +257,7 @@ mod tests {
         let grouped = split_batch(&batch);
 
         assert_eq!(grouped.events.len(), 1);
+        assert_eq!(grouped.lobby_events.len(), 1);
         assert_eq!(grouped.performance_samples.len(), 1);
     }
 }

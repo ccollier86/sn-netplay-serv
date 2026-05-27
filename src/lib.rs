@@ -7,8 +7,10 @@
 pub mod analytics;
 pub mod auth;
 pub mod config;
+pub mod file_relay;
 pub mod http;
 pub mod limits;
+pub mod lobbies;
 pub mod observability;
 pub mod protocol;
 pub mod rate_limit;

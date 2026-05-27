@@ -7,6 +7,7 @@ use std::env;
 pub struct AnalyticsConfig {
     pub dsn: PostgresDsn,
     pub tables: PostgresTableNames,
+    pub file_relay_transfer_events_table: String,
 }
 
 impl AnalyticsConfig {
@@ -20,11 +21,22 @@ impl AnalyticsConfig {
             events: optional_env("SB_NETPLAY_POSTGRES_EVENTS_TABLE")
                 .or(legacy_events_table)
                 .unwrap_or_else(|| "netplay_room_events".to_string()),
+            lobby_events: optional_env("SB_NETPLAY_POSTGRES_LOBBY_EVENTS_TABLE")
+                .unwrap_or_else(|| "netplay_lobby_events".to_string()),
             performance_samples: optional_env("SB_NETPLAY_POSTGRES_PERFORMANCE_TABLE")
                 .unwrap_or_else(|| "netplay_performance_samples".to_string()),
         };
 
-        Ok(Self { dsn, tables })
+        let file_relay_transfer_events_table =
+            optional_env("SB_FILE_RELAY_POSTGRES_TRANSFER_EVENTS_TABLE")
+                .or_else(|| optional_env("SB_NETPLAY_POSTGRES_FILE_RELAY_TABLE"))
+                .unwrap_or_else(|| "file_relay_transfer_events".to_string());
+
+        Ok(Self {
+            dsn,
+            tables,
+            file_relay_transfer_events_table,
+        })
     }
 }
 

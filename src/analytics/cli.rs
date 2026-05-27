@@ -1,13 +1,17 @@
 //! Command-line entry point for netplay analytics tools.
 
 use crate::analytics::config::AnalyticsConfig;
+use crate::analytics::file_relay_query::{FileRelayAnalyticsDb, FileRelayEventFilter};
+use crate::analytics::file_relay_report::{
+    build_file_relay_report, print_file_relay_events, print_file_relay_report,
+};
 use crate::analytics::live::{LiveDiagnosticsClient, LiveDiagnosticsConfig};
-use crate::analytics::query::{AnalyticsDb, SessionKey};
+use crate::analytics::query::{AnalyticsDb, LobbyEventRow, SessionKey};
 use crate::analytics::report::{build_fleet_report, build_session_reports, print_report};
 use crate::config::PostgresTelemetryConfig;
 use crate::observability::{
-    NetplayPerformanceSample, NetplayTelemetryEvent, NetplayTelemetryRecord,
-    PostgresTelemetryWriter,
+    NetplayLobbyTelemetryEvent, NetplayPerformanceSample, NetplayTelemetryEvent,
+    NetplayTelemetryRecord, PostgresTelemetryWriter,
 };
 use crate::rooms::RoomId;
 
@@ -25,8 +29,11 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             run_live(&args).await?;
         }
         "schema" => {
-            let db = connect_db().await?;
+            let config = AnalyticsConfig::from_env()?;
+            let db = AnalyticsDb::connect(config.clone()).await?;
+            let file_relay_db = FileRelayAnalyticsDb::connect(config).await?;
             db.apply_schema().await?;
+            file_relay_db.apply_schema().await?;
             println!("analytics schema applied");
         }
         "probe" => {
@@ -67,9 +74,41 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             let db = connect_db().await?;
             run_raw(&db, &args).await?;
         }
+        "lobby-events" => {
+            let db = connect_db().await?;
+            run_lobby_events(&db, &args).await?;
+        }
+        "file-relay" => {
+            let config = AnalyticsConfig::from_env()?;
+            let db = FileRelayAnalyticsDb::connect(config).await?;
+            run_file_relay(&db, &args).await?;
+        }
         _ => {
             print_help();
         }
+    }
+
+    Ok(())
+}
+
+async fn run_file_relay(
+    db: &FileRelayAnalyticsDb,
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let limit = option_usize(args, "--limit").unwrap_or(100);
+    let filter = FileRelayEventFilter {
+        room_id: option_string(args, "--room"),
+        transfer_id: option_string(args, "--transfer"),
+    };
+    let events = db.recent_events(filter, limit).await?;
+
+    match args.get(1).map(String::as_str) {
+        Some("raw") => print_file_relay_events(&events),
+        Some("report") => {
+            let report = build_file_relay_report(&events);
+            print_file_relay_report(&report, &events);
+        }
+        _ => print_help(),
     }
 
     Ok(())
@@ -86,9 +125,14 @@ async fn run_live(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let payload = match args.get(1).map(String::as_str) {
         Some("metrics") => client.metrics().await?,
         Some("rooms") => client.rooms().await?,
+        Some("lobbies") => client.lobbies().await?,
         Some("room") => {
             let invite_code = required_option(args, "--invite")?;
             client.room(&invite_code).await?
+        }
+        Some("lobby") => {
+            let invite_code = required_option(args, "--invite")?;
+            client.lobby(&invite_code).await?
         }
         Some("events") => {
             let limit = option_usize(args, "--limit").unwrap_or(100);
@@ -96,6 +140,14 @@ async fn run_live(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 client.room_events(&invite_code, limit).await?
             } else {
                 client.recent_events(limit).await?
+            }
+        }
+        Some("lobby-events") => {
+            let limit = option_usize(args, "--limit").unwrap_or(100);
+            if let Some(invite_code) = option_string(args, "--invite") {
+                client.lobby_events(&invite_code, limit).await?
+            } else {
+                client.recent_lobby_events(limit).await?
             }
         }
         _ => {
@@ -136,6 +188,21 @@ async fn run_raw(db: &AnalyticsDb, args: &[String]) -> Result<(), Box<dyn std::e
         _ => print_help(),
     }
 
+    Ok(())
+}
+
+async fn run_lobby_events(
+    db: &AnalyticsDb,
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let limit = option_usize(args, "--limit").unwrap_or(100);
+    let events = if let Some(invite_code) = option_string(args, "--invite") {
+        db.lobby_events_for_invite(&invite_code, limit).await?
+    } else {
+        db.recent_lobby_events(limit).await?
+    };
+
+    print_lobby_events(&events);
     Ok(())
 }
 
@@ -187,6 +254,21 @@ async fn print_raw_sessions(
     Ok(())
 }
 
+fn print_lobby_events(events: &[LobbyEventRow]) {
+    for event in events {
+        println!(
+            "{} {} invite={} epoch={} seq={} {} {}",
+            event.timestamp_ms,
+            event.lobby_id,
+            event.invite_code,
+            event.lobby_epoch,
+            event.event_seq,
+            event.kind,
+            event.detail
+        );
+    }
+}
+
 fn option_usize(args: &[String], name: &str) -> Option<usize> {
     option_string(args, name).and_then(|value| value.parse().ok())
 }
@@ -208,15 +290,25 @@ fn print_help() {
     println!("ShadowBoy netplay analytics");
     println!("  live metrics");
     println!("  live rooms");
+    println!("  live lobbies");
     println!("  live room --invite AB23-CD");
+    println!("  live lobby --invite AB23-CD");
     println!("  live events [--invite AB23-CD] [--limit 100]");
+    println!("  live lobby-events [--invite AB23-CD] [--limit 100]");
     println!("  schema");
     println!("  probe");
     println!("  purge-probes");
     println!("  sessions --limit 25");
     println!("  report --limit 25");
+    println!("  lobby-events [--invite AB23-CD] [--limit 100]");
     println!("  raw recent --limit 5");
     println!("  raw session --room <room_uuid> [--epoch <session_epoch>] [--limit 25]");
+    println!(
+        "  file-relay report [--room <room_or_lobby_id>] [--transfer <transfer_id>] [--limit 100]"
+    );
+    println!(
+        "  file-relay raw [--room <room_or_lobby_id>] [--transfer <transfer_id>] [--limit 100]"
+    );
 }
 
 async fn run_probe(
@@ -229,6 +321,7 @@ async fn run_probe(
     });
     let now = timestamp_ms();
     let room_id = RoomId::new();
+    let lobby_id = RoomId::new();
     let batch = vec![
         NetplayTelemetryRecord::RoomEvent(NetplayTelemetryEvent {
             timestamp_ms: now,
@@ -239,6 +332,15 @@ async fn run_probe(
             session_epoch: now,
             kind: "telemetryProbe".to_string(),
             detail: "operator telemetry write probe".to_string(),
+        }),
+        NetplayTelemetryRecord::LobbyEvent(NetplayLobbyTelemetryEvent {
+            timestamp_ms: now,
+            lobby_id,
+            invite_code: "PROB-E1".to_string(),
+            event_seq: 1,
+            lobby_epoch: 1,
+            kind: "telemetryProbe".to_string(),
+            detail: "operator lobby telemetry write probe".to_string(),
         }),
         NetplayTelemetryRecord::PerformanceSample(NetplayPerformanceSample {
             timestamp_ms: now,

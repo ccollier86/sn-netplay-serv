@@ -50,6 +50,7 @@ pub async fn handle_websocket_session(
                 room_epoch,
                 resume_token,
                 connection_id,
+                request.supports_state_file_relay,
             )
             .await
     } else {
@@ -57,13 +58,23 @@ pub async fn handle_websocket_session(
             WebSocketJoinRole::Host => {
                 services
                     .rooms
-                    .connect_host(request.invite_code.clone(), request.license, connection_id)
+                    .connect_host(
+                        request.invite_code.clone(),
+                        request.license,
+                        connection_id,
+                        request.supports_state_file_relay,
+                    )
                     .await
             }
             WebSocketJoinRole::Guest => {
                 services
                     .rooms
-                    .connect_guest(request.invite_code.clone(), request.license, connection_id)
+                    .connect_guest(
+                        request.invite_code.clone(),
+                        request.license,
+                        connection_id,
+                        request.supports_state_file_relay,
+                    )
                     .await
             }
         }
@@ -324,6 +335,36 @@ async fn handle_room_event(
                 room_epoch,
                 session_epoch,
                 manifest,
+            }
+        }
+        Ok(RoomEvent::SnapshotFileRelayUploadGranted {
+            source,
+            room_epoch,
+            session_epoch,
+            grant,
+        }) => {
+            if source != connection_id {
+                return true;
+            }
+            ServerMessage::SnapshotFileRelayUploadGranted {
+                room_epoch,
+                session_epoch,
+                grant,
+            }
+        }
+        Ok(RoomEvent::SnapshotFileRelayDownloadReady {
+            receiver,
+            room_epoch,
+            session_epoch,
+            grant,
+        }) => {
+            if receiver != connection_id {
+                return true;
+            }
+            ServerMessage::SnapshotFileRelayDownloadReady {
+                room_epoch,
+                session_epoch,
+                grant,
             }
         }
         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => ServerMessage::Error {

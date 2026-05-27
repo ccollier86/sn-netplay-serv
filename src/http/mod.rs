@@ -8,9 +8,10 @@ mod admin_auth;
 mod client_auth_headers;
 mod client_identity;
 mod errors;
+mod lobby_routes;
 mod routes;
 mod services;
 
 pub use admin_auth::AdminAuthorizer;
 pub use routes::build_router;
-pub use services::AppServices;
+pub use services::{AppServices, FileRelayPolicy};

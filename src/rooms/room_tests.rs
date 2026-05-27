@@ -9,7 +9,8 @@ use crate::protocol::{
     ClientNetworkQualityReport, ClientRuntimeState, CompatibilityFingerprint, InputFrame,
     InputFrameLimits, LinkCableCompatibility, LinkCablePacket, LinkCablePacketLimits,
     NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor, SessionPauseReason, SessionPauseState,
-    SnapshotChunk, SnapshotLimits, SnapshotManifest, StateHashReport,
+    SnapshotChunk, SnapshotFileRelayGrant, SnapshotFileRelayGrantPair, SnapshotFileRelayGrantRole,
+    SnapshotLimits, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, InviteCode, PlayerIndex, PlayerStatus, RoomError,
@@ -341,6 +342,61 @@ fn host_can_relay_snapshot_manifest_during_sync() {
     );
 
     assert!(result.is_ok());
+}
+
+#[test]
+fn snapshot_file_relay_requires_all_connected_players_to_support_it() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let room = compatible_room(host_connection, guest_connection);
+
+    let result = room.prepare_snapshot_file_relay_transfer(
+        host_connection,
+        &snapshot_manifest(&[1, 2, 3]),
+        SnapshotLimits::default(),
+    );
+
+    assert!(matches!(
+        result,
+        Err(RoomError::SnapshotFileRelayUnavailable)
+    ));
+}
+
+#[test]
+fn snapshot_file_relay_completion_allows_ready() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let host_input_connection = ConnectionId::new();
+    let guest_input_connection = ConnectionId::new();
+    let mut room = file_relay_supported_room(host_connection, guest_connection);
+    let manifest = snapshot_manifest(&[1, 2, 3]);
+    let grants = snapshot_file_relay_grants("transfer-1", manifest.clone());
+
+    let upload = room
+        .accept_snapshot_file_relay_grant(
+            host_connection,
+            &manifest,
+            grants,
+            SnapshotLimits::default(),
+        )
+        .expect("upload grant");
+    let (receiver, download) = room
+        .accept_snapshot_file_relay_upload_complete(
+            host_connection,
+            &upload.transfer_id,
+            &manifest,
+            SnapshotLimits::default(),
+        )
+        .expect("upload complete");
+    attach_input_sockets(&mut room, host_input_connection, guest_input_connection);
+
+    let started = room
+        .mark_ready(host_connection, None, std::time::Instant::now())
+        .expect("host ready");
+
+    assert!(!started);
+    assert_eq!(receiver, guest_connection);
+    assert_eq!(download.role, SnapshotFileRelayGrantRole::Download);
 }
 
 #[test]
@@ -898,6 +954,36 @@ fn compatible_room(host_connection: ConnectionId, guest_connection: ConnectionId
     room
 }
 
+fn file_relay_supported_room(
+    host_connection: ConnectionId,
+    guest_connection: ConnectionId,
+) -> NetplayRoom {
+    let mut room = room(host_connection);
+    room.attach_host_with_resume(
+        license("host"),
+        host_connection,
+        String::new(),
+        String::new(),
+        std::time::Instant::now(),
+        true,
+    )
+    .expect("host attaches with file relay support");
+    room.join_guest_with_resume(
+        license("guest"),
+        guest_connection,
+        String::new(),
+        String::new(),
+        std::time::Instant::now(),
+        true,
+    )
+    .expect("guest joins with file relay support");
+    room.set_compatibility_for_connection(host_connection, fingerprint("rom"))
+        .expect("host fingerprint");
+    room.set_compatibility_for_connection(guest_connection, fingerprint("rom"))
+        .expect("guest fingerprint");
+    room
+}
+
 fn attach_input_sockets(
     room: &mut NetplayRoom,
     host_input_connection: ConnectionId,
@@ -1074,6 +1160,34 @@ fn snapshot_manifest(bytes: &[u8]) -> SnapshotManifest {
         repair_frame: 0,
         total_bytes: bytes.len() as u64,
         sha256: format!("{:x}", Sha256::digest(bytes)),
+    }
+}
+
+fn snapshot_file_relay_grants(
+    transfer_id: &str,
+    manifest: SnapshotManifest,
+) -> SnapshotFileRelayGrantPair {
+    SnapshotFileRelayGrantPair {
+        upload: SnapshotFileRelayGrant {
+            transfer_id: transfer_id.to_string(),
+            relay_url: "https://relay.shadowboy.app".to_string(),
+            token: "upload-token".to_string(),
+            role: SnapshotFileRelayGrantRole::Upload,
+            chunk_size_bytes: 1024,
+            chunk_count: 1,
+            expires_at: "2026-05-25T00:00:00Z".to_string(),
+            manifest: manifest.clone(),
+        },
+        download: SnapshotFileRelayGrant {
+            transfer_id: transfer_id.to_string(),
+            relay_url: "https://relay.shadowboy.app".to_string(),
+            token: "download-token".to_string(),
+            role: SnapshotFileRelayGrantRole::Download,
+            chunk_size_bytes: 1024,
+            chunk_count: 1,
+            expires_at: "2026-05-25T00:00:00Z".to_string(),
+            manifest,
+        },
     }
 }
 

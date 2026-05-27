@@ -6,8 +6,8 @@
 
 use crate::protocol::{
     ClientNetworkQualityReport, ClientRuntimeState, InputDelayChange, InputFrame, InputFrameBatch,
-    LinkCablePacket, ServerFrame, SessionPauseView, SnapshotChunk, SnapshotManifest,
-    StateHashMismatchView,
+    LinkCablePacket, ServerFrame, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant,
+    SnapshotManifest, StateHashMismatchView,
 };
 use crate::rooms::{
     ConnectionId, InputFrameRelayBuffer, NetplayRoom, RoomDebugEvent, RoomDebugEventLog, RoomEvent,
@@ -288,6 +288,46 @@ impl StoredRoom {
             room_epoch: room.room_epoch,
             session_epoch: room.session_epoch,
             manifest,
+        });
+    }
+
+    /// Emits a private file-relay upload grant to the host.
+    pub(super) fn emit_snapshot_file_relay_upload_granted(
+        &mut self,
+        now: Instant,
+        source: ConnectionId,
+        grant: SnapshotFileRelayGrant,
+    ) {
+        let room = self.record_event(
+            now,
+            "snapshotFileRelayUploadGranted",
+            "snapshot file relay upload granted",
+        );
+        let _ = self.events.send(RoomEvent::SnapshotFileRelayUploadGranted {
+            source,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            grant,
+        });
+    }
+
+    /// Emits a private file-relay download grant to the guest.
+    pub(super) fn emit_snapshot_file_relay_download_ready(
+        &mut self,
+        now: Instant,
+        receiver: ConnectionId,
+        grant: SnapshotFileRelayGrant,
+    ) {
+        let room = self.record_event(
+            now,
+            "snapshotFileRelayDownloadReady",
+            "snapshot file relay download ready",
+        );
+        let _ = self.events.send(RoomEvent::SnapshotFileRelayDownloadReady {
+            receiver,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            grant,
         });
     }
 

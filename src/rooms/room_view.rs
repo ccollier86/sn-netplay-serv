@@ -87,6 +87,8 @@ pub struct PlayerSlotView {
     pub control_connected: bool,
     /// Whether the binary input socket is connected.
     pub input_connected: bool,
+    /// Whether this client can use file relay for large sync states.
+    pub supports_state_file_relay: bool,
     /// Milliseconds since this slot was last seen by heartbeat or socket IO.
     pub last_seen_age_ms: Option<u128>,
     /// Milliseconds remaining before reconnect grace expires.

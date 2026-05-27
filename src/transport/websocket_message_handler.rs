@@ -10,6 +10,7 @@ use crate::rooms::{ConnectionId, InviteCode, RoomError};
 use crate::transport::websocket_outbound::{
     SocketSender, send_room_error, send_server_message, send_static_error,
 };
+use crate::transport::websocket_snapshot_file_relay_handler::handle_snapshot_file_relay_request;
 use crate::transport::websocket_voice_handler::handle_refresh_voice_token;
 
 /// Parses and applies one client text message.
@@ -143,6 +144,48 @@ async fn handle_client_message(
                 services
                     .rooms
                     .relay_snapshot_complete(invite_code.clone(), connection_id, manifest)
+                    .await,
+            )
+            .await
+        }
+        ClientMessage::SnapshotFileRelayRequested {
+            room_epoch,
+            session_epoch,
+            manifest,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            apply_room_result(
+                sender,
+                handle_snapshot_file_relay_request(services, invite_code, connection_id, manifest)
+                    .await,
+            )
+            .await
+        }
+        ClientMessage::SnapshotFileRelayUploadComplete {
+            room_epoch,
+            session_epoch,
+            transfer_id,
+            manifest,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            apply_room_result(
+                sender,
+                services
+                    .rooms
+                    .relay_snapshot_file_upload_complete(
+                        invite_code.clone(),
+                        connection_id,
+                        transfer_id,
+                        manifest,
+                    )
                     .await,
             )
             .await

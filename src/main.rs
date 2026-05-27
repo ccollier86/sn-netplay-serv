@@ -6,7 +6,11 @@
 
 use sb_netplay_serv::auth::HttpLicenseAuthority;
 use sb_netplay_serv::config::{ServerConfig, VoiceBrokerConfig};
-use sb_netplay_serv::http::{AdminAuthorizer, AppServices, build_router};
+use sb_netplay_serv::file_relay::{
+    DisabledFileRelayBroker, FileRelayBroker, FileRelayBrokerConfig, HttpFileRelayBroker,
+};
+use sb_netplay_serv::http::{AdminAuthorizer, AppServices, FileRelayPolicy, build_router};
+use sb_netplay_serv::lobbies::{InMemoryLobbyRegistry, LobbyServerCapabilities, MAX_LOBBY_PLAYERS};
 use sb_netplay_serv::observability::{
     InMemoryMetrics, ensure_telemetry_schema, init_tracing, spawn_telemetry_sink,
 };
@@ -30,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?);
     ensure_telemetry_schema(&config.telemetry).await?;
     let metrics = Arc::new(InMemoryMetrics::new());
-    let (event_sink, _telemetry_task) =
+    let (event_sink, lobby_event_sink, _telemetry_task) =
         spawn_telemetry_sink(config.telemetry.clone(), metrics.clone());
     let voice_broker: Arc<dyn VoiceBroker> = match config.voice.broker.clone() {
         VoiceBrokerConfig::Disabled => Arc::new(DisabledVoiceBroker),
@@ -40,14 +44,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             voice.request_timeout,
         )?),
     };
-    let rooms = Arc::new(
-        InMemoryRoomRegistry::with_dependencies_event_sink_and_voice(
+    let file_relay_broker: Arc<dyn FileRelayBroker> = match config.file_relay.broker.clone() {
+        FileRelayBrokerConfig::Disabled => Arc::new(DisabledFileRelayBroker),
+        FileRelayBrokerConfig::Http(file_relay) => Arc::new(HttpFileRelayBroker::new(
+            file_relay.base_url,
+            file_relay.bearer_token,
+            file_relay.request_timeout,
+        )?),
+    };
+    let lobby_capabilities = LobbyServerCapabilities::current(
+        MAX_LOBBY_PLAYERS,
+        file_relay_broker.is_enabled() && config.file_relay.temporary_roms_enabled,
+        voice_broker.is_enabled(),
+    );
+    let rooms = Arc::new(InMemoryRoomRegistry::with_dependencies_and_event_sink(
+        Arc::new(UuidInviteCodeGenerator),
+        Arc::new(sb_netplay_serv::rooms::UuidResumeTokenGenerator),
+        Arc::new(sb_netplay_serv::rooms::SystemClock),
+        config.recovery,
+        event_sink,
+    ));
+    let lobbies = Arc::new(
+        InMemoryLobbyRegistry::with_generators_capabilities_voice_and_event_sink(
             Arc::new(UuidInviteCodeGenerator),
             Arc::new(sb_netplay_serv::rooms::UuidResumeTokenGenerator),
-            Arc::new(sb_netplay_serv::rooms::SystemClock),
-            config.recovery,
-            event_sink,
+            lobby_capabilities,
             voice_broker,
+            lobby_event_sink,
         ),
     );
     let rate_limiter = Arc::new(InMemoryRateLimiter::new(config.rate_limits));
@@ -57,6 +80,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let services = AppServices::new(
         license_authority,
         rooms,
+        lobbies,
+        file_relay_broker,
+        FileRelayPolicy {
+            save_states_enabled: config.file_relay.save_states_enabled,
+            temporary_roms_enabled: config.file_relay.temporary_roms_enabled,
+            temporary_rom_max_bytes: config.file_relay.temporary_rom_max_bytes,
+        },
         rate_limiter,
         metrics,
         admin_authorizer,

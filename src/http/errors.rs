@@ -4,6 +4,7 @@
 //! exposing raw tokens, secrets, or internal transport details.
 
 use crate::auth::AuthError;
+use crate::lobbies::LobbyError;
 use crate::protocol::{ProtocolVersionError, SessionDescriptorError};
 use crate::rate_limit::RateLimitExceeded;
 use crate::rooms::RoomError;
@@ -19,6 +20,8 @@ pub enum HttpError {
     Auth(AuthError),
     /// Room domain operation failed.
     Room(RoomError),
+    /// Lobby domain operation failed.
+    Lobby(LobbyError),
     /// Request exceeded a configured rate limit.
     RateLimited(RateLimitExceeded),
     /// Client supplied malformed or unsupported request data.
@@ -43,6 +46,12 @@ impl From<AuthError> for HttpError {
 impl From<RoomError> for HttpError {
     fn from(value: RoomError) -> Self {
         Self::Room(value)
+    }
+}
+
+impl From<LobbyError> for HttpError {
+    fn from(value: LobbyError) -> Self {
+        Self::Lobby(value)
     }
 }
 
@@ -135,6 +144,77 @@ impl IntoResponse for HttpError {
                 StatusCode::CONFLICT,
                 "roomStateConflict",
                 "Room state does not allow this operation.",
+            ),
+            Self::Lobby(LobbyError::NotFound) => (
+                StatusCode::NOT_FOUND,
+                "lobbyNotFound",
+                "Lobby was not found.",
+            ),
+            Self::Lobby(LobbyError::LobbyFull) => {
+                (StatusCode::CONFLICT, "lobbyFull", "Lobby is full.")
+            }
+            Self::Lobby(LobbyError::LobbyClosed) => {
+                (StatusCode::GONE, "lobbyClosed", "Lobby is closed.")
+            }
+            Self::Lobby(LobbyError::StaleLobbyEpoch) => (
+                StatusCode::CONFLICT,
+                "staleLobbyEpoch",
+                "Lobby state changed; refresh and retry.",
+            ),
+            Self::Lobby(LobbyError::ResumeTokenInvalid) => (
+                StatusCode::UNAUTHORIZED,
+                "lobbyResumeTokenInvalid",
+                "Lobby reconnect token is invalid.",
+            ),
+            Self::Lobby(LobbyError::PlayerSlotUnavailable) => (
+                StatusCode::CONFLICT,
+                "lobbyPlayerSlotUnavailable",
+                "Lobby player slot is not available.",
+            ),
+            Self::Lobby(LobbyError::UnknownConnection) => (
+                StatusCode::CONFLICT,
+                "unknownLobbyConnection",
+                "Connection is not assigned to this lobby.",
+            ),
+            Self::Lobby(LobbyError::HostOnly) => (
+                StatusCode::FORBIDDEN,
+                "lobbyHostOnly",
+                "Only Player 1 can perform this action.",
+            ),
+            Self::Lobby(LobbyError::StaleGameProposal) => (
+                StatusCode::CONFLICT,
+                "staleLobbyGameProposal",
+                "Selected game changed; refresh and retry.",
+            ),
+            Self::Lobby(LobbyError::PlayersNotReady) => (
+                StatusCode::CONFLICT,
+                "lobbyPlayersNotReady",
+                "Players are not ready yet.",
+            ),
+            Self::Lobby(LobbyError::RomRelayUnavailable) => (
+                StatusCode::CONFLICT,
+                "lobbyRomRelayUnavailable",
+                "Temporary session access is not available.",
+            ),
+            Self::Lobby(LobbyError::RomRelayUnsupported) => (
+                StatusCode::CONFLICT,
+                "lobbyRomRelayUnsupported",
+                "Temporary session access is not supported by every player.",
+            ),
+            Self::Lobby(LobbyError::RomRelayTooLarge) => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "lobbyRomRelayTooLarge",
+                "This game is too large for temporary session access.",
+            ),
+            Self::Lobby(LobbyError::VoiceUnavailable) => (
+                StatusCode::CONFLICT,
+                "lobbyVoiceUnavailable",
+                "Voice chat is unavailable.",
+            ),
+            Self::Lobby(LobbyError::InvalidPayload) => (
+                StatusCode::BAD_REQUEST,
+                "invalidLobbyPayload",
+                "Lobby payload is invalid.",
             ),
             Self::RateLimited(error) => {
                 retry_after_seconds = Some(error.retry_after.as_secs().max(1));

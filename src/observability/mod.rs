@@ -20,7 +20,8 @@ pub use postgres_schema::PostgresTableNames;
 pub(crate) use postgres_telemetry_writer::PostgresTelemetryWriter;
 pub use telemetry::spawn_telemetry_sink;
 pub(crate) use telemetry_event::{
-    NetplayPerformanceSample, NetplayTelemetryEvent, NetplayTelemetryRecord,
+    NetplayLobbyTelemetryEvent, NetplayPerformanceSample, NetplayTelemetryEvent,
+    NetplayTelemetryRecord,
 };
 pub use telemetry_schema_check::ensure_telemetry_schema;
 pub use tracing_setup::init_tracing;

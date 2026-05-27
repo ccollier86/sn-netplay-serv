@@ -25,6 +25,7 @@ impl NetplayRoom {
             String::new(),
             String::new(),
             Instant::now(),
+            false,
         )
     }
 
@@ -36,6 +37,7 @@ impl NetplayRoom {
         resume_token_hash: ResumeTokenHash,
         input_socket_token_hash: ResumeTokenHash,
         now: Instant,
+        supports_state_file_relay: bool,
     ) -> Result<PlayerIndex, RoomError> {
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
@@ -53,6 +55,7 @@ impl NetplayRoom {
                 resume_token_hash,
                 input_socket_token_hash,
                 now,
+                supports_state_file_relay,
             );
             slot.player_index
         };
@@ -73,6 +76,7 @@ impl NetplayRoom {
             String::new(),
             String::new(),
             Instant::now(),
+            false,
         )
     }
 
@@ -84,6 +88,7 @@ impl NetplayRoom {
         resume_token_hash: ResumeTokenHash,
         input_socket_token_hash: ResumeTokenHash,
         now: Instant,
+        supports_state_file_relay: bool,
     ) -> Result<PlayerIndex, RoomError> {
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
@@ -109,6 +114,7 @@ impl NetplayRoom {
         slot.runtime_state = PlayerRuntimeState::Connected;
         slot.resume_token_hash = Some(resume_token_hash);
         slot.input_socket_token_hash = Some(input_socket_token_hash);
+        slot.supports_state_file_relay = supports_state_file_relay;
         slot.reconnect_deadline = None;
         slot.reconnect_room_epoch = None;
         slot.last_seen_at = Some(now);
@@ -217,6 +223,7 @@ impl NetplayRoom {
         room_epoch: u64,
         connection_id: ConnectionId,
         now: Instant,
+        supports_state_file_relay: bool,
     ) -> Result<(), RoomError> {
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
@@ -250,6 +257,7 @@ impl NetplayRoom {
         slot.status = PlayerStatus::Connected;
         slot.runtime_state = PlayerRuntimeState::Reconnecting;
         slot.input_socket_token_hash = Some(input_socket_token_hash);
+        slot.supports_state_file_relay = supports_state_file_relay;
         slot.last_seen_at = Some(now);
         slot.latest_local_frame = None;
         slot.latest_local_frame_reported_at = None;
@@ -477,21 +485,5 @@ impl NetplayRoom {
                 slot.reconnect_room_epoch
                     .get_or_insert(reconnect_room_epoch);
             });
-    }
-}
-
-impl From<ClientRuntimeState> for PlayerRuntimeState {
-    fn from(state: ClientRuntimeState) -> Self {
-        match state {
-            ClientRuntimeState::Connected => PlayerRuntimeState::Connected,
-            ClientRuntimeState::CheckingCompatibility => PlayerRuntimeState::CheckingCompatibility,
-            ClientRuntimeState::Syncing => PlayerRuntimeState::Syncing,
-            ClientRuntimeState::Ready => PlayerRuntimeState::Ready,
-            ClientRuntimeState::Playing => PlayerRuntimeState::Playing,
-            ClientRuntimeState::Pausing => PlayerRuntimeState::Pausing,
-            ClientRuntimeState::Paused => PlayerRuntimeState::Paused,
-            ClientRuntimeState::Reconnecting => PlayerRuntimeState::Reconnecting,
-            ClientRuntimeState::Disconnected => PlayerRuntimeState::Disconnected,
-        }
     }
 }
