@@ -13,7 +13,11 @@ use uuid::Uuid;
 
 /// Client-to-relay lobby WebSocket message.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum LobbyClientMessage {
     /// Lightweight keepalive.
     Ping,
@@ -90,7 +94,11 @@ pub enum LobbyClientMessage {
 
 /// Relay-to-client lobby WebSocket message.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum LobbyServerMessage {
     /// Reply to client ping.
     Pong,
@@ -154,4 +162,65 @@ pub enum LobbyServerMessage {
         /// Safe user-facing message.
         message: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lobbies::{LobbyServerCapabilities, LobbyStatus};
+    use crate::rooms::RoomId;
+    use serde_json::json;
+
+    #[test]
+    fn lobby_client_messages_accept_desktop_camel_case_fields() {
+        let message = serde_json::from_value::<LobbyClientMessage>(json!({
+            "type": "chat",
+            "lobbyEpoch": 3,
+            "body": "hello"
+        }))
+        .expect("chat message");
+
+        assert!(matches!(
+            message,
+            LobbyClientMessage::Chat {
+                lobby_epoch: 3,
+                body
+            } if body == "hello"
+        ));
+    }
+
+    #[test]
+    fn lobby_server_messages_emit_desktop_camel_case_fields() {
+        let message = LobbyServerMessage::LobbyJoined {
+            event_seq: 4,
+            lobby_epoch: 2,
+            your_player_index: 0,
+            resume_token: "resume-token".to_string(),
+            voice: None,
+            lobby: LobbyView {
+                lobby_id: RoomId::new(),
+                event_seq: 4,
+                lobby_epoch: 2,
+                invite_code: "AB23-CD".to_string(),
+                created_at_ms: 1,
+                updated_at_ms: 2,
+                status: LobbyStatus::Open,
+                capabilities: LobbyServerCapabilities::current(4, true, true),
+                players: Vec::new(),
+                selected_game: None,
+                game_readiness: Vec::new(),
+                pending_launch: None,
+                voice: None,
+            },
+        };
+
+        let payload = serde_json::to_value(message).expect("server message");
+
+        assert_eq!(payload["eventSeq"], 4);
+        assert_eq!(payload["lobbyEpoch"], 2);
+        assert_eq!(payload["yourPlayerIndex"], 0);
+        assert!(payload.get("event_seq").is_none());
+        assert!(payload.get("lobby_epoch").is_none());
+        assert!(payload.get("your_player_index").is_none());
+    }
 }

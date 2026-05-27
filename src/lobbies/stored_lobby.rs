@@ -3,7 +3,11 @@
 //! The registry owns lookup and locking; this wrapper owns the event channel
 //! beside a lobby and exposes small emit helpers.
 
-use crate::lobbies::{Lobby, LobbyChatMessageView, LobbyEvent, LobbyServerCapabilities, LobbyView};
+use crate::lobbies::lobby_debug_event::current_lobby_timestamp_ms;
+use crate::lobbies::{
+    Lobby, LobbyChatMessageView, LobbyDebugEvent, LobbyDebugEventLog, LobbyEvent,
+    LobbyServerCapabilities, LobbyView,
+};
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::ConnectionId;
 use tokio::sync::broadcast;
@@ -13,6 +17,7 @@ const LOBBY_EVENT_CHANNEL_CAPACITY: usize = 256;
 /// Lobby plus event channel stored by the in-memory registry.
 pub(crate) struct StoredLobby {
     pub(super) lobby: Lobby,
+    debug_events: LobbyDebugEventLog,
     events: broadcast::Sender<LobbyEvent>,
     capabilities: LobbyServerCapabilities,
 }
@@ -24,6 +29,7 @@ impl StoredLobby {
 
         Self {
             lobby,
+            debug_events: LobbyDebugEventLog::default(),
             events,
             capabilities,
         }
@@ -37,6 +43,28 @@ impl StoredLobby {
     /// Returns the current lobby view.
     pub(super) fn view(&self) -> LobbyView {
         self.lobby.view(self.capabilities.clone())
+    }
+
+    /// Returns recent sanitized debug events for this lobby.
+    pub(super) fn debug_events(&self, limit: usize) -> Vec<LobbyDebugEvent> {
+        self.debug_events.tail(limit)
+    }
+
+    /// Records a sanitized debug event without broadcasting it to clients.
+    pub(super) fn record_debug_event(&mut self, kind: &str, detail: String) -> LobbyDebugEvent {
+        let lobby = self.view();
+        let event = LobbyDebugEvent {
+            timestamp_ms: current_lobby_timestamp_ms(),
+            lobby_id: lobby.lobby_id,
+            invite_code: lobby.invite_code,
+            event_seq: lobby.event_seq,
+            lobby_epoch: lobby.lobby_epoch,
+            kind: kind.to_string(),
+            detail,
+        };
+
+        self.debug_events.push(event.clone());
+        event
     }
 
     /// Broadcasts the current lobby view.

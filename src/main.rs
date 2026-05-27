@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?);
     ensure_telemetry_schema(&config.telemetry).await?;
     let metrics = Arc::new(InMemoryMetrics::new());
-    let (event_sink, _telemetry_task) =
+    let (event_sink, lobby_event_sink, _telemetry_task) =
         spawn_telemetry_sink(config.telemetry.clone(), metrics.clone());
     let voice_broker: Arc<dyn VoiceBroker> = match config.voice.broker.clone() {
         VoiceBrokerConfig::Disabled => Arc::new(DisabledVoiceBroker),
@@ -65,11 +65,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         event_sink,
     ));
     let lobbies = Arc::new(
-        InMemoryLobbyRegistry::with_generators_capabilities_and_voice(
+        InMemoryLobbyRegistry::with_generators_capabilities_voice_and_event_sink(
             Arc::new(UuidInviteCodeGenerator),
             Arc::new(sb_netplay_serv::rooms::UuidResumeTokenGenerator),
             lobby_capabilities,
             voice_broker,
+            lobby_event_sink,
         ),
     );
     let rate_limiter = Arc::new(InMemoryRateLimiter::new(config.rate_limits));

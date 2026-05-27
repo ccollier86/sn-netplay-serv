@@ -5,10 +5,11 @@
 
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
-    CreateLobbyParams, JoinLobbyParams, Lobby, LobbyChatMessageView, LobbyError,
-    LobbyEventReceiver, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyRegistry,
-    LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyView,
-    MAX_LOBBY_PLAYERS, StoredLobby,
+    CreateLobbyParams, JoinLobbyParams, Lobby, LobbyChatMessageView, LobbyDebugEvent,
+    LobbyDebugEventLog, LobbyDebugEventSink, LobbyError, LobbyEventReceiver, LobbyGameCandidate,
+    LobbyGameReadinessStatus, LobbyJoin, LobbyRegistry, LobbyRegistrySnapshot, LobbyRomRelayLimits,
+    LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyView, MAX_LOBBY_PLAYERS,
+    NoopLobbyDebugEventSink, StoredLobby,
 };
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::{
@@ -17,7 +18,7 @@ use crate::rooms::{
 };
 use crate::voice::{DisabledVoiceBroker, VoiceBroker};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
 /// Thread-safe in-memory lobby registry.
@@ -26,6 +27,8 @@ pub struct InMemoryLobbyRegistry {
     invite_code_generator: Arc<dyn InviteCodeGenerator>,
     resume_token_generator: Arc<dyn ResumeTokenGenerator>,
     pub(super) capabilities: LobbyServerCapabilities,
+    recent_events: Mutex<LobbyDebugEventLog>,
+    event_sink: Arc<dyn LobbyDebugEventSink>,
     pub(super) voice_broker: Arc<dyn VoiceBroker>,
 }
 
@@ -37,6 +40,8 @@ impl InMemoryLobbyRegistry {
             invite_code_generator,
             resume_token_generator: Arc::new(UuidResumeTokenGenerator),
             capabilities: LobbyServerCapabilities::current(MAX_LOBBY_PLAYERS, false, false),
+            recent_events: Mutex::new(LobbyDebugEventLog::default()),
+            event_sink: Arc::new(NoopLobbyDebugEventSink),
             voice_broker: Arc::new(DisabledVoiceBroker),
         }
     }
@@ -51,6 +56,8 @@ impl InMemoryLobbyRegistry {
             invite_code_generator,
             resume_token_generator,
             capabilities: LobbyServerCapabilities::current(MAX_LOBBY_PLAYERS, false, false),
+            recent_events: Mutex::new(LobbyDebugEventLog::default()),
+            event_sink: Arc::new(NoopLobbyDebugEventSink),
             voice_broker: Arc::new(DisabledVoiceBroker),
         }
     }
@@ -66,6 +73,8 @@ impl InMemoryLobbyRegistry {
             invite_code_generator,
             resume_token_generator,
             capabilities,
+            recent_events: Mutex::new(LobbyDebugEventLog::default()),
+            event_sink: Arc::new(NoopLobbyDebugEventSink),
             voice_broker: Arc::new(DisabledVoiceBroker),
         }
     }
@@ -77,13 +86,47 @@ impl InMemoryLobbyRegistry {
         capabilities: LobbyServerCapabilities,
         voice_broker: Arc<dyn VoiceBroker>,
     ) -> Self {
+        Self::with_generators_capabilities_voice_and_event_sink(
+            invite_code_generator,
+            resume_token_generator,
+            capabilities,
+            voice_broker,
+            Arc::new(NoopLobbyDebugEventSink),
+        )
+    }
+
+    /// Creates a registry with injectable generators, capabilities, voice broker, and event sink.
+    pub fn with_generators_capabilities_voice_and_event_sink(
+        invite_code_generator: Arc<dyn InviteCodeGenerator>,
+        resume_token_generator: Arc<dyn ResumeTokenGenerator>,
+        capabilities: LobbyServerCapabilities,
+        voice_broker: Arc<dyn VoiceBroker>,
+        event_sink: Arc<dyn LobbyDebugEventSink>,
+    ) -> Self {
         Self {
             lobbies: RwLock::new(HashMap::new()),
             invite_code_generator,
             resume_token_generator,
             capabilities,
+            recent_events: Mutex::new(LobbyDebugEventLog::default()),
+            event_sink,
             voice_broker,
         }
+    }
+
+    fn record_lobby_event(&self, lobby: &mut StoredLobby, kind: &str, detail: String) {
+        let event = lobby.record_debug_event(kind, detail);
+        self.record_recent_event(event);
+    }
+
+    fn record_recent_event(&self, event: LobbyDebugEvent) {
+        self.event_sink.record_lobby_event(event.clone());
+
+        let Ok(mut recent_events) = self.recent_events.lock() else {
+            return;
+        };
+
+        recent_events.push(event);
     }
 }
 
@@ -117,7 +160,9 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             lobby.set_voice_state(voice);
         }
         let voice = lobby.voice_grant_for(crate::rooms::PlayerIndex::ONE);
-        let stored_lobby = StoredLobby::new(lobby, self.capabilities.clone());
+        let mut stored_lobby = StoredLobby::new(lobby, self.capabilities.clone());
+        let created_detail = lobby_created_detail(&stored_lobby.view());
+        self.record_lobby_event(&mut stored_lobby, "lobbyCreated", created_detail);
         let lobby_view = stored_lobby.view();
 
         self.lobbies
@@ -153,6 +198,11 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             crate::rooms::current_timestamp_ms(),
         )?;
         lobby.emit_state_changed();
+        self.record_lobby_event(
+            lobby,
+            "lobbyJoined",
+            player_detail("player joined lobby", player_index),
+        );
 
         Ok(LobbyJoin {
             lobby: lobby.view(),
@@ -183,6 +233,11 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             crate::rooms::current_timestamp_ms(),
         )?;
         lobby.emit_state_changed();
+        self.record_lobby_event(
+            lobby,
+            "lobbySocketConnected",
+            player_detail("lobby socket connected", player_index),
+        );
 
         Ok(LobbyJoin {
             lobby: lobby.view(),
@@ -217,6 +272,11 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             crate::rooms::current_timestamp_ms(),
         )?;
         lobby.emit_state_changed();
+        self.record_lobby_event(
+            lobby,
+            "lobbyPlayerReconnected",
+            player_detail("lobby player reconnected", player_index),
+        );
 
         Ok(LobbyJoin {
             lobby: lobby.view(),
@@ -241,6 +301,8 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             .disconnect(connection_id, crate::rooms::current_timestamp_ms())
         {
             lobby.emit_state_changed();
+            let detail = "lobby socket disconnected".to_string();
+            self.record_lobby_event(lobby, "lobbySocketDisconnected", detail);
         }
 
         Ok(lobby.view())
@@ -265,6 +327,12 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             None
         };
         lobby.emit_state_changed();
+        let detail = if lobby.lobby.status() == crate::lobbies::LobbyStatus::Closed {
+            "host left; lobby closed".to_string()
+        } else {
+            "player left lobby".to_string()
+        };
+        self.record_lobby_event(lobby, "lobbyPlayerLeft", detail);
         self.cleanup_lobby_voice_room(voice_cleanup, "lobby-left");
 
         Ok(lobby.view())
@@ -296,6 +364,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             .lobby
             .select_game(connection_id, game, crate::rooms::current_timestamp_ms())?;
         lobby.emit_state_changed();
+        self.record_lobby_event(lobby, "lobbyGameSelected", "host selected game".to_string());
 
         Ok(lobby.view())
     }
@@ -320,6 +389,11 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             crate::rooms::current_timestamp_ms(),
         )?;
         lobby.emit_state_changed();
+        self.record_lobby_event(
+            lobby,
+            "lobbyReadinessSet",
+            format!("player readiness set status={status:?}"),
+        );
 
         Ok(lobby.view())
     }
@@ -340,6 +414,11 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             crate::rooms::current_timestamp_ms(),
         )?;
         lobby.emit_state_changed();
+        self.record_lobby_event(
+            lobby,
+            "lobbyLaunchRequested",
+            "host requested game launch".to_string(),
+        );
 
         Ok(lobby.view())
     }
@@ -404,6 +483,11 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             crate::rooms::current_timestamp_ms(),
         )?;
         lobby.emit_state_changed();
+        self.record_lobby_event(
+            lobby,
+            "lobbyGameRoomPublished",
+            "gameplay room published to lobby".to_string(),
+        );
 
         Ok(lobby.view())
     }
@@ -424,6 +508,11 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             crate::rooms::current_timestamp_ms(),
         )?;
         lobby.emit_state_changed();
+        self.record_lobby_event(
+            lobby,
+            "lobbyReturned",
+            "lobby returned from game".to_string(),
+        );
 
         Ok(lobby.view())
     }
@@ -434,9 +523,9 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         connection_id: ConnectionId,
         body: String,
     ) -> Result<LobbyChatMessageView, LobbyError> {
-        let lobbies = self.lobbies.read().await;
+        let mut lobbies = self.lobbies.write().await;
         let lobby = lobbies
-            .get(invite_code.normalized())
+            .get_mut(invite_code.normalized())
             .ok_or(LobbyError::NotFound)?;
         let player_index = lobby.lobby.player_index_for_connection(connection_id)?;
         let chat = LobbyChatMessageView::new(
@@ -445,6 +534,11 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             crate::rooms::current_timestamp_ms(),
         );
         lobby.emit_chat_message(chat.clone());
+        self.record_lobby_event(
+            lobby,
+            "lobbyChatMessage",
+            player_detail("lobby chat message sent", player_index),
+        );
 
         Ok(chat)
     }
@@ -454,8 +548,20 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         invite_code: InviteCode,
         connection_id: ConnectionId,
     ) -> Result<crate::lobbies::LobbyVoiceTokenRefresh, LobbyError> {
-        self.refresh_lobby_voice_token_impl(invite_code, connection_id)
-            .await
+        let refresh = self
+            .refresh_lobby_voice_token_impl(invite_code.clone(), connection_id)
+            .await?;
+        let mut lobbies = self.lobbies.write().await;
+
+        if let Some(lobby) = lobbies.get_mut(invite_code.normalized()) {
+            self.record_lobby_event(
+                lobby,
+                "lobbyVoiceTokenRefreshed",
+                "lobby voice token refreshed".to_string(),
+            );
+        }
+
+        Ok(refresh)
     }
 
     async fn lobby_view(&self, invite_code: InviteCode) -> Result<LobbyView, LobbyError> {
@@ -465,6 +571,44 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             .get(invite_code.normalized())
             .map(StoredLobby::view)
             .ok_or(LobbyError::NotFound)
+    }
+
+    async fn snapshot(&self) -> LobbyRegistrySnapshot {
+        let mut lobbies = self
+            .lobbies
+            .read()
+            .await
+            .values()
+            .map(StoredLobby::view)
+            .collect::<Vec<_>>();
+
+        lobbies.sort_by(|left, right| left.created_at_ms.cmp(&right.created_at_ms));
+
+        LobbyRegistrySnapshot {
+            active_lobby_count: lobbies.len(),
+            lobbies,
+        }
+    }
+
+    async fn lobby_events(
+        &self,
+        invite_code: InviteCode,
+        limit: usize,
+    ) -> Result<Vec<LobbyDebugEvent>, LobbyError> {
+        self.lobbies
+            .read()
+            .await
+            .get(invite_code.normalized())
+            .map(|lobby| lobby.debug_events(limit))
+            .ok_or(LobbyError::NotFound)
+    }
+
+    async fn recent_events(&self, limit: usize) -> Vec<LobbyDebugEvent> {
+        let Ok(events) = self.recent_events.lock() else {
+            return Vec::new();
+        };
+
+        events.tail(limit)
     }
 }
 
@@ -482,4 +626,25 @@ fn sanitize_chat_body(body: String) -> Result<String, LobbyError> {
     }
 
     Ok(sanitized.to_string())
+}
+
+fn lobby_created_detail(lobby: &LobbyView) -> String {
+    format!(
+        "lobby created status={:?} voice={} selectedGame={}",
+        lobby.status,
+        lobby_voice_state(lobby),
+        lobby.selected_game.is_some()
+    )
+}
+
+fn lobby_voice_state(lobby: &LobbyView) -> &'static str {
+    match lobby.voice.as_ref().map(|voice| voice.status) {
+        Some(crate::rooms::RoomVoiceStatus::Available) => "available",
+        Some(crate::rooms::RoomVoiceStatus::Unavailable) => "unavailable",
+        None => "off",
+    }
+}
+
+fn player_detail(prefix: &str, player_index: PlayerIndex) -> String {
+    format!("{prefix} p{}", player_index.zero_based() + 1)
 }

@@ -12,10 +12,12 @@ use crate::rooms::{
 };
 use crate::voice::{
     CreateVoiceRoomBrokerRequest, CreateVoiceRoomBrokerResponse, IssueVoiceTokenBrokerRequest,
-    VoiceBrokerGrant, VoiceBrokerParticipant,
+    VoiceBrokerError, VoiceBrokerGrant, VoiceBrokerParticipant,
 };
 use std::collections::HashMap;
 use tracing::warn;
+
+const LEGACY_LOBBY_VOICE_MAX_PARTICIPANTS: u8 = 2;
 
 impl InMemoryLobbyRegistry {
     /// Creates broker voice state for a lobby when the host requested it.
@@ -38,11 +40,7 @@ impl InMemoryLobbyRegistry {
             ));
         }
 
-        match self
-            .voice_broker
-            .create_room(create_lobby_voice_request(lobby, descriptor.mode))
-            .await
-        {
+        match self.create_lobby_voice_room(lobby, descriptor.mode).await {
             Ok(response) => Some(voice_state_from_response(response, descriptor.mode)),
             Err(error) => {
                 warn!(
@@ -56,6 +54,39 @@ impl InMemoryLobbyRegistry {
                     "Voice chat is not available for this lobby.",
                 ))
             }
+        }
+    }
+
+    async fn create_lobby_voice_room(
+        &self,
+        lobby: &Lobby,
+        mode: NetplayVoiceMode,
+    ) -> Result<CreateVoiceRoomBrokerResponse, VoiceBrokerError> {
+        match self
+            .voice_broker
+            .create_room(create_lobby_voice_request(lobby, mode, MAX_LOBBY_PLAYERS))
+            .await
+        {
+            Ok(response) => Ok(response),
+            Err(VoiceBrokerError::UnexpectedStatus(400))
+                if MAX_LOBBY_PLAYERS > LEGACY_LOBBY_VOICE_MAX_PARTICIPANTS =>
+            {
+                warn!(
+                    lobby_id = %lobby.lobby_id(),
+                    invite_code = %lobby.invite_code().display(),
+                    requested_max_participants = MAX_LOBBY_PLAYERS,
+                    fallback_max_participants = LEGACY_LOBBY_VOICE_MAX_PARTICIPANTS,
+                    "voice broker rejected full lobby participant limit; retrying legacy lobby voice contract"
+                );
+                self.voice_broker
+                    .create_room(create_lobby_voice_request(
+                        lobby,
+                        mode,
+                        LEGACY_LOBBY_VOICE_MAX_PARTICIPANTS,
+                    ))
+                    .await
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -144,19 +175,22 @@ impl InMemoryLobbyRegistry {
 fn create_lobby_voice_request(
     lobby: &Lobby,
     mode: NetplayVoiceMode,
+    max_participants: u8,
 ) -> CreateVoiceRoomBrokerRequest {
     CreateVoiceRoomBrokerRequest {
         netplay_room_id: lobby.lobby_id().to_string(),
         netplay_invite_code: lobby.invite_code().display(),
         room_epoch: lobby.lobby_epoch(),
         mode,
-        max_participants: MAX_LOBBY_PLAYERS,
-        participants: voice_participants(lobby),
+        max_participants,
+        participants: voice_participants(lobby, max_participants),
     }
 }
 
-fn voice_participants(lobby: &Lobby) -> Vec<VoiceBrokerParticipant> {
-    (0..MAX_LOBBY_PLAYERS)
+fn voice_participants(lobby: &Lobby, max_participants: u8) -> Vec<VoiceBrokerParticipant> {
+    let participant_count = max_participants.min(MAX_LOBBY_PLAYERS);
+
+    (0..participant_count)
         .filter_map(|index| PlayerIndex::new(index, MAX_LOBBY_PLAYERS))
         .map(|player_index| VoiceBrokerParticipant {
             player_index: player_index.display_number(),

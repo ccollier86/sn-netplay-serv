@@ -5,6 +5,7 @@
 //! active rooms.
 
 use crate::config::{TelemetryConfig, TelemetrySinkConfig};
+use crate::lobbies::{LobbyDebugEvent, LobbyDebugEventSink, NoopLobbyDebugEventSink};
 use crate::observability::MetricsRecorder;
 use crate::observability::postgres_telemetry_writer::PostgresTelemetryWriter;
 use crate::observability::telemetry_event::NetplayTelemetryRecord;
@@ -21,15 +22,24 @@ use tracing::warn;
 pub fn spawn_telemetry_sink(
     config: TelemetryConfig,
     metrics: Arc<dyn MetricsRecorder>,
-) -> (Arc<dyn RoomDebugEventSink>, Option<JoinHandle<()>>) {
+) -> (
+    Arc<dyn RoomDebugEventSink>,
+    Arc<dyn LobbyDebugEventSink>,
+    Option<JoinHandle<()>>,
+) {
     match config.sink {
-        TelemetrySinkConfig::Disabled => (Arc::new(NoopRoomDebugEventSink), None),
+        TelemetrySinkConfig::Disabled => (
+            Arc::new(NoopRoomDebugEventSink),
+            Arc::new(NoopLobbyDebugEventSink),
+            None,
+        ),
         TelemetrySinkConfig::Postgres(postgres) => {
             let (sender, receiver) = mpsc::channel(config.queue_capacity);
             let sink = Arc::new(BoundedTelemetrySink {
                 sender,
                 metrics: metrics.clone(),
             });
+            let lobby_sink = sink.clone();
             let writer = TelemetryWriter::Postgres(PostgresTelemetryWriter::new(postgres));
             let task = tokio::spawn(run_telemetry_drain(
                 receiver,
@@ -39,7 +49,7 @@ pub fn spawn_telemetry_sink(
                 metrics,
             ));
 
-            (sink, Some(task))
+            (sink, lobby_sink, Some(task))
         }
     }
 }
@@ -80,6 +90,12 @@ impl RoomDebugEventSink for BoundedTelemetrySink {
 
     fn record_performance_sample(&self, sample: RoomPerformanceSample) {
         self.try_record(NetplayTelemetryRecord::PerformanceSample(sample.into()));
+    }
+}
+
+impl LobbyDebugEventSink for BoundedTelemetrySink {
+    fn record_lobby_event(&self, event: LobbyDebugEvent) {
+        self.try_record(NetplayTelemetryRecord::LobbyEvent(event.into()));
     }
 }
 

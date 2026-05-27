@@ -9,6 +9,7 @@ mod in_memory_lobby_registry;
 mod lobby;
 mod lobby_capabilities;
 mod lobby_chat;
+mod lobby_debug_event;
 mod lobby_event;
 mod lobby_game;
 mod lobby_launch;
@@ -29,6 +30,10 @@ pub use in_memory_lobby_registry::InMemoryLobbyRegistry;
 pub use lobby::{Lobby, LobbyStatus, MAX_LOBBY_PLAYERS};
 pub use lobby_capabilities::{LobbyClientCapabilities, LobbyServerCapabilities};
 pub use lobby_chat::LobbyChatMessageView;
+pub use lobby_debug_event::{
+    LobbyDebugEvent, LobbyDebugEventLog, LobbyDebugEventSink, LobbyRegistrySnapshot,
+    NoopLobbyDebugEventSink,
+};
 pub use lobby_event::LobbyEvent;
 pub use lobby_game::{LobbyGameCandidate, LobbyGameSelectionView};
 pub use lobby_launch::{

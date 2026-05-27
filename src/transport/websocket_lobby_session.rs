@@ -368,12 +368,10 @@ async fn handle_lobby_message(
             )
             .await
         }
-        LobbyClientMessage::Chat { lobby_epoch, body } => {
-            apply_lobby_result(
-                sender,
-                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
-            )
-            .await?;
+        LobbyClientMessage::Chat {
+            lobby_epoch: _,
+            body,
+        } => {
             apply_lobby_result(
                 sender,
                 services

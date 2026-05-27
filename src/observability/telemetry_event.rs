@@ -3,6 +3,7 @@
 //! These records are derived from sanitized room debug events. They must not
 //! contain tokens, raw input payloads, snapshot bytes, or license secrets.
 
+use crate::lobbies::LobbyDebugEvent;
 use crate::rooms::{RoomDebugEvent, RoomId, RoomPerformanceSample};
 use serde::Serialize;
 
@@ -11,6 +12,8 @@ use serde::Serialize;
 pub enum NetplayTelemetryRecord {
     /// Sanitized lifecycle/debug event.
     RoomEvent(NetplayTelemetryEvent),
+    /// Sanitized persistent lobby event.
+    LobbyEvent(NetplayLobbyTelemetryEvent),
     /// Sanitized heartbeat/runtime sample.
     PerformanceSample(NetplayPerformanceSample),
 }
@@ -45,6 +48,39 @@ impl From<RoomDebugEvent> for NetplayTelemetryEvent {
             event_seq: event.event_seq,
             room_epoch: event.room_epoch,
             session_epoch: event.session_epoch,
+            kind: event.kind,
+            detail: event.detail,
+        }
+    }
+}
+
+/// Append-only lobby event row written to analytics storage.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct NetplayLobbyTelemetryEvent {
+    /// Milliseconds since unix epoch.
+    pub timestamp_ms: u64,
+    /// Stable internal lobby id.
+    pub lobby_id: RoomId,
+    /// Human invite code for operator correlation.
+    pub invite_code: String,
+    /// Monotonic event sequence inside the lobby.
+    pub event_seq: u64,
+    /// Current lobby epoch.
+    pub lobby_epoch: u64,
+    /// Stable event kind.
+    pub kind: String,
+    /// Sanitized detail string.
+    pub detail: String,
+}
+
+impl From<LobbyDebugEvent> for NetplayLobbyTelemetryEvent {
+    fn from(event: LobbyDebugEvent) -> Self {
+        Self {
+            timestamp_ms: u64::try_from(event.timestamp_ms).unwrap_or(u64::MAX),
+            lobby_id: event.lobby_id,
+            invite_code: event.invite_code,
+            event_seq: event.event_seq,
+            lobby_epoch: event.lobby_epoch,
             kind: event.kind,
             detail: event.detail,
         }

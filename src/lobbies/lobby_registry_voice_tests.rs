@@ -103,6 +103,34 @@ async fn lobby_voice_token_refresh_updates_requesting_player_grant() {
 }
 
 #[tokio::test]
+async fn lobby_voice_retries_two_player_contract_when_broker_rejects_full_lobby_limit() {
+    let broker = MockVoiceBroker::limited_to(2);
+    let requests = broker.requests.clone();
+    let registry = registry_with_voice(broker);
+
+    let join = registry
+        .create_lobby(license("host"), create_params_with_voice())
+        .await
+        .expect("created");
+
+    assert_eq!(
+        join.lobby.voice.as_ref().map(|voice| voice.status),
+        Some(RoomVoiceStatus::Available)
+    );
+    assert_eq!(
+        join.lobby
+            .voice
+            .as_ref()
+            .map(|voice| voice.max_participants),
+        Some(2)
+    );
+    assert_eq!(
+        requests.lock().expect("voice requests").as_slice(),
+        [MAX_LOBBY_PLAYERS, 2]
+    );
+}
+
+#[tokio::test]
 async fn lobby_voice_room_closes_when_host_closes_lobby() {
     let broker = MockVoiceBroker::available();
     let closed = broker.closed.clone();
@@ -214,12 +242,24 @@ impl ResumeTokenGenerator for SequenceResumeTokenGenerator {
 #[derive(Clone)]
 struct MockVoiceBroker {
     closed: Arc<Mutex<Vec<String>>>,
+    max_supported_participants: u8,
+    requests: Arc<Mutex<Vec<u8>>>,
 }
 
 impl MockVoiceBroker {
     fn available() -> Self {
         Self {
             closed: Arc::new(Mutex::new(Vec::new())),
+            max_supported_participants: MAX_LOBBY_PLAYERS,
+            requests: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn limited_to(max_supported_participants: u8) -> Self {
+        Self {
+            closed: Arc::new(Mutex::new(Vec::new())),
+            max_supported_participants,
+            requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -234,6 +274,15 @@ impl VoiceBroker for MockVoiceBroker {
         &self,
         request: CreateVoiceRoomBrokerRequest,
     ) -> Result<CreateVoiceRoomBrokerResponse, VoiceBrokerError> {
+        self.requests
+            .lock()
+            .expect("voice requests")
+            .push(request.max_participants);
+        if request.max_participants > self.max_supported_participants {
+            return Err(VoiceBrokerError::UnexpectedStatus(400));
+        }
+
+        let max_participants = request.max_participants;
         Ok(CreateVoiceRoomBrokerResponse {
             room: VoiceBrokerRoomView {
                 voice_room_id: "lobby-voice-room-1".to_string(),
@@ -245,7 +294,7 @@ impl VoiceBroker for MockVoiceBroker {
                 mode: request.mode,
                 max_participants: request.max_participants,
             },
-            grants: (1..=MAX_LOBBY_PLAYERS)
+            grants: (1..=max_participants)
                 .map(|player_index| VoiceBrokerGrant {
                     player_index,
                     participant_identity: format!("lobby-player-{player_index}"),

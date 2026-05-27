@@ -21,6 +21,8 @@ impl AnalyticsConfig {
             events: optional_env("SB_NETPLAY_POSTGRES_EVENTS_TABLE")
                 .or(legacy_events_table)
                 .unwrap_or_else(|| "netplay_room_events".to_string()),
+            lobby_events: optional_env("SB_NETPLAY_POSTGRES_LOBBY_EVENTS_TABLE")
+                .unwrap_or_else(|| "netplay_lobby_events".to_string()),
             performance_samples: optional_env("SB_NETPLAY_POSTGRES_PERFORMANCE_TABLE")
                 .unwrap_or_else(|| "netplay_performance_samples".to_string()),
         };

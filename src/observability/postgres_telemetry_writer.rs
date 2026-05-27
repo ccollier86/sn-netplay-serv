@@ -8,7 +8,8 @@ use crate::observability::PostgresConnectError;
 use crate::observability::connect_postgres;
 use crate::observability::postgres_schema::split_batch;
 use crate::observability::telemetry_event::{
-    NetplayPerformanceSample, NetplayTelemetryEvent, NetplayTelemetryRecord,
+    NetplayLobbyTelemetryEvent, NetplayPerformanceSample, NetplayTelemetryEvent,
+    NetplayTelemetryRecord,
 };
 use tokio::task::JoinHandle;
 use tokio_postgres::Client;
@@ -26,6 +27,11 @@ const INSERT_SAMPLE_SQL: &str = "\
      stall_count, catch_up_frames, late_input_frames, audio_underruns) \
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, \
             $17, $18, $19, $20, $21)";
+
+const INSERT_LOBBY_EVENT_SQL: &str = "\
+    INSERT INTO {table} \
+    (timestamp_ms, lobby_id, invite_code, event_seq, lobby_epoch, kind, detail) \
+    VALUES ($1, $2, $3, $4, $5, $6, $7)";
 
 /// Batched Postgres writer with reconnect-on-failure behavior.
 pub struct PostgresTelemetryWriter {
@@ -75,6 +81,15 @@ impl PostgresTelemetryWriter {
             .await?;
         }
 
+        if !grouped.lobby_events.is_empty() {
+            write_lobby_events(
+                &connection.client,
+                &self.config.tables.lobby_events,
+                &grouped.lobby_events,
+            )
+            .await?;
+        }
+
         if !grouped.performance_samples.is_empty() {
             write_performance_samples(
                 &connection.client,
@@ -96,6 +111,39 @@ impl PostgresTelemetryWriter {
 
         Ok(connection)
     }
+}
+
+async fn write_lobby_events(
+    client: &Client,
+    table: &str,
+    events: &[NetplayLobbyTelemetryEvent],
+) -> Result<(), PostgresTelemetryError> {
+    let sql = INSERT_LOBBY_EVENT_SQL.replace("{table}", &quote_table(table));
+    let statement = client.prepare(&sql).await?;
+
+    for event in events {
+        let timestamp_ms = u64_to_i64(event.timestamp_ms, "timestamp_ms")?;
+        let event_seq = u64_to_i64(event.event_seq, "event_seq")?;
+        let lobby_epoch = u64_to_i64(event.lobby_epoch, "lobby_epoch")?;
+        let lobby_id = event.lobby_id.as_uuid();
+
+        client
+            .execute(
+                &statement,
+                &[
+                    &timestamp_ms,
+                    &lobby_id,
+                    &event.invite_code,
+                    &event_seq,
+                    &lobby_epoch,
+                    &event.kind,
+                    &event.detail,
+                ],
+            )
+            .await?;
+    }
+
+    Ok(())
 }
 
 async fn write_events(
