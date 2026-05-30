@@ -166,4 +166,12 @@ pub trait LobbyRegistry: Send + Sync {
 
     /// Returns sanitized event history across active lobbies.
     async fn recent_events(&self, limit: usize) -> Vec<LobbyDebugEvent>;
+
+    /// Records one sanitized operator diagnostic for an existing lobby.
+    async fn record_lobby_diagnostic(
+        &self,
+        invite_code: InviteCode,
+        kind: &'static str,
+        detail: String,
+    ) -> Result<(), LobbyError>;
 }

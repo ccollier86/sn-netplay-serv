@@ -55,6 +55,9 @@ pub enum FileRelayBrokerError {
     /// HTTP request to the broker failed.
     #[error("file relay broker request failed")]
     RequestFailed,
+    /// HTTP request to the broker timed out.
+    #[error("file relay broker request timed out")]
+    RequestTimedOut,
     /// Broker rejected or failed the request.
     #[error("file relay broker returned status {0}")]
     UnexpectedStatus(u16),

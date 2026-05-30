@@ -52,6 +52,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             file_relay.request_timeout,
         )?),
     };
+    match &config.file_relay.broker {
+        FileRelayBrokerConfig::Disabled => {
+            info!(
+                temporary_roms_enabled = config.file_relay.temporary_roms_enabled,
+                save_states_enabled = config.file_relay.save_states_enabled,
+                temporary_rom_max_bytes = config.file_relay.temporary_rom_max_bytes,
+                "file relay broker disabled"
+            );
+        }
+        FileRelayBrokerConfig::Http(file_relay) => {
+            info!(
+                base_url = %file_relay.base_url,
+                timeout_ms = file_relay.request_timeout.as_millis(),
+                temporary_roms_enabled = config.file_relay.temporary_roms_enabled,
+                save_states_enabled = config.file_relay.save_states_enabled,
+                temporary_rom_max_bytes = config.file_relay.temporary_rom_max_bytes,
+                "file relay broker configured"
+            );
+        }
+    }
     let lobby_capabilities = LobbyServerCapabilities::current(
         MAX_LOBBY_PLAYERS,
         file_relay_broker.is_enabled() && config.file_relay.temporary_roms_enabled,

@@ -431,17 +431,29 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         receiver_player_index: PlayerIndex,
         limits: LobbyRomRelayLimits,
     ) -> Result<LobbyRomRelayTransferIntent, LobbyError> {
-        let lobbies = self.lobbies.read().await;
+        let mut lobbies = self.lobbies.write().await;
         let lobby = lobbies
-            .get(invite_code.normalized())
+            .get_mut(invite_code.normalized())
             .ok_or(LobbyError::NotFound)?;
 
-        lobby.lobby.prepare_rom_relay_transfer(
+        let intent = lobby.lobby.prepare_rom_relay_transfer(
             connection_id,
             proposal_id,
             receiver_player_index,
             limits,
-        )
+        )?;
+        self.record_lobby_event(
+            lobby,
+            "lobbyRomRelayRequested",
+            format!(
+                "temporary ROM relay requested p{}->p{} bytes={}",
+                intent.sender_player_index.display_number(),
+                intent.receiver_player_index.display_number(),
+                intent.size_bytes
+            ),
+        );
+
+        Ok(intent)
     }
 
     async fn grant_lobby_rom_relay_transfer(
@@ -450,9 +462,9 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         intent: LobbyRomRelayTransferIntent,
         grants: LobbyFileRelayGrantPair,
     ) -> Result<(), LobbyError> {
-        let lobbies = self.lobbies.read().await;
+        let mut lobbies = self.lobbies.write().await;
         let lobby = lobbies
-            .get(invite_code.normalized())
+            .get_mut(invite_code.normalized())
             .ok_or(LobbyError::NotFound)?;
 
         lobby.lobby.require_rom_relay_transfer_current(&intent)?;
@@ -460,6 +472,16 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             intent.sender_connection_id,
             intent.receiver_connection_id,
             grants,
+        );
+        self.record_lobby_event(
+            lobby,
+            "lobbyRomRelayGranted",
+            format!(
+                "temporary ROM relay grants issued p{}->p{} bytes={}",
+                intent.sender_player_index.display_number(),
+                intent.receiver_player_index.display_number(),
+                intent.size_bytes
+            ),
         );
 
         Ok(())
@@ -609,6 +631,22 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         };
 
         events.tail(limit)
+    }
+
+    async fn record_lobby_diagnostic(
+        &self,
+        invite_code: InviteCode,
+        kind: &'static str,
+        detail: String,
+    ) -> Result<(), LobbyError> {
+        let mut lobbies = self.lobbies.write().await;
+        let lobby = lobbies
+            .get_mut(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+
+        self.record_lobby_event(lobby, kind, detail);
+
+        Ok(())
     }
 }
 

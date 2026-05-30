@@ -362,6 +362,10 @@ impl Lobby {
     ) -> Result<(), LobbyError> {
         self.player_index_for_connection(connection_id)?;
         self.require_selected_proposal(proposal_id)?;
+        match self.pending_launch.as_ref() {
+            Some(launch) if launch.proposal_id == proposal_id => {}
+            _ => return Err(LobbyError::StaleGameProposal),
+        }
 
         self.game_readiness.clear();
         self.pending_launch = None;

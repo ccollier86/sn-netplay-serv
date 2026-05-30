@@ -72,7 +72,13 @@ impl FileRelayBroker for HttpFileRelayBroker {
             .json(&request)
             .send()
             .await
-            .map_err(|_| FileRelayBrokerError::RequestFailed)?;
+            .map_err(|error| {
+                if error.is_timeout() {
+                    FileRelayBrokerError::RequestTimedOut
+                } else {
+                    FileRelayBrokerError::RequestFailed
+                }
+            })?;
 
         if !response.status().is_success() {
             return Err(FileRelayBrokerError::UnexpectedStatus(

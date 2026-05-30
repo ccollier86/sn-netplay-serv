@@ -473,6 +473,39 @@ async fn host_launch_requires_connected_players_ready() {
 }
 
 #[tokio::test]
+async fn return_to_lobby_requires_active_launch() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    let selected = registry
+        .select_lobby_game(invite.clone(), host_connection, game_candidate())
+        .await
+        .expect("selected")
+        .selected_game
+        .expect("selected game");
+
+    let error = registry
+        .return_lobby_from_game(invite, host_connection, selected.proposal_id)
+        .await
+        .expect_err("cannot return before a child launch exists");
+
+    assert!(matches!(error, LobbyError::StaleGameProposal));
+}
+
+#[tokio::test]
 async fn lobby_chat_is_sanitized_and_broadcast() {
     let registry = registry();
     let host_join = registry
