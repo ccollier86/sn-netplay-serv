@@ -5,8 +5,10 @@
 
 use crate::protocol::{
     ClientNetworkQualityReport, ClientRuntimeState, CompatibilityFingerprint, InputFrame,
-    LinkCableCompatibility, LinkCablePacket, SessionPauseReason, SnapshotChunk, SnapshotManifest,
-    StateHashReport,
+    LinkCableCompatibility, LinkCablePacket, RomRelayCancelled as RomRelayCancelledPayload,
+    RomRelayCompletion as RomRelayCompletionPayload, RomRelayFailure as RomRelayFailurePayload,
+    RomRelayProgress as RomRelayProgressPayload, SessionPauseReason, SnapshotChunk,
+    SnapshotManifest, StateHashReport,
 };
 use serde::Deserialize;
 
@@ -86,6 +88,54 @@ pub enum ClientMessage {
         transfer_id: String,
         /// Snapshot manifest.
         manifest: SnapshotManifest,
+    },
+    /// Guest requests temporary ROM relay for this direct-invite room.
+    #[serde(rename = "romRelay.request")]
+    RomRelayRequest {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+    },
+    /// Client reports upload/download progress for a temporary ROM relay.
+    #[serde(rename = "romRelay.progress")]
+    RomRelayProgress {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+        /// Progress payload.
+        progress: RomRelayProgressPayload,
+    },
+    /// Client reports a verified upload/download completion.
+    #[serde(rename = "romRelay.completed")]
+    RomRelayCompleted {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+        /// Completion payload.
+        completion: RomRelayCompletionPayload,
+    },
+    /// Client reports a transfer failure.
+    #[serde(rename = "romRelay.failed")]
+    RomRelayFailed {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+        /// Failure payload.
+        failure: RomRelayFailurePayload,
+    },
+    /// Client cancels a temporary ROM relay transfer.
+    #[serde(rename = "romRelay.cancelled")]
+    RomRelayCancelled {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+        /// Cancel payload.
+        cancelled: RomRelayCancelledPayload,
     },
     /// Frame-numbered input from the local player.
     InputFrame {

@@ -129,7 +129,13 @@ async fn joined_link_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, 
     let invite = InviteCode::parse(view.invite_code).expect("invite");
 
     registry
-        .connect_guest(invite.clone(), license("guest"), guest_connection, false)
+        .connect_guest(
+            invite.clone(),
+            license("guest"),
+            guest_connection,
+            false,
+            false,
+        )
         .await
         .expect("guest");
 

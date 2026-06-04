@@ -4,12 +4,14 @@ use super::InMemoryRoomRegistry;
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
     ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
-    LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason,
+    LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, RomRelayBlockReason,
+    RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayProgress, SessionPauseReason,
     SnapshotChunk, SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, PlayerIndex, RoomDebugEvent, RoomError, RoomEventReceiver, RoomJoin,
-    RoomRegistry, RoomRegistrySnapshot, RoomView, SnapshotFileRelayTransferIntent,
+    ConnectionId, InviteCode, PlayerIndex, RomRelayGrantPair, RomRelayTransferIntent,
+    RoomDebugEvent, RoomError, RoomEventReceiver, RoomJoin, RoomRegistry, RoomRegistrySnapshot,
+    RoomView, SnapshotFileRelayTransferIntent,
 };
 
 #[async_trait::async_trait]
@@ -39,9 +41,16 @@ impl RoomRegistry for InMemoryRoomRegistry {
         host: VerifiedLicense,
         connection_id: ConnectionId,
         supports_state_file_relay: bool,
+        supports_rom_file_relay: bool,
     ) -> Result<RoomJoin, RoomError> {
-        self.connect_host_impl(invite_code, host, connection_id, supports_state_file_relay)
-            .await
+        self.connect_host_impl(
+            invite_code,
+            host,
+            connection_id,
+            supports_state_file_relay,
+            supports_rom_file_relay,
+        )
+        .await
     }
 
     async fn connect_guest(
@@ -50,9 +59,16 @@ impl RoomRegistry for InMemoryRoomRegistry {
         guest: VerifiedLicense,
         connection_id: ConnectionId,
         supports_state_file_relay: bool,
+        supports_rom_file_relay: bool,
     ) -> Result<RoomJoin, RoomError> {
-        self.connect_guest_impl(invite_code, guest, connection_id, supports_state_file_relay)
-            .await
+        self.connect_guest_impl(
+            invite_code,
+            guest,
+            connection_id,
+            supports_state_file_relay,
+            supports_rom_file_relay,
+        )
+        .await
     }
 
     async fn reconnect_player(
@@ -63,6 +79,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
         resume_token: String,
         connection_id: ConnectionId,
         supports_state_file_relay: bool,
+        supports_rom_file_relay: bool,
     ) -> Result<RoomJoin, RoomError> {
         self.reconnect_player_impl(
             invite_code,
@@ -71,6 +88,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
             resume_token,
             connection_id,
             supports_state_file_relay,
+            supports_rom_file_relay,
         )
         .await
     }
@@ -248,6 +266,65 @@ impl RoomRegistry for InMemoryRoomRegistry {
             manifest,
         )
         .await
+    }
+
+    async fn prepare_rom_relay(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<RomRelayTransferIntent, RomRelayBlockReason> {
+        self.prepare_rom_relay_impl(invite_code, connection_id)
+            .await
+    }
+
+    async fn grant_rom_relay_upload(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        grants: RomRelayGrantPair,
+    ) -> Result<(), RomRelayBlockReason> {
+        self.grant_rom_relay_upload_impl(invite_code, connection_id, grants)
+            .await
+    }
+
+    async fn relay_rom_relay_progress(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        progress: RomRelayProgress,
+    ) -> Result<(), RomRelayBlockReason> {
+        self.relay_rom_relay_progress_impl(invite_code, connection_id, progress)
+            .await
+    }
+
+    async fn relay_rom_relay_completed(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        completion: RomRelayCompletion,
+    ) -> Result<(), RomRelayBlockReason> {
+        self.relay_rom_relay_completed_impl(invite_code, connection_id, completion)
+            .await
+    }
+
+    async fn relay_rom_relay_failed(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        failure: RomRelayFailure,
+    ) -> Result<(), RomRelayBlockReason> {
+        self.relay_rom_relay_failed_impl(invite_code, connection_id, failure)
+            .await
+    }
+
+    async fn relay_rom_relay_cancelled(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        cancelled: RomRelayCancelled,
+    ) -> Result<(), RomRelayBlockReason> {
+        self.relay_rom_relay_cancelled_impl(invite_code, connection_id, cancelled)
+            .await
     }
 
     async fn relay_input_frame(

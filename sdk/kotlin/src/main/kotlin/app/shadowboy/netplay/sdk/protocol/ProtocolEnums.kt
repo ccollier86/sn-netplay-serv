@@ -22,6 +22,105 @@ public enum class NetplaySessionMode {
 }
 
 @Serializable
+public enum class NetplayRoomMode {
+    @SerialName("directInvite")
+    DirectInvite,
+}
+
+@Serializable
+public enum class RomRelayIntent {
+    @SerialName("exactMatchOnly")
+    ExactMatchOnly,
+
+    @SerialName("missingPeerOnly")
+    MissingPeerOnly,
+}
+
+@Serializable
+public enum class RomRelayCapabilityReason {
+    @SerialName("disabled")
+    Disabled,
+
+    @SerialName("brokerUnavailable")
+    BrokerUnavailable,
+
+    @SerialName("unsupportedRoom")
+    UnsupportedRoom,
+
+    @SerialName("missingIdentity")
+    MissingIdentity,
+
+    @SerialName("tooLarge")
+    TooLarge,
+
+    @SerialName("unsupportedSystem")
+    UnsupportedSystem,
+}
+
+@Serializable
+public enum class RomRelayGrantRole {
+    @SerialName("upload")
+    Upload,
+
+    @SerialName("download")
+    Download,
+}
+
+@Serializable
+public enum class SnapshotFileRelayGrantRole {
+    @SerialName("upload")
+    Upload,
+
+    @SerialName("download")
+    Download,
+}
+
+@Serializable
+public enum class RomRelayFailReason {
+    @SerialName("brokerUnavailable")
+    BrokerUnavailable,
+
+    @SerialName("hashMismatch")
+    HashMismatch,
+
+    @SerialName("transferFailed")
+    TransferFailed,
+
+    @SerialName("staleEpoch")
+    StaleEpoch,
+
+    @SerialName("invalidPayload")
+    InvalidPayload,
+}
+
+@Serializable
+public enum class RomRelayBlockReason {
+    @SerialName("disabled")
+    Disabled,
+
+    @SerialName("brokerUnavailable")
+    BrokerUnavailable,
+
+    @SerialName("wrongPlayer")
+    WrongPlayer,
+
+    @SerialName("clientUnsupported")
+    ClientUnsupported,
+
+    @SerialName("unsupportedSystem")
+    UnsupportedSystem,
+
+    @SerialName("tooLarge")
+    TooLarge,
+
+    @SerialName("missingIdentity")
+    MissingIdentity,
+
+    @SerialName("transferActive")
+    TransferActive,
+}
+
+@Serializable
 public enum class LinkCableTransport {
     @SerialName("relay")
     Relay,

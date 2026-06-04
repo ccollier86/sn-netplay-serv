@@ -126,6 +126,15 @@ fn create_rom_relay_request(
         sha256: intent.sha256.clone(),
         size_bytes: intent.size_bytes,
         expires_in_seconds: Some(ROM_FILE_RELAY_TTL_SECONDS),
+        room_epoch: None,
+        session_epoch: None,
+        system: Some(intent.game.system_id.clone()),
+        core_id: Some(intent.game.core_id.clone()),
+        content_hash: Some(intent.sha256.clone()),
+        file_name: None,
+        extension: None,
+        display_name: Some(intent.game.title.clone()),
+        single_use: true,
     }
 }
 

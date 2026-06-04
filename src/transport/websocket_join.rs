@@ -34,6 +34,8 @@ pub struct WebSocketJoinRequest {
     pub resume_token: Option<String>,
     /// Whether this socket can use file relay for large sync state.
     pub supports_state_file_relay: bool,
+    /// Whether this socket can use file relay for temporary direct-invite ROMs.
+    pub supports_rom_file_relay: bool,
     /// Verified Desktop install/license identity.
     pub license: VerifiedLicense,
 }

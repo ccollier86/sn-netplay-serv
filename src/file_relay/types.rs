@@ -34,6 +34,32 @@ pub struct CreateFileRelayTransferRequest {
     pub size_bytes: u64,
     /// Optional shorter lifetime than the relay default.
     pub expires_in_seconds: Option<u64>,
+    /// Room epoch that scoped this transfer, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub room_epoch: Option<u64>,
+    /// Session epoch that scoped this transfer, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_epoch: Option<u64>,
+    /// Stable system id for the payload, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    /// Stable emulator core id for the payload, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub core_id: Option<String>,
+    /// Canonical content hash advertised by the room, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    /// Original file name shown to the receiver, when safe to expose.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    /// Original file extension shown to the receiver, when safe to expose.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extension: Option<String>,
+    /// User-facing display name for the payload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Whether download tokens should close after one complete download.
+    pub single_use: bool,
 }
 
 /// File relay transfer grant returned by the trusted relay.

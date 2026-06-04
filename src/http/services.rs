@@ -8,17 +8,25 @@ use crate::file_relay::FileRelayBroker;
 use crate::http::AdminAuthorizer;
 use crate::lobbies::LobbyRegistry;
 use crate::observability::MetricsRecorder;
+use crate::protocol::{
+    NetplayClientKind, NetplayRoomMode, NetplaySessionDescriptor, RomRelayCapability,
+    RomRelayCapabilityReason, RomRelayIntent,
+};
 use crate::rate_limit::RateLimiter;
 use crate::rooms::RoomRegistry;
 use std::sync::Arc;
 
 /// Runtime file-relay policy used by transport handlers.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileRelayPolicy {
     /// Whether temporary ROM transfer tickets may be created.
     pub temporary_roms_enabled: bool,
+    /// Whether Android direct-invite ROM transfer tickets may be created.
+    pub direct_roms_enabled: bool,
     /// Maximum temporary ROM payload bytes accepted by netplay.
     pub temporary_rom_max_bytes: u64,
+    /// Direct-invite systems allowed by policy.
+    pub direct_rom_allowed_systems: Vec<String>,
     /// Whether large save-state transfer tickets may be created.
     pub save_states_enabled: bool,
 }
@@ -32,6 +40,53 @@ impl FileRelayPolicy {
     /// Returns whether large save-state relay can be used for this request.
     pub fn can_relay_save_states(&self, broker: &dyn FileRelayBroker) -> bool {
         self.save_states_enabled && broker.is_enabled()
+    }
+
+    /// Returns whether direct Android ROM relay can be used for this request.
+    pub fn can_relay_direct_roms(&self, broker: &dyn FileRelayBroker) -> bool {
+        self.direct_roms_enabled && broker.is_enabled()
+    }
+
+    /// Computes the capability view returned to direct-invite clients.
+    pub fn direct_rom_relay_capability(
+        &self,
+        broker: &dyn FileRelayBroker,
+        session: &NetplaySessionDescriptor,
+    ) -> Option<RomRelayCapability> {
+        if session.room_mode != NetplayRoomMode::DirectInvite
+            || session.host_client_kind != Some(NetplayClientKind::Android)
+            || session.rom_relay_intent != RomRelayIntent::MissingPeerOnly
+        {
+            return None;
+        }
+
+        let mut reason = None;
+        if !self.direct_roms_enabled {
+            reason = Some(RomRelayCapabilityReason::Disabled);
+        } else if !broker.is_enabled() {
+            reason = Some(RomRelayCapabilityReason::BrokerUnavailable);
+        } else if let Some(identity) = session.rom_identity.as_ref() {
+            if identity.size_bytes > self.temporary_rom_max_bytes {
+                reason = Some(RomRelayCapabilityReason::TooLarge);
+            } else if !self
+                .direct_rom_allowed_systems
+                .iter()
+                .any(|system| system == &identity.system)
+            {
+                reason = Some(RomRelayCapabilityReason::UnsupportedSystem);
+            }
+        } else {
+            reason = Some(RomRelayCapabilityReason::MissingIdentity);
+        }
+
+        Some(RomRelayCapability {
+            supported: true,
+            available: reason.is_none(),
+            temporary_access_only: true,
+            max_bytes: self.temporary_rom_max_bytes,
+            allowed_systems: self.direct_rom_allowed_systems.clone(),
+            reason,
+        })
     }
 }
 
@@ -92,12 +147,16 @@ mod tests {
         CreateFileRelayTransferRequest, CreateFileRelayTransferResponse, DisabledFileRelayBroker,
         FileRelayBroker, FileRelayBrokerError,
     };
+    use crate::protocol::{NetplaySessionDescriptor, RomRelayCapabilityReason};
+    use serde_json::json;
 
     #[test]
     fn file_relay_policy_enforces_independent_feature_switches() {
         let enabled_broker = EnabledFileRelayBroker;
         let disabled_broker = DisabledFileRelayBroker;
         let policy = FileRelayPolicy {
+            direct_roms_enabled: false,
+            direct_rom_allowed_systems: vec!["snes".to_string()],
             save_states_enabled: false,
             temporary_rom_max_bytes: 1024,
             temporary_roms_enabled: true,
@@ -106,6 +165,84 @@ mod tests {
         assert!(policy.can_relay_temporary_roms(&enabled_broker));
         assert!(!policy.can_relay_temporary_roms(&disabled_broker));
         assert!(!policy.can_relay_save_states(&enabled_broker));
+    }
+
+    #[test]
+    fn direct_rom_relay_capability_allows_android_direct_invite_systems() {
+        let policy = FileRelayPolicy {
+            direct_roms_enabled: true,
+            direct_rom_allowed_systems: vec!["snes".to_string()],
+            save_states_enabled: false,
+            temporary_rom_max_bytes: 1024,
+            temporary_roms_enabled: false,
+        };
+        let descriptor = direct_rom_descriptor("snes", "snes9x", 512);
+
+        let capability = policy
+            .direct_rom_relay_capability(&EnabledFileRelayBroker, &descriptor)
+            .expect("capability");
+
+        assert!(capability.supported);
+        assert!(capability.available);
+        assert!(capability.temporary_access_only);
+        assert_eq!(capability.max_bytes, 1024);
+        assert_eq!(capability.allowed_systems, vec!["snes"]);
+        assert_eq!(capability.reason, None);
+    }
+
+    #[test]
+    fn direct_rom_relay_capability_blocks_n64_until_policy_allows_it() {
+        let policy = FileRelayPolicy {
+            direct_roms_enabled: true,
+            direct_rom_allowed_systems: vec!["snes".to_string()],
+            save_states_enabled: false,
+            temporary_rom_max_bytes: 1024,
+            temporary_roms_enabled: false,
+        };
+        let descriptor = direct_rom_descriptor("n64", "mupen64plus-next", 512);
+
+        let capability = policy
+            .direct_rom_relay_capability(&EnabledFileRelayBroker, &descriptor)
+            .expect("capability");
+
+        assert!(capability.supported);
+        assert!(!capability.available);
+        assert_eq!(
+            capability.reason,
+            Some(RomRelayCapabilityReason::UnsupportedSystem)
+        );
+    }
+
+    fn direct_rom_descriptor(
+        system: &str,
+        core_id: &str,
+        size_bytes: u64,
+    ) -> NetplaySessionDescriptor {
+        serde_json::from_value(json!({
+            "hostClientKind": "android",
+            "roomMode": "directInvite",
+            "romRelayIntent": "missingPeerOnly",
+            "game": {
+                "systemId": system,
+                "title": "Relay Test",
+                "romSha256": "a".repeat(64),
+                "contentKey": format!("{system}-relay-test")
+            },
+            "core": {
+                "coreId": core_id,
+                "stateFormat": format!("{core_id}:{system}:state-v1")
+            },
+            "romIdentity": {
+                "system": system,
+                "coreId": core_id,
+                "contentHash": "a".repeat(64),
+                "sizeBytes": size_bytes,
+                "fileName": format!("Relay Test.{system}"),
+                "extension": system,
+                "displayName": "Relay Test"
+            }
+        }))
+        .expect("descriptor")
     }
 
     struct EnabledFileRelayBroker;

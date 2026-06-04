@@ -11,6 +11,7 @@ mod websocket_lobby_session;
 mod websocket_message_handler;
 mod websocket_outbound;
 mod websocket_peer_close;
+mod websocket_rom_relay_handler;
 mod websocket_session;
 mod websocket_snapshot_file_relay_handler;
 mod websocket_voice_handler;

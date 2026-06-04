@@ -475,6 +475,8 @@ fn test_services(rooms: Arc<InMemoryRoomRegistry>) -> AppServices {
             save_states_enabled: false,
             temporary_roms_enabled: false,
             temporary_rom_max_bytes: 104_857_600,
+            direct_roms_enabled: false,
+            direct_rom_allowed_systems: Vec::new(),
         },
         Arc::new(InMemoryRateLimiter::new(RateLimitPolicy {
             create_room_per_minute: 100,

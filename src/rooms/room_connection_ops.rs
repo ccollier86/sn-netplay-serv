@@ -26,6 +26,7 @@ impl NetplayRoom {
             String::new(),
             Instant::now(),
             false,
+            false,
         )
     }
 
@@ -38,6 +39,7 @@ impl NetplayRoom {
         input_socket_token_hash: ResumeTokenHash,
         now: Instant,
         supports_state_file_relay: bool,
+        supports_rom_file_relay: bool,
     ) -> Result<PlayerIndex, RoomError> {
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
@@ -56,6 +58,7 @@ impl NetplayRoom {
                 input_socket_token_hash,
                 now,
                 supports_state_file_relay,
+                supports_rom_file_relay,
             );
             slot.player_index
         };
@@ -77,6 +80,7 @@ impl NetplayRoom {
             String::new(),
             Instant::now(),
             false,
+            false,
         )
     }
 
@@ -89,6 +93,7 @@ impl NetplayRoom {
         input_socket_token_hash: ResumeTokenHash,
         now: Instant,
         supports_state_file_relay: bool,
+        supports_rom_file_relay: bool,
     ) -> Result<PlayerIndex, RoomError> {
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
@@ -115,6 +120,7 @@ impl NetplayRoom {
         slot.resume_token_hash = Some(resume_token_hash);
         slot.input_socket_token_hash = Some(input_socket_token_hash);
         slot.supports_state_file_relay = supports_state_file_relay;
+        slot.supports_rom_file_relay = supports_rom_file_relay;
         slot.reconnect_deadline = None;
         slot.reconnect_room_epoch = None;
         slot.last_seen_at = Some(now);
@@ -224,6 +230,7 @@ impl NetplayRoom {
         connection_id: ConnectionId,
         now: Instant,
         supports_state_file_relay: bool,
+        supports_rom_file_relay: bool,
     ) -> Result<(), RoomError> {
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
@@ -258,6 +265,7 @@ impl NetplayRoom {
         slot.runtime_state = PlayerRuntimeState::Reconnecting;
         slot.input_socket_token_hash = Some(input_socket_token_hash);
         slot.supports_state_file_relay = supports_state_file_relay;
+        slot.supports_rom_file_relay = supports_rom_file_relay;
         slot.last_seen_at = Some(now);
         slot.latest_local_frame = None;
         slot.latest_local_frame_reported_at = None;

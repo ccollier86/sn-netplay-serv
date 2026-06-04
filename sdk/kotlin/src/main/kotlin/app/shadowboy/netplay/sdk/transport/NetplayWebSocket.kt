@@ -24,6 +24,14 @@ public data class NetplayInputWebSocketJoinOptions(
     public val inputSocketToken: String,
 )
 
+public data class NetplayWebSocketJoinOptions(
+    public val inviteCode: String,
+    public val role: WebSocketRole,
+    public val reconnectTicket: ReconnectTicket? = null,
+    public val supportsStateFileRelay: Boolean = false,
+    public val supportsRomFileRelay: Boolean = false,
+)
+
 public class NetplayWebSocketEndpoint(
     private val authHeadersProvider: NetplayAuthHeadersProvider,
 ) {
@@ -31,11 +39,22 @@ public class NetplayWebSocketEndpoint(
         inviteCode: String,
         role: WebSocketRole,
         reconnectTicket: ReconnectTicket? = null,
-    ): NetplayWebSocketRequest {
+    ): NetplayWebSocketRequest =
+        joinRequest(
+            NetplayWebSocketJoinOptions(
+                inviteCode = inviteCode,
+                role = role,
+                reconnectTicket = reconnectTicket,
+            ),
+        )
+
+    public suspend fun joinRequest(options: NetplayWebSocketJoinOptions): NetplayWebSocketRequest {
         val path = NetplayPaths.websocketJoin(
-            inviteCode = inviteCode,
-            role = role.wireValue,
-            reconnect = reconnectTicket,
+            inviteCode = options.inviteCode,
+            role = options.role.wireValue,
+            reconnect = options.reconnectTicket,
+            supportsStateFileRelay = options.supportsStateFileRelay,
+            supportsRomFileRelay = options.supportsRomFileRelay,
         )
 
         return NetplayWebSocketRequest(

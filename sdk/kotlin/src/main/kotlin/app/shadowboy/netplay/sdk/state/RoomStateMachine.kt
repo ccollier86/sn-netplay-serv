@@ -121,7 +121,16 @@ public class RoomStateMachine(
             ServerMessage.Pong,
             is ServerMessage.LinkCablePacketMessage,
             is ServerMessage.SnapshotChunkMessage,
-            is ServerMessage.SnapshotComplete -> Unit
+            is ServerMessage.SnapshotComplete,
+            is ServerMessage.SnapshotFileRelayUploadGranted,
+            is ServerMessage.SnapshotFileRelayDownloadReady,
+            is ServerMessage.RomRelayGrantUpload,
+            is ServerMessage.RomRelayGrantDownload,
+            is ServerMessage.RomRelayProgressChanged,
+            is ServerMessage.RomRelayCompleted,
+            is ServerMessage.RomRelayFailed,
+            is ServerMessage.RomRelayBlockedMessage,
+            is ServerMessage.RomRelayCancelledMessage -> Unit
         }
 
         return state
@@ -165,6 +174,42 @@ public class RoomStateMachine(
                 message.sessionEpoch,
             )
             is ServerMessage.SnapshotComplete -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            is ServerMessage.SnapshotFileRelayUploadGranted -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            is ServerMessage.SnapshotFileRelayDownloadReady -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            is ServerMessage.RomRelayGrantUpload -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            is ServerMessage.RomRelayGrantDownload -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            is ServerMessage.RomRelayProgressChanged -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            is ServerMessage.RomRelayCompleted -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            is ServerMessage.RomRelayFailed -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            is ServerMessage.RomRelayBlockedMessage -> isExactRuntimeEpochCurrent(
+                message.roomEpoch,
+                message.sessionEpoch,
+            )
+            is ServerMessage.RomRelayCancelledMessage -> isExactRuntimeEpochCurrent(
                 message.roomEpoch,
                 message.sessionEpoch,
             )

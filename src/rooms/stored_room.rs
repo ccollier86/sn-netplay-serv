@@ -6,7 +6,8 @@
 
 use crate::protocol::{
     ClientNetworkQualityReport, ClientRuntimeState, InputDelayChange, InputFrame, InputFrameBatch,
-    LinkCablePacket, ServerFrame, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant,
+    LinkCablePacket, RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayGrant,
+    RomRelayProgress, ServerFrame, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant,
     SnapshotManifest, StateHashMismatchView,
 };
 use crate::rooms::{
@@ -328,6 +329,104 @@ impl StoredRoom {
             room_epoch: room.room_epoch,
             session_epoch: room.session_epoch,
             grant,
+        });
+    }
+
+    /// Emits a private ROM file-relay upload grant to the host.
+    pub(super) fn emit_rom_relay_upload_granted(&mut self, now: Instant, grant: RomRelayGrant) {
+        let source = self
+            .room
+            .rom_relay_transfer
+            .as_ref()
+            .map(|transfer| transfer.sender_connection)
+            .expect("rom relay transfer exists before upload grant");
+        let room = self.record_event(now, "romRelayUploadGranted", "ROM relay upload granted");
+        let _ = self.events.send(RoomEvent::RomRelayUploadGranted {
+            source,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            grant,
+        });
+    }
+
+    /// Emits a private ROM file-relay download grant to the guest.
+    pub(super) fn emit_rom_relay_download_granted(&mut self, now: Instant, grant: RomRelayGrant) {
+        let receiver = self
+            .room
+            .rom_relay_transfer
+            .as_ref()
+            .map(|transfer| transfer.receiver_connection)
+            .expect("rom relay transfer exists before download grant");
+        let room = self.record_event(now, "romRelayDownloadGranted", "ROM relay download granted");
+        let _ = self.events.send(RoomEvent::RomRelayDownloadGranted {
+            receiver,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            grant,
+        });
+    }
+
+    /// Emits a ROM relay progress event.
+    pub(super) fn emit_rom_relay_progress(
+        &mut self,
+        now: Instant,
+        source: ConnectionId,
+        progress: RomRelayProgress,
+    ) {
+        let room = self.record_event(now, "romRelayProgress", "ROM relay progress");
+        let _ = self.events.send(RoomEvent::RomRelayProgress {
+            source,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            progress,
+        });
+    }
+
+    /// Emits a ROM relay completion event.
+    pub(super) fn emit_rom_relay_completed(
+        &mut self,
+        now: Instant,
+        source: ConnectionId,
+        completion: RomRelayCompletion,
+    ) {
+        let room = self.record_event(now, "romRelayCompleted", "ROM relay completed");
+        let _ = self.events.send(RoomEvent::RomRelayCompleted {
+            source,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            completion,
+        });
+    }
+
+    /// Emits a ROM relay failure event.
+    pub(super) fn emit_rom_relay_failed(
+        &mut self,
+        now: Instant,
+        source: ConnectionId,
+        failure: RomRelayFailure,
+    ) {
+        let room = self.record_event(now, "romRelayFailed", "ROM relay failed");
+        let _ = self.events.send(RoomEvent::RomRelayFailed {
+            source,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            failure,
+        });
+    }
+
+    /// Emits a ROM relay cancellation event.
+    pub(super) fn emit_rom_relay_cancelled(
+        &mut self,
+        now: Instant,
+        source: ConnectionId,
+        cancelled: RomRelayCancelled,
+    ) {
+        let room = self.record_event(now, "romRelayCancelled", "ROM relay cancelled");
+        let _ = self.events.send(RoomEvent::RomRelayCancelled {
+            source,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            cancelled,
         });
     }
 

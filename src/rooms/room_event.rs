@@ -4,8 +4,10 @@
 //! concepts inside the room domain model.
 
 use crate::protocol::{
-    InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket, ServerFrame, SessionPauseView,
-    SnapshotChunk, SnapshotFileRelayGrant, SnapshotManifest, StateHashMismatchView,
+    InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket, RomRelayCancelled,
+    RomRelayCompletion, RomRelayFailure, RomRelayGrant, RomRelayProgress, ServerFrame,
+    SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant, SnapshotManifest,
+    StateHashMismatchView,
 };
 use crate::rooms::{ConnectionId, RoomView};
 
@@ -96,6 +98,72 @@ pub enum RoomEvent {
         session_epoch: u64,
         /// Private download grant for the receiver connection.
         grant: SnapshotFileRelayGrant,
+    },
+    /// Host should upload a temporary ROM through the file relay.
+    RomRelayUploadGranted {
+        /// Connection that should upload the file.
+        source: ConnectionId,
+        /// Room epoch the transfer belongs to.
+        room_epoch: u64,
+        /// Session epoch the transfer belongs to.
+        session_epoch: u64,
+        /// Private upload grant for the source connection.
+        grant: RomRelayGrant,
+    },
+    /// Guest can download a temporary ROM through the file relay.
+    RomRelayDownloadGranted {
+        /// Connection that should download the file.
+        receiver: ConnectionId,
+        /// Room epoch the transfer belongs to.
+        room_epoch: u64,
+        /// Session epoch the transfer belongs to.
+        session_epoch: u64,
+        /// Private download grant for the receiver connection.
+        grant: RomRelayGrant,
+    },
+    /// Temporary ROM relay progress changed.
+    RomRelayProgress {
+        /// Connection that reported progress.
+        source: ConnectionId,
+        /// Room epoch the transfer belongs to.
+        room_epoch: u64,
+        /// Session epoch the transfer belongs to.
+        session_epoch: u64,
+        /// Progress payload.
+        progress: RomRelayProgress,
+    },
+    /// Temporary ROM relay upload/download was verified by a client.
+    RomRelayCompleted {
+        /// Connection that reported completion.
+        source: ConnectionId,
+        /// Room epoch the transfer belongs to.
+        room_epoch: u64,
+        /// Session epoch the transfer belongs to.
+        session_epoch: u64,
+        /// Completion payload.
+        completion: RomRelayCompletion,
+    },
+    /// Temporary ROM relay failed.
+    RomRelayFailed {
+        /// Connection that reported or caused failure.
+        source: ConnectionId,
+        /// Room epoch the transfer belongs to.
+        room_epoch: u64,
+        /// Session epoch the transfer belongs to.
+        session_epoch: u64,
+        /// Failure payload.
+        failure: RomRelayFailure,
+    },
+    /// Temporary ROM relay was cancelled.
+    RomRelayCancelled {
+        /// Connection that requested cancellation.
+        source: ConnectionId,
+        /// Room epoch the transfer belongs to.
+        room_epoch: u64,
+        /// Session epoch the transfer belongs to.
+        session_epoch: u64,
+        /// Cancel payload.
+        cancelled: RomRelayCancelled,
     },
     /// One player intentionally left the room.
     PlayerExited {

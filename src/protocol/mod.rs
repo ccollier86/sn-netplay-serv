@@ -18,6 +18,7 @@ mod link_cable_packet;
 mod lobby_file_relay;
 mod lobby_messages;
 mod netplay_protocol;
+mod rom_relay;
 mod server_frame;
 mod server_message;
 mod session_descriptor;
@@ -47,6 +48,12 @@ pub use lobby_messages::{LobbyClientMessage, LobbyServerMessage};
 pub use netplay_protocol::{
     MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION, NETPLAY_PROTOCOL_VERSION, NetplayProtocolView,
     ProtocolVersionError, validate_client_protocol_version,
+};
+pub use rom_relay::{
+    NetplayRoomMode, RomIdentity, RomRelayBlockReason, RomRelayBlocked, RomRelayCancelled,
+    RomRelayCapability, RomRelayCapabilityReason, RomRelayCompletion, RomRelayFailReason,
+    RomRelayFailure, RomRelayGrant, RomRelayGrantRole, RomRelayIntent, RomRelayProgress,
+    is_content_hash, normalize_content_hash,
 };
 pub use server_frame::{
     ServerFrame, ServerFrameCodecError, decode_server_frame, encode_server_frame,

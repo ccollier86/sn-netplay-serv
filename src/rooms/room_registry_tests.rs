@@ -76,6 +76,7 @@ async fn connect_guest_returns_joined_room_view() {
             license("guest"),
             ConnectionId::new(),
             false,
+            false,
         )
         .await
         .expect("guest");
@@ -95,7 +96,7 @@ async fn join_broadcasts_room_state_event() {
     let mut events = registry.subscribe(invite.clone()).await.expect("events");
 
     registry
-        .connect_guest(invite, license("guest"), ConnectionId::new(), false)
+        .connect_guest(invite, license("guest"), ConnectionId::new(), false, false)
         .await
         .expect("guest");
 
@@ -158,6 +159,7 @@ async fn joined_rooms_do_not_expire_as_waiting_rooms() {
             InviteCode::parse(view.invite_code).expect("invite"),
             license("guest"),
             ConnectionId::new(),
+            false,
             false,
         )
         .await
@@ -227,7 +229,13 @@ async fn compatibility_mismatch_broadcasts_room_state() {
     let invite = InviteCode::parse(view.invite_code).expect("invite");
 
     registry
-        .connect_guest(invite.clone(), license("guest"), guest_connection, false)
+        .connect_guest(
+            invite.clone(),
+            license("guest"),
+            guest_connection,
+            false,
+            false,
+        )
         .await
         .expect("guest");
     registry
@@ -943,6 +951,7 @@ async fn reconnect_with_valid_resume_token_restores_player_slot() {
             guest_token,
             ConnectionId::new(),
             false,
+            false,
         )
         .await
         .expect("guest reconnect");
@@ -978,6 +987,7 @@ async fn reconnect_rejects_stale_room_epoch() {
             stale_epoch,
             guest_token,
             ConnectionId::new(),
+            false,
             false,
         )
         .await;
@@ -1065,6 +1075,7 @@ async fn second_disconnect_during_recovery_keeps_both_slots_reconnectable() {
             host_token,
             ConnectionId::new(),
             false,
+            false,
         )
         .await
         .expect("host reconnect");
@@ -1075,6 +1086,7 @@ async fn second_disconnect_during_recovery_keeps_both_slots_reconnectable() {
             known_epoch,
             guest_token,
             ConnectionId::new(),
+            false,
             false,
         )
         .await
@@ -1106,11 +1118,23 @@ async fn compatible_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, C
     let invite = InviteCode::parse(view.invite_code).expect("invite");
 
     let host_join = registry
-        .connect_host(invite.clone(), license("host"), host_connection, false)
+        .connect_host(
+            invite.clone(),
+            license("host"),
+            host_connection,
+            false,
+            false,
+        )
         .await
         .expect("host");
     let guest_join = registry
-        .connect_guest(invite.clone(), license("guest"), guest_connection, false)
+        .connect_guest(
+            invite.clone(),
+            license("guest"),
+            guest_connection,
+            false,
+            false,
+        )
         .await
         .expect("guest");
     registry
@@ -1189,11 +1213,23 @@ async fn reconnectable_room() -> (
         .expect("room");
     let invite = InviteCode::parse(view.invite_code).expect("invite");
     let host_join = registry
-        .connect_host(invite.clone(), license("host"), host_connection, false)
+        .connect_host(
+            invite.clone(),
+            license("host"),
+            host_connection,
+            false,
+            false,
+        )
         .await
         .expect("host");
     let guest_join = registry
-        .connect_guest(invite.clone(), license("guest"), guest_connection, false)
+        .connect_guest(
+            invite.clone(),
+            license("guest"),
+            guest_connection,
+            false,
+            false,
+        )
         .await
         .expect("guest");
 

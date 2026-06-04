@@ -16,6 +16,7 @@ mod player_runtime_state_mapping;
 mod player_slot;
 mod recovery_config;
 mod resume_token;
+mod rom_relay;
 mod room;
 mod room_adaptive_input_delay_ops;
 mod room_connection_diagnostics;
@@ -33,6 +34,7 @@ mod room_performance_sample;
 mod room_registry;
 mod room_registry_snapshot;
 mod room_registry_trait;
+mod room_rom_relay_ops;
 mod room_snapshot_ops;
 mod room_state_hash_ops;
 mod room_status;
@@ -58,6 +60,8 @@ pub use recovery_config::RoomRecoveryConfig;
 pub use resume_token::{
     ResumeToken, ResumeTokenGenerator, ResumeTokenHash, UuidResumeTokenGenerator, hash_resume_token,
 };
+pub(crate) use rom_relay::RomRelayTransferState;
+pub use rom_relay::{RomRelayGrantPair, RomRelayTransferIntent};
 pub use room::NetplayRoom;
 pub use room_controller_netplay_ops::{SessionPauseReachedOutcome, SessionResumeOutcome};
 pub use room_debug_event::{

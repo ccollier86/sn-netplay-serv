@@ -23,12 +23,37 @@ public data class RoomStatusResponse(
 public data class NetplaySessionDescriptor(
     public val hostClientKind: NetplayClientKind? = null,
     public val hostAppVersion: String? = null,
+    public val roomMode: NetplayRoomMode = NetplayRoomMode.DirectInvite,
     public val mode: NetplaySessionMode = NetplaySessionMode.ControllerNetplay,
     public val game: NetplayGameDescriptor,
     public val core: NetplayCoreDescriptor,
     public val controller: ControllerNetplayDescriptor = ControllerNetplayDescriptor(),
     public val link: LinkCableDescriptor? = null,
     public val voice: NetplayVoiceDescriptor? = null,
+    public val romIdentity: RomIdentity? = null,
+    public val romRelayIntent: RomRelayIntent = RomRelayIntent.ExactMatchOnly,
+    public val romRelay: RomRelayCapability? = null,
+)
+
+@Serializable
+public data class RomIdentity(
+    public val system: String,
+    public val coreId: String,
+    public val contentHash: String,
+    public val sizeBytes: Long,
+    public val fileName: String? = null,
+    public val extension: String? = null,
+    public val displayName: String,
+)
+
+@Serializable
+public data class RomRelayCapability(
+    public val supported: Boolean,
+    public val available: Boolean,
+    public val temporaryAccessOnly: Boolean,
+    public val maxBytes: Long,
+    public val allowedSystems: List<String> = emptyList(),
+    public val reason: RomRelayCapabilityReason? = null,
 )
 
 @Serializable
@@ -81,7 +106,24 @@ public fun NetplaySessionDescriptor.validateForRelay() {
     } else {
         require(link == null) { "link descriptor is only valid for linkCable rooms" }
     }
+    romIdentity?.let { identity ->
+        require(identity.contentHash.isContentHash()) {
+            "romIdentity.contentHash must be a SHA-256 digest"
+        }
+        require(identity.sizeBytes > 0L) { "romIdentity.sizeBytes must be positive" }
+        require(identity.system == game.systemId) { "romIdentity.system must match game.systemId" }
+        require(identity.coreId == core.coreId) { "romIdentity.coreId must match core.coreId" }
+        require(identity.contentHash.normalizedContentHash().equals(game.romSha256, ignoreCase = true)) {
+            "romIdentity.contentHash must match game.romSha256"
+        }
+    }
 }
 
 private fun String.isSha256Hex(): Boolean =
     length == 64 && all { value -> value in '0'..'9' || value in 'a'..'f' || value in 'A'..'F' }
+
+private fun String.isContentHash(): Boolean =
+    isSha256Hex() || removePrefix("sha256:").isSha256Hex()
+
+private fun String.normalizedContentHash(): String =
+    removePrefix("sha256:").lowercase()

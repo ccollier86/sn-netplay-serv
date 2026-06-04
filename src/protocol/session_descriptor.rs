@@ -9,8 +9,9 @@ use crate::protocol::descriptor_validation::{
     validate_sha256, validate_title,
 };
 use crate::protocol::{
-    LinkCableDescriptor, NetplayClientKind, NetplaySessionMode, NetplayVoiceDescriptor,
-    SessionDescriptorError,
+    LinkCableDescriptor, NetplayClientKind, NetplayRoomMode, NetplaySessionMode,
+    NetplayVoiceDescriptor, RomIdentity, RomRelayCapability, RomRelayIntent,
+    SessionDescriptorError, is_content_hash, normalize_content_hash,
 };
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +29,9 @@ pub struct NetplaySessionDescriptor {
     /// ShadowBoy Desktop version that created the room.
     #[serde(default)]
     pub host_app_version: Option<String>,
+    /// High-level invite room shape.
+    #[serde(default)]
+    pub room_mode: NetplayRoomMode,
     /// High-level room behavior selected by the host.
     #[serde(default)]
     pub mode: NetplaySessionMode,
@@ -44,6 +48,15 @@ pub struct NetplaySessionDescriptor {
     /// Optional voice-chat setup requested by the host.
     #[serde(default)]
     pub voice: Option<NetplayVoiceDescriptor>,
+    /// Optional ROM relay metadata for direct-invite rooms.
+    #[serde(default)]
+    pub rom_identity: Option<RomIdentity>,
+    /// Host intent for direct-invite ROM relay.
+    #[serde(default)]
+    pub rom_relay_intent: RomRelayIntent,
+    /// Server-computed ROM relay capability advertised in room views.
+    #[serde(default)]
+    pub rom_relay: Option<RomRelayCapability>,
 }
 
 impl NetplaySessionDescriptor {
@@ -53,7 +66,49 @@ impl NetplaySessionDescriptor {
         self.game.validate()?;
         self.core.validate()?;
         self.controller.validate()?;
+        self.validate_rom_identity()?;
         self.validate_mode()
+    }
+
+    fn validate_rom_identity(&self) -> Result<(), SessionDescriptorError> {
+        let Some(identity) = self.rom_identity.as_ref() else {
+            return Ok(());
+        };
+
+        validate_id("romIdentity.system", &identity.system)?;
+        validate_id("romIdentity.coreId", &identity.core_id)?;
+        validate_title(&identity.display_name)?;
+        validate_optional_short_text("romIdentity.fileName", identity.file_name.as_deref())?;
+        validate_optional_id("romIdentity.extension", identity.extension.as_deref())?;
+        if identity.size_bytes == 0 {
+            return Err(SessionDescriptorError {
+                field: "romIdentity.sizeBytes",
+            });
+        }
+        if !is_content_hash(&identity.content_hash) {
+            return Err(SessionDescriptorError {
+                field: "romIdentity.contentHash",
+            });
+        }
+        if identity.system != self.game.system_id {
+            return Err(SessionDescriptorError {
+                field: "romIdentity.system",
+            });
+        }
+        if identity.core_id != self.core.core_id {
+            return Err(SessionDescriptorError {
+                field: "romIdentity.coreId",
+            });
+        }
+        if normalize_content_hash(&identity.content_hash)
+            != self.game.rom_sha256.to_ascii_lowercase()
+        {
+            return Err(SessionDescriptorError {
+                field: "romIdentity.contentHash",
+            });
+        }
+
+        Ok(())
     }
 
     fn validate_mode(&self) -> Result<(), SessionDescriptorError> {
@@ -345,6 +400,49 @@ mod tests {
         assert_eq!(
             descriptor.validate(),
             Err(SessionDescriptorError { field: "romSha256" })
+        );
+    }
+
+    #[test]
+    fn accepts_direct_invite_rom_identity_with_sha_prefix() {
+        let mut value = descriptor_value();
+        value["roomMode"] = json!("directInvite");
+        value["romRelayIntent"] = json!("missingPeerOnly");
+        value["romIdentity"] = json!({
+            "system": "gamecube",
+            "coreId": "dolphin",
+            "contentHash": format!("sha256:{}", "a".repeat(64)),
+            "sizeBytes": 1024,
+            "fileName": "Star Fox Adventures.iso",
+            "extension": "iso",
+            "displayName": "Star Fox Adventures"
+        });
+        let descriptor =
+            serde_json::from_value::<NetplaySessionDescriptor>(value).expect("descriptor");
+
+        assert!(descriptor.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_direct_invite_rom_identity_hash_mismatch() {
+        let mut value = descriptor_value();
+        value["roomMode"] = json!("directInvite");
+        value["romRelayIntent"] = json!("missingPeerOnly");
+        value["romIdentity"] = json!({
+            "system": "gamecube",
+            "coreId": "dolphin",
+            "contentHash": "c".repeat(64),
+            "sizeBytes": 1024,
+            "displayName": "Star Fox Adventures"
+        });
+        let descriptor =
+            serde_json::from_value::<NetplaySessionDescriptor>(value).expect("descriptor");
+
+        assert_eq!(
+            descriptor.validate(),
+            Err(SessionDescriptorError {
+                field: "romIdentity.contentHash"
+            })
         );
     }
 

@@ -4,7 +4,8 @@
 //! does not bloat the domain state machine.
 
 use crate::protocol::{
-    InputDelayChange, NetplayProtocolView, NetplaySessionDescriptor, SessionPauseView,
+    InputDelayChange, NetplayProtocolView, NetplaySessionDescriptor, RomRelayCapability,
+    SessionPauseView,
 };
 use crate::rooms::{PlayerRole, PlayerStatus, RoomId, RoomStatus, RoomVoiceView};
 use serde::Serialize;
@@ -29,6 +30,8 @@ pub struct RoomView {
     pub session: NetplaySessionDescriptor,
     /// Shared voice-chat metadata, if the host requested voice for this room.
     pub voice: Option<RoomVoiceView>,
+    /// Direct-invite temporary ROM relay capability, when applicable.
+    pub rom_relay: Option<RomRelayCapability>,
     /// Configured room capacity.
     pub max_players: u8,
     /// Active coordinated pause details, if any.
@@ -89,6 +92,8 @@ pub struct PlayerSlotView {
     pub input_connected: bool,
     /// Whether this client can use file relay for large sync states.
     pub supports_state_file_relay: bool,
+    /// Whether this client can use file relay for temporary direct-invite ROMs.
+    pub supports_rom_file_relay: bool,
     /// Milliseconds since this slot was last seen by heartbeat or socket IO.
     pub last_seen_age_ms: Option<u128>,
     /// Milliseconds remaining before reconnect grace expires.

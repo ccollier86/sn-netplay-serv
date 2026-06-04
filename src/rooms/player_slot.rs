@@ -110,6 +110,8 @@ pub struct PlayerSlot {
     pub latest_network_report: Option<ClientNetworkQualityReport>,
     /// Whether this control socket can use file relay for large sync states.
     pub supports_state_file_relay: bool,
+    /// Whether this control socket can use file relay for temporary ROMs.
+    pub supports_rom_file_relay: bool,
     /// Time the latest network/runtime health sample was reported.
     pub latest_network_reported_at: Option<Instant>,
     /// Deadline for reclaiming this slot after transport loss.
@@ -137,6 +139,7 @@ impl PlayerSlot {
             latest_local_frame_reported_at: None,
             latest_network_report: None,
             supports_state_file_relay: false,
+            supports_rom_file_relay: false,
             latest_network_reported_at: None,
             reconnect_deadline: None,
             reconnect_room_epoch: None,
@@ -167,6 +170,7 @@ impl PlayerSlot {
             latest_local_frame_reported_at: None,
             latest_network_report: None,
             supports_state_file_relay: false,
+            supports_rom_file_relay: false,
             latest_network_reported_at: None,
             reconnect_deadline: None,
             reconnect_room_epoch: None,
@@ -182,6 +186,7 @@ impl PlayerSlot {
         input_socket_token_hash: ResumeTokenHash,
         now: Instant,
         supports_state_file_relay: bool,
+        supports_rom_file_relay: bool,
     ) {
         self.role = PlayerRole::Guest;
         self.subject_key = Some(license.identity_key());
@@ -196,6 +201,7 @@ impl PlayerSlot {
         self.latest_local_frame_reported_at = None;
         self.latest_network_report = None;
         self.supports_state_file_relay = supports_state_file_relay;
+        self.supports_rom_file_relay = supports_rom_file_relay;
         self.latest_network_reported_at = None;
         self.reconnect_deadline = None;
         self.reconnect_room_epoch = None;

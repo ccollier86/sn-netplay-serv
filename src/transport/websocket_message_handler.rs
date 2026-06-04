@@ -5,11 +5,12 @@
 
 use crate::http::AppServices;
 use crate::limits::MAX_WEBSOCKET_MESSAGE_BYTES;
-use crate::protocol::{ClientMessage, ServerMessage};
+use crate::protocol::{ClientMessage, RomRelayBlocked, ServerMessage};
 use crate::rooms::{ConnectionId, InviteCode, RoomError};
 use crate::transport::websocket_outbound::{
     SocketSender, send_room_error, send_server_message, send_static_error,
 };
+use crate::transport::websocket_rom_relay_handler::handle_rom_relay_request;
 use crate::transport::websocket_snapshot_file_relay_handler::handle_snapshot_file_relay_request;
 use crate::transport::websocket_voice_handler::handle_refresh_voice_token;
 
@@ -189,6 +190,138 @@ async fn handle_client_message(
                     .await,
             )
             .await
+        }
+        ClientMessage::RomRelayRequest {
+            room_epoch,
+            session_epoch,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            if let Err(reason) =
+                handle_rom_relay_request(services, invite_code, connection_id).await
+            {
+                return send_server_message(
+                    sender,
+                    &ServerMessage::RomRelayBlocked {
+                        room_epoch,
+                        session_epoch,
+                        blocked: RomRelayBlocked { reason },
+                    },
+                )
+                .await;
+            }
+            Ok(())
+        }
+        ClientMessage::RomRelayProgress {
+            room_epoch,
+            session_epoch,
+            progress,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            if let Err(reason) = services
+                .rooms
+                .relay_rom_relay_progress(invite_code.clone(), connection_id, progress)
+                .await
+            {
+                return send_server_message(
+                    sender,
+                    &ServerMessage::RomRelayBlocked {
+                        room_epoch,
+                        session_epoch,
+                        blocked: RomRelayBlocked { reason },
+                    },
+                )
+                .await;
+            }
+            Ok(())
+        }
+        ClientMessage::RomRelayCompleted {
+            room_epoch,
+            session_epoch,
+            completion,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            if let Err(reason) = services
+                .rooms
+                .relay_rom_relay_completed(invite_code.clone(), connection_id, completion)
+                .await
+            {
+                return send_server_message(
+                    sender,
+                    &ServerMessage::RomRelayBlocked {
+                        room_epoch,
+                        session_epoch,
+                        blocked: RomRelayBlocked { reason },
+                    },
+                )
+                .await;
+            }
+            Ok(())
+        }
+        ClientMessage::RomRelayFailed {
+            room_epoch,
+            session_epoch,
+            failure,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            if let Err(reason) = services
+                .rooms
+                .relay_rom_relay_failed(invite_code.clone(), connection_id, failure)
+                .await
+            {
+                return send_server_message(
+                    sender,
+                    &ServerMessage::RomRelayBlocked {
+                        room_epoch,
+                        session_epoch,
+                        blocked: RomRelayBlocked { reason },
+                    },
+                )
+                .await;
+            }
+            Ok(())
+        }
+        ClientMessage::RomRelayCancelled {
+            room_epoch,
+            session_epoch,
+            cancelled,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            if let Err(reason) = services
+                .rooms
+                .relay_rom_relay_cancelled(invite_code.clone(), connection_id, cancelled)
+                .await
+            {
+                return send_server_message(
+                    sender,
+                    &ServerMessage::RomRelayBlocked {
+                        room_epoch,
+                        session_epoch,
+                        blocked: RomRelayBlocked { reason },
+                    },
+                )
+                .await;
+            }
+            Ok(())
         }
         ClientMessage::InputFrame {
             room_epoch,

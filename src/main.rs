@@ -56,8 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         FileRelayBrokerConfig::Disabled => {
             info!(
                 temporary_roms_enabled = config.file_relay.temporary_roms_enabled,
+                direct_roms_enabled = config.file_relay.direct_roms_enabled,
                 save_states_enabled = config.file_relay.save_states_enabled,
                 temporary_rom_max_bytes = config.file_relay.temporary_rom_max_bytes,
+                direct_rom_allowed_systems = ?config.file_relay.direct_rom_allowed_systems,
                 "file relay broker disabled"
             );
         }
@@ -66,8 +68,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 base_url = %file_relay.base_url,
                 timeout_ms = file_relay.request_timeout.as_millis(),
                 temporary_roms_enabled = config.file_relay.temporary_roms_enabled,
+                direct_roms_enabled = config.file_relay.direct_roms_enabled,
                 save_states_enabled = config.file_relay.save_states_enabled,
                 temporary_rom_max_bytes = config.file_relay.temporary_rom_max_bytes,
+                direct_rom_allowed_systems = ?config.file_relay.direct_rom_allowed_systems,
                 "file relay broker configured"
             );
         }
@@ -105,7 +109,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         FileRelayPolicy {
             save_states_enabled: config.file_relay.save_states_enabled,
             temporary_roms_enabled: config.file_relay.temporary_roms_enabled,
+            direct_roms_enabled: config.file_relay.direct_roms_enabled,
             temporary_rom_max_bytes: config.file_relay.temporary_rom_max_bytes,
+            direct_rom_allowed_systems: config.file_relay.direct_rom_allowed_systems.clone(),
         },
         rate_limiter,
         metrics,

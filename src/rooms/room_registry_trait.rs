@@ -7,13 +7,14 @@
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
     ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
-    LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, SessionPauseReason,
+    LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, RomRelayBlockReason,
+    RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayProgress, SessionPauseReason,
     SnapshotChunk, SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, PlayerIndex, RoomDebugEvent, RoomError, RoomEvent, RoomInputEvent,
-    RoomJoin, RoomRegistrySnapshot, RoomView, RoomVoiceTokenRefresh,
-    SnapshotFileRelayTransferIntent,
+    ConnectionId, InviteCode, PlayerIndex, RomRelayGrantPair, RomRelayTransferIntent,
+    RoomDebugEvent, RoomError, RoomEvent, RoomInputEvent, RoomJoin, RoomRegistrySnapshot, RoomView,
+    RoomVoiceTokenRefresh, SnapshotFileRelayTransferIntent,
 };
 use tokio::sync::broadcast;
 
@@ -48,6 +49,7 @@ pub trait RoomRegistry: Send + Sync {
         host: VerifiedLicense,
         connection_id: ConnectionId,
         supports_state_file_relay: bool,
+        supports_rom_file_relay: bool,
     ) -> Result<RoomJoin, RoomError>;
 
     /// Adds a verified guest socket and returns the joined room state.
@@ -57,6 +59,7 @@ pub trait RoomRegistry: Send + Sync {
         guest: VerifiedLicense,
         connection_id: ConnectionId,
         supports_state_file_relay: bool,
+        supports_rom_file_relay: bool,
     ) -> Result<RoomJoin, RoomError>;
 
     /// Reclaims an occupied player slot with a valid resume token.
@@ -68,6 +71,7 @@ pub trait RoomRegistry: Send + Sync {
         resume_token: String,
         connection_id: ConnectionId,
         supports_state_file_relay: bool,
+        supports_rom_file_relay: bool,
     ) -> Result<RoomJoin, RoomError>;
 
     /// Marks a socket connection as disconnected.
@@ -193,6 +197,53 @@ pub trait RoomRegistry: Send + Sync {
         transfer_id: String,
         manifest: SnapshotManifest,
     ) -> Result<(), RoomError>;
+
+    /// Validates a guest request for direct-invite temporary ROM relay.
+    async fn prepare_rom_relay(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<RomRelayTransferIntent, RomRelayBlockReason>;
+
+    /// Stores ROM relay grants and privately grants the host upload.
+    async fn grant_rom_relay_upload(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        grants: RomRelayGrantPair,
+    ) -> Result<(), RomRelayBlockReason>;
+
+    /// Validates and emits a ROM relay progress update.
+    async fn relay_rom_relay_progress(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        progress: RomRelayProgress,
+    ) -> Result<(), RomRelayBlockReason>;
+
+    /// Validates and emits ROM relay upload/download completion.
+    async fn relay_rom_relay_completed(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        completion: RomRelayCompletion,
+    ) -> Result<(), RomRelayBlockReason>;
+
+    /// Validates and emits a ROM relay failure.
+    async fn relay_rom_relay_failed(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        failure: RomRelayFailure,
+    ) -> Result<(), RomRelayBlockReason>;
+
+    /// Validates and emits a ROM relay cancellation.
+    async fn relay_rom_relay_cancelled(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        cancelled: RomRelayCancelled,
+    ) -> Result<(), RomRelayBlockReason>;
 
     /// Validates and broadcasts one frame of player input.
     async fn relay_input_frame(

@@ -58,7 +58,7 @@ class NetplayTransportTest {
         )
 
         assertEquals(
-            "/v1/ws?inviteCode=AB%20CD&protocolVersion=4&playerIndex=0&roomEpoch=4&resumeToken=resume%20token%2F%2B",
+            "/v1/ws?inviteCode=AB%20CD&protocolVersion=4&supportsStateFileRelay=false&supportsRomFileRelay=false&playerIndex=0&roomEpoch=4&resumeToken=resume%20token%2F%2B",
             request.pathAndQuery,
         )
         assertEquals(request.pathAndQuery, auth.lastPath)

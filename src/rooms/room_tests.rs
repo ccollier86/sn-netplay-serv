@@ -8,13 +8,14 @@ use crate::auth::VerifiedLicense;
 use crate::protocol::{
     ClientNetworkQualityReport, ClientRuntimeState, CompatibilityFingerprint, InputFrame,
     InputFrameLimits, LinkCableCompatibility, LinkCablePacket, LinkCablePacketLimits,
-    NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor, SessionPauseReason, SessionPauseState,
+    NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor, RomIdentity, RomRelayBlockReason,
+    RomRelayCompletion, RomRelayGrant, RomRelayGrantRole, SessionPauseReason, SessionPauseState,
     SnapshotChunk, SnapshotFileRelayGrant, SnapshotFileRelayGrantPair, SnapshotFileRelayGrantRole,
     SnapshotLimits, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
-    ConnectionId, InputFrameAcceptance, InviteCode, PlayerIndex, PlayerStatus, RoomError,
-    SessionResumeOutcome, StateHashEvaluation,
+    ConnectionId, InputFrameAcceptance, InviteCode, PlayerIndex, PlayerStatus, RomRelayGrantPair,
+    RoomError, SessionResumeOutcome, StateHashEvaluation,
 };
 use sha2::{Digest, Sha256};
 
@@ -397,6 +398,74 @@ fn snapshot_file_relay_completion_allows_ready() {
     assert!(!started);
     assert_eq!(receiver, guest_connection);
     assert_eq!(download.role, SnapshotFileRelayGrantRole::Download);
+}
+
+#[test]
+fn rom_relay_requires_guest_request_and_client_support() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let unsupported_room = rom_relay_room(host_connection, guest_connection, false);
+
+    assert_eq!(
+        unsupported_room.prepare_rom_relay_transfer(host_connection),
+        Err(RomRelayBlockReason::WrongPlayer)
+    );
+    assert_eq!(
+        unsupported_room.prepare_rom_relay_transfer(guest_connection),
+        Err(RomRelayBlockReason::ClientUnsupported)
+    );
+
+    let supported_room = rom_relay_room(host_connection, guest_connection, true);
+    let intent = supported_room
+        .prepare_rom_relay_transfer(guest_connection)
+        .expect("rom relay intent");
+
+    assert_eq!(intent.sender_player_index, PlayerIndex::ONE);
+    assert_eq!(intent.receiver_player_index, PlayerIndex::TWO);
+    assert_eq!(intent.rom.system, "snes");
+    assert_eq!(intent.rom.core_id, "snes9x");
+}
+
+#[test]
+fn rom_relay_upload_completion_reveals_private_download_grant() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = rom_relay_room(host_connection, guest_connection, true);
+    let grants = rom_relay_grants("transfer-1");
+
+    let upload = room
+        .accept_rom_relay_grants(guest_connection, grants)
+        .expect("upload grant");
+    assert_eq!(upload.role, RomRelayGrantRole::Upload);
+
+    let download = room
+        .accept_rom_relay_completion(
+            host_connection,
+            RomRelayCompletion {
+                transfer_id: "transfer-1".to_string(),
+                role: RomRelayGrantRole::Upload,
+                content_hash: "a".repeat(64),
+            },
+        )
+        .expect("upload complete")
+        .expect("download grant");
+
+    assert_eq!(download.0, guest_connection);
+    assert_eq!(download.1.role, RomRelayGrantRole::Download);
+
+    assert_eq!(
+        room.accept_rom_relay_completion(
+            guest_connection,
+            RomRelayCompletion {
+                transfer_id: "transfer-1".to_string(),
+                role: RomRelayGrantRole::Download,
+                content_hash: "a".repeat(64),
+            },
+        )
+        .expect("download complete"),
+        None
+    );
+    assert!(room.prepare_rom_relay_transfer(guest_connection).is_ok());
 }
 
 #[test]
@@ -966,6 +1035,7 @@ fn file_relay_supported_room(
         String::new(),
         std::time::Instant::now(),
         true,
+        false,
     )
     .expect("host attaches with file relay support");
     room.join_guest_with_resume(
@@ -975,12 +1045,47 @@ fn file_relay_supported_room(
         String::new(),
         std::time::Instant::now(),
         true,
+        false,
     )
     .expect("guest joins with file relay support");
     room.set_compatibility_for_connection(host_connection, fingerprint("rom"))
         .expect("host fingerprint");
     room.set_compatibility_for_connection(guest_connection, fingerprint("rom"))
         .expect("guest fingerprint");
+    room
+}
+
+fn rom_relay_room(
+    host_connection: ConnectionId,
+    guest_connection: ConnectionId,
+    supports_rom_file_relay: bool,
+) -> NetplayRoom {
+    let mut room = NetplayRoom::new(
+        license("host"),
+        host_connection,
+        InviteCode::parse("AB23-CD").expect("invite code"),
+        direct_rom_descriptor(),
+    );
+    room.attach_host_with_resume(
+        license("host"),
+        host_connection,
+        String::new(),
+        String::new(),
+        std::time::Instant::now(),
+        false,
+        supports_rom_file_relay,
+    )
+    .expect("host attaches with rom relay support");
+    room.join_guest_with_resume(
+        license("guest"),
+        guest_connection,
+        String::new(),
+        String::new(),
+        std::time::Instant::now(),
+        false,
+        supports_rom_file_relay,
+    )
+    .expect("guest joins with rom relay support");
     room
 }
 
@@ -1092,6 +1197,43 @@ fn link_descriptor() -> NetplaySessionDescriptor {
     .expect("link descriptor")
 }
 
+fn direct_rom_descriptor() -> NetplaySessionDescriptor {
+    serde_json::from_value(serde_json::json!({
+        "hostClientKind": "android",
+        "roomMode": "directInvite",
+        "romRelayIntent": "missingPeerOnly",
+        "hostAppVersion": "0.3.0",
+        "game": {
+            "systemId": "snes",
+            "title": "Relay Test",
+            "romSha256": "a".repeat(64),
+            "contentKey": "snes-relay-test"
+        },
+        "core": {
+            "coreId": "snes9x",
+            "stateFormat": "snes9x:snes:libretro-serialize-v1"
+        },
+        "romIdentity": {
+            "system": "snes",
+            "coreId": "snes9x",
+            "contentHash": "a".repeat(64),
+            "sizeBytes": 512,
+            "fileName": "Relay Test.sfc",
+            "extension": "sfc",
+            "displayName": "Relay Test"
+        },
+        "romRelay": {
+            "supported": true,
+            "available": true,
+            "temporaryAccessOnly": true,
+            "maxBytes": 104857600,
+            "allowedSystems": ["snes"],
+            "reason": null
+        }
+    }))
+    .expect("direct rom descriptor")
+}
+
 fn input(player_index: PlayerIndex, frame: u64) -> InputFrame {
     InputFrame {
         player_index,
@@ -1188,6 +1330,40 @@ fn snapshot_file_relay_grants(
             expires_at: "2026-05-25T00:00:00Z".to_string(),
             manifest,
         },
+    }
+}
+
+fn rom_identity() -> RomIdentity {
+    RomIdentity {
+        system: "snes".to_string(),
+        core_id: "snes9x".to_string(),
+        content_hash: "a".repeat(64),
+        size_bytes: 512,
+        file_name: Some("Relay Test.sfc".to_string()),
+        extension: Some("sfc".to_string()),
+        display_name: "Relay Test".to_string(),
+    }
+}
+
+fn rom_relay_grants(transfer_id: &str) -> RomRelayGrantPair {
+    RomRelayGrantPair {
+        upload: rom_relay_grant(transfer_id, RomRelayGrantRole::Upload),
+        download: rom_relay_grant(transfer_id, RomRelayGrantRole::Download),
+    }
+}
+
+fn rom_relay_grant(transfer_id: &str, role: RomRelayGrantRole) -> RomRelayGrant {
+    RomRelayGrant {
+        transfer_id: transfer_id.to_string(),
+        relay_url: "https://relay.shadowboy.app".to_string(),
+        token: format!("{role:?}-token"),
+        role,
+        rom: rom_identity(),
+        sender_player_index: 0,
+        receiver_player_index: 1,
+        chunk_size_bytes: 1024,
+        chunk_count: 1,
+        expires_at: "2026-05-25T00:00:00Z".to_string(),
     }
 }
 

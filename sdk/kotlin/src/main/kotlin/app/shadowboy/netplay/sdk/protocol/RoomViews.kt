@@ -18,6 +18,7 @@ public data class RoomView(
     public val protocol: NetplayProtocolView,
     public val session: NetplaySessionDescriptor,
     public val voice: RoomVoiceView? = null,
+    public val romRelay: RomRelayCapability? = null,
     public val maxPlayers: Int,
     public val pause: SessionPauseView? = null,
     public val frameClock: RoomFrameClockView = RoomFrameClockView(),
@@ -62,6 +63,8 @@ public data class PlayerSlotView(
     public val occupied: Boolean,
     public val controlConnected: Boolean,
     public val inputConnected: Boolean,
+    public val supportsStateFileRelay: Boolean = false,
+    public val supportsRomFileRelay: Boolean = false,
     public val lastSeenAgeMs: Long? = null,
     public val reconnectGraceRemainingMs: Long? = null,
 )

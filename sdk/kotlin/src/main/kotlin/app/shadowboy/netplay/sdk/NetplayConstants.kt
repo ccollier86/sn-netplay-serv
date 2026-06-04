@@ -16,14 +16,18 @@ public object NetplayPaths {
         inviteCode: String,
         role: String,
         reconnect: ReconnectTicket? = null,
+        supportsStateFileRelay: Boolean = false,
+        supportsRomFileRelay: Boolean = false,
     ): String {
         val base = "/v1/ws?inviteCode=${encode(inviteCode.trim())}"
         val protocol = "&protocolVersion=$NETPLAY_PROTOCOL_VERSION"
+        val capabilities = "&supportsStateFileRelay=$supportsStateFileRelay" +
+            "&supportsRomFileRelay=$supportsRomFileRelay"
         if (reconnect == null) {
-            return "$base&role=${encode(role)}$protocol"
+            return "$base&role=${encode(role)}$protocol$capabilities"
         }
 
-        return "$base$protocol" +
+        return "$base$protocol$capabilities" +
             "&playerIndex=${reconnect.playerIndex}" +
             "&roomEpoch=${reconnect.roomEpoch}" +
             "&resumeToken=${encode(reconnect.resumeToken)}"

@@ -12,9 +12,9 @@ use crate::protocol::{
 };
 use crate::rooms::{
     AdaptiveInputDelayPolicy, ConnectionId, InviteCode, LinkCableRoomState, PlayerIndex,
-    PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus, ResumeTokenHash, RoomError,
-    RoomId, RoomStatus, RoomView, RoomVoiceState, SessionPauseStateTracker,
-    SnapshotFileRelayTransferState, SnapshotTransferState,
+    PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus, ResumeTokenHash,
+    RomRelayTransferState, RoomError, RoomId, RoomStatus, RoomView, RoomVoiceState,
+    SessionPauseStateTracker, SnapshotFileRelayTransferState, SnapshotTransferState,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
@@ -40,6 +40,7 @@ pub struct NetplayRoom {
     pub(super) pause_state: Option<SessionPauseStateTracker>,
     pub(super) snapshot_transfer: Option<SnapshotTransferState>,
     pub(super) snapshot_file_relay_transfer: Option<SnapshotFileRelayTransferState>,
+    pub(super) rom_relay_transfer: Option<RomRelayTransferState>,
     pub(super) sync_start_frame: u64,
     pub(super) room_frame: u64,
     pub(super) released_frame: Option<u64>,
@@ -114,6 +115,7 @@ impl NetplayRoom {
             pause_state: None,
             snapshot_transfer: None,
             snapshot_file_relay_transfer: None,
+            rom_relay_transfer: None,
             sync_start_frame: 0,
             room_frame: 0,
             released_frame: None,
@@ -169,6 +171,7 @@ impl NetplayRoom {
             self.ready_players.remove(&player_index);
             self.snapshot_transfer = None;
             self.snapshot_file_relay_transfer = None;
+            self.rom_relay_transfer = None;
             self.status = RoomStatus::CheckingCompatibility;
             self.set_player_status(player_index, PlayerStatus::CompatibilityFailed);
             return Err(RoomError::CompatibilityMismatch);
@@ -279,6 +282,7 @@ impl NetplayRoom {
             protocol: NetplayProtocolView::default(),
             session: self.session.clone(),
             voice: self.voice.as_ref().map(RoomVoiceState::view),
+            rom_relay: self.session.rom_relay.clone(),
             max_players: self.max_players,
             pause: self
                 .pause_state
@@ -299,6 +303,7 @@ impl NetplayRoom {
                     control_connected: slot.connection_id.is_some(),
                     input_connected: slot.input_connection_id.is_some(),
                     supports_state_file_relay: slot.supports_state_file_relay,
+                    supports_rom_file_relay: slot.supports_rom_file_relay,
                     last_seen_age_ms: slot
                         .last_seen_at
                         .map(|last_seen| now.saturating_duration_since(last_seen).as_millis()),
@@ -405,6 +410,7 @@ impl NetplayRoom {
         self.pause_state = None;
         self.snapshot_transfer = None;
         self.snapshot_file_relay_transfer = None;
+        self.rom_relay_transfer = None;
         self.sync_start_frame = start_frame;
         self.room_frame = start_frame;
         self.released_frame = None;

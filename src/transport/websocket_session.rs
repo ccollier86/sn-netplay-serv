@@ -51,6 +51,7 @@ pub async fn handle_websocket_session(
                 resume_token,
                 connection_id,
                 request.supports_state_file_relay,
+                request.supports_rom_file_relay,
             )
             .await
     } else {
@@ -63,6 +64,7 @@ pub async fn handle_websocket_session(
                         request.license,
                         connection_id,
                         request.supports_state_file_relay,
+                        request.supports_rom_file_relay,
                     )
                     .await
             }
@@ -74,6 +76,7 @@ pub async fn handle_websocket_session(
                         request.license,
                         connection_id,
                         request.supports_state_file_relay,
+                        request.supports_rom_file_relay,
                     )
                     .await
             }
@@ -365,6 +368,96 @@ async fn handle_room_event(
                 room_epoch,
                 session_epoch,
                 grant,
+            }
+        }
+        Ok(RoomEvent::RomRelayUploadGranted {
+            source,
+            room_epoch,
+            session_epoch,
+            grant,
+        }) => {
+            if source != connection_id {
+                return true;
+            }
+            ServerMessage::RomRelayGrantUpload {
+                room_epoch,
+                session_epoch,
+                grant,
+            }
+        }
+        Ok(RoomEvent::RomRelayDownloadGranted {
+            receiver,
+            room_epoch,
+            session_epoch,
+            grant,
+        }) => {
+            if receiver != connection_id {
+                return true;
+            }
+            ServerMessage::RomRelayGrantDownload {
+                room_epoch,
+                session_epoch,
+                grant,
+            }
+        }
+        Ok(RoomEvent::RomRelayProgress {
+            source,
+            room_epoch,
+            session_epoch,
+            progress,
+        }) => {
+            if source == connection_id {
+                return true;
+            }
+            ServerMessage::RomRelayProgress {
+                room_epoch,
+                session_epoch,
+                progress,
+            }
+        }
+        Ok(RoomEvent::RomRelayCompleted {
+            source,
+            room_epoch,
+            session_epoch,
+            completion,
+        }) => {
+            if source == connection_id {
+                return true;
+            }
+            ServerMessage::RomRelayCompleted {
+                room_epoch,
+                session_epoch,
+                completion,
+            }
+        }
+        Ok(RoomEvent::RomRelayFailed {
+            source,
+            room_epoch,
+            session_epoch,
+            failure,
+        }) => {
+            if source == connection_id {
+                return true;
+            }
+            ServerMessage::RomRelayFailed {
+                room_epoch,
+                session_epoch,
+                failure,
+            }
+        }
+        Ok(RoomEvent::RomRelayCancelled {
+            source,
+            room_epoch,
+            session_epoch,
+            cancelled,
+        }) => {
+            if source == connection_id {
+                return true;
+            }
+            ServerMessage::RomRelayCancelled {
+                room_epoch,
+                session_epoch,
+                cancelled,
             }
         }
         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => ServerMessage::Error {

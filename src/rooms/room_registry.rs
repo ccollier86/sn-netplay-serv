@@ -24,6 +24,8 @@ mod lifecycle_ops;
 mod query_ops;
 #[path = "room_registry_relay_ops.rs"]
 mod relay_ops;
+#[path = "room_registry_rom_relay_ops.rs"]
+mod rom_relay_ops;
 #[path = "room_registry_sync_ops.rs"]
 mod sync_ops;
 #[path = "room_registry_trait_impl.rs"]

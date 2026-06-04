@@ -50,6 +50,62 @@ public sealed interface ClientMessage {
     ) : ClientMessage
 
     @Serializable
+    @SerialName("snapshotFileRelayRequested")
+    public data class SnapshotFileRelayRequested(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val manifest: SnapshotManifest,
+    ) : ClientMessage
+
+    @Serializable
+    @SerialName("snapshotFileRelayUploadComplete")
+    public data class SnapshotFileRelayUploadComplete(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val transferId: String,
+        public val manifest: SnapshotManifest,
+    ) : ClientMessage
+
+    @Serializable
+    @SerialName("romRelay.request")
+    public data class RomRelayRequest(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+    ) : ClientMessage
+
+    @Serializable
+    @SerialName("romRelay.progress")
+    public data class RomRelayProgressMessage(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val progress: RomRelayProgress,
+    ) : ClientMessage
+
+    @Serializable
+    @SerialName("romRelay.completed")
+    public data class RomRelayCompleted(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val completion: RomRelayCompletion,
+    ) : ClientMessage
+
+    @Serializable
+    @SerialName("romRelay.failed")
+    public data class RomRelayFailed(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val failure: RomRelayFailure,
+    ) : ClientMessage
+
+    @Serializable
+    @SerialName("romRelay.cancelled")
+    public data class RomRelayCancelledMessage(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val cancelled: RomRelayCancelled,
+    ) : ClientMessage
+
+    @Serializable
     @SerialName("inputFrame")
     public data class InputFrameMessage(
         public val roomEpoch: Long,
@@ -389,6 +445,114 @@ public sealed interface ServerMessage {
         public val roomEpoch: Long,
         public val sessionEpoch: Long,
         public val manifest: SnapshotManifest,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("snapshotFileRelayUploadGranted")
+    public data class SnapshotFileRelayUploadGranted(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val grant: SnapshotFileRelayGrant,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("snapshotFileRelayDownloadReady")
+    public data class SnapshotFileRelayDownloadReady(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val grant: SnapshotFileRelayGrant,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("romRelay.grantUpload")
+    public data class RomRelayGrantUpload(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val grant: RomRelayGrant,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("romRelay.grantDownload")
+    public data class RomRelayGrantDownload(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val grant: RomRelayGrant,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("romRelay.progress")
+    public data class RomRelayProgressChanged(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val progress: RomRelayProgress,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("romRelay.completed")
+    public data class RomRelayCompleted(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val completion: RomRelayCompletion,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("romRelay.failed")
+    public data class RomRelayFailed(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val failure: RomRelayFailure,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("romRelay.blocked")
+    public data class RomRelayBlockedMessage(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val blocked: RomRelayBlocked,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long? = null
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("romRelay.cancelled")
+    public data class RomRelayCancelledMessage(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val cancelled: RomRelayCancelled,
     ) : ServerMessage {
         override val eventSeqOrNull: Long? = null
         override val roomEpochOrNull: Long = roomEpoch

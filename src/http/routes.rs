@@ -107,7 +107,11 @@ pub async fn create_room(
     validate_client_protocol_version(request.desktop_protocol_version)?;
     let mut session = request.session;
     session.host_client_kind = Some(netplay_client_kind(license.client_kind));
+    session.rom_relay = None;
     session.validate()?;
+    session.rom_relay = services
+        .file_relay_policy
+        .direct_rom_relay_capability(services.file_relay.as_ref(), &session);
     let room = services
         .rooms
         .create_room(license, ConnectionId::new(), session)
@@ -168,6 +172,7 @@ pub async fn websocket_room(
         resume_token: reconnect.map(|value| value.resume_token),
         role: query.role,
         supports_state_file_relay: query.supports_state_file_relay.unwrap_or(false),
+        supports_rom_file_relay: query.supports_rom_file_relay.unwrap_or(false),
         license,
     };
 
@@ -478,6 +483,8 @@ pub struct WebSocketRoomQuery {
     resume_token: Option<String>,
     #[serde(default)]
     supports_state_file_relay: Option<bool>,
+    #[serde(default)]
+    supports_rom_file_relay: Option<bool>,
 }
 
 #[derive(Deserialize)]

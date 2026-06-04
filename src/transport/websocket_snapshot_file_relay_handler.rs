@@ -67,6 +67,15 @@ fn create_snapshot_file_relay_request(
         sha256: manifest.sha256.clone(),
         size_bytes: manifest.total_bytes,
         expires_in_seconds: Some(SNAPSHOT_FILE_RELAY_TTL_SECONDS),
+        room_epoch: None,
+        session_epoch: None,
+        system: None,
+        core_id: None,
+        content_hash: None,
+        file_name: None,
+        extension: None,
+        display_name: None,
+        single_use: true,
     }
 }
 
