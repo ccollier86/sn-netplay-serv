@@ -5,11 +5,11 @@
 
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
-    CreateLobbyParams, JoinLobbyParams, Lobby, LobbyChatMessageView, LobbyDebugEvent,
-    LobbyDebugEventLog, LobbyDebugEventSink, LobbyError, LobbyEventReceiver, LobbyGameCandidate,
-    LobbyGameReadinessStatus, LobbyJoin, LobbyRegistry, LobbyRegistrySnapshot, LobbyRomRelayLimits,
-    LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyView, MAX_LOBBY_PLAYERS,
-    NoopLobbyDebugEventSink, StoredLobby,
+    CreateLobbyParams, JoinLobbyParams, Lobby, LobbyActivityKind, LobbyChatMessageView,
+    LobbyDebugEvent, LobbyDebugEventLog, LobbyDebugEventSink, LobbyError, LobbyEventReceiver,
+    LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyRegistry, LobbyRegistrySnapshot,
+    LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyView,
+    MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink, StoredLobby,
 };
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::{
@@ -19,6 +19,7 @@ use crate::rooms::{
 use crate::voice::{DisabledVoiceBroker, VoiceBroker};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 /// Thread-safe in-memory lobby registry.
@@ -127,6 +128,43 @@ impl InMemoryLobbyRegistry {
         };
 
         recent_events.push(event);
+    }
+
+    /// Closes and removes lobbies with no meaningful user/game activity.
+    pub async fn expire_idle_lobbies(&self, idle_timeout: Duration) -> usize {
+        let now_ms = crate::rooms::current_timestamp_ms();
+        let mut expired_keys = Vec::new();
+        let mut voice_cleanup = Vec::new();
+        let mut lobbies = self.lobbies.write().await;
+
+        for (key, lobby) in lobbies.iter_mut() {
+            if !lobby.lobby.is_meaningfully_idle(now_ms, idle_timeout) {
+                continue;
+            }
+
+            let idle_ms = now_ms.saturating_sub(lobby.lobby.last_meaningful_activity_at_ms());
+            if lobby.lobby.close_due_to_idle(now_ms) {
+                voice_cleanup.push(lobby.lobby.take_voice_room_id_for_cleanup());
+                lobby.emit_lobby_closed("inactive".to_string());
+                self.record_lobby_event(
+                    lobby,
+                    "lobbyIdleExpired",
+                    format!("lobby expired after {idle_ms}ms without meaningful activity"),
+                );
+                expired_keys.push(key.clone());
+            }
+        }
+
+        for key in &expired_keys {
+            lobbies.remove(key);
+        }
+        drop(lobbies);
+
+        for voice_room_id in voice_cleanup {
+            self.cleanup_lobby_voice_room(voice_room_id, "lobby-idle-expired");
+        }
+
+        expired_keys.len()
     }
 }
 
@@ -442,6 +480,11 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             receiver_player_index,
             limits,
         )?;
+        lobby.lobby.record_activity(
+            connection_id,
+            LobbyActivityKind::RomRelay,
+            crate::rooms::current_timestamp_ms(),
+        )?;
         self.record_lobby_event(
             lobby,
             "lobbyRomRelayRequested",
@@ -555,6 +598,9 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             sanitize_chat_body(body)?,
             crate::rooms::current_timestamp_ms(),
         );
+        lobby
+            .lobby
+            .mark_meaningful_activity(crate::rooms::current_timestamp_ms());
         lobby.emit_chat_message(chat.clone());
         self.record_lobby_event(
             lobby,
@@ -584,6 +630,29 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         }
 
         Ok(refresh)
+    }
+
+    async fn record_lobby_activity(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        kind: LobbyActivityKind,
+    ) -> Result<(), LobbyError> {
+        let mut lobbies = self.lobbies.write().await;
+        let lobby = lobbies
+            .get_mut(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+
+        lobby
+            .lobby
+            .record_activity(connection_id, kind, crate::rooms::current_timestamp_ms())?;
+        self.record_lobby_event(
+            lobby,
+            "lobbyActivity",
+            format!("meaningful lobby activity kind={kind:?}"),
+        );
+
+        Ok(())
     }
 
     async fn lobby_view(&self, invite_code: InviteCode) -> Result<LobbyView, LobbyError> {

@@ -2,9 +2,10 @@
 
 use crate::auth::{ClientKind, VerifiedLicense};
 use crate::lobbies::{
-    CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyClientCapabilities, LobbyError,
-    LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyPlayerRole, LobbyPlayerStatus,
-    LobbyRegistry, LobbyServerCapabilities, LobbyStatus, MAX_LOBBY_PLAYERS,
+    CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyActivityKind,
+    LobbyClientCapabilities, LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus,
+    LobbyPlayerRole, LobbyPlayerStatus, LobbyRegistry, LobbyServerCapabilities, LobbyStatus,
+    MAX_LOBBY_PLAYERS,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, ResumeToken, ResumeTokenGenerator,
@@ -537,6 +538,74 @@ async fn lobby_chat_is_sanitized_and_broadcast() {
 
     assert_eq!(chat.body, "hello world");
     assert!(matches!(event, LobbyEvent::ChatMessage(_)));
+}
+
+#[tokio::test]
+async fn idle_lobby_expiration_closes_and_removes_lobby() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let mut events = registry
+        .subscribe_lobby(invite.clone())
+        .await
+        .expect("events");
+
+    let expired = registry.expire_idle_lobbies(Duration::ZERO).await;
+    let event = recv_lobby_event(&mut events).await;
+    let error = registry
+        .lobby_view(invite)
+        .await
+        .expect_err("expired lobby is removed");
+
+    assert_eq!(expired, 1);
+    assert!(matches!(error, LobbyError::NotFound));
+    match event {
+        LobbyEvent::LobbyClosed { lobby, reason } => {
+            assert_eq!(reason, "inactive");
+            assert_eq!(lobby.status, LobbyStatus::Closed);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn recorded_lobby_activity_keeps_lobby_within_idle_window() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            host_connection,
+        )
+        .await
+        .expect("connected");
+
+    registry
+        .record_lobby_activity(
+            invite.clone(),
+            host_connection,
+            LobbyActivityKind::GameplayActive,
+        )
+        .await
+        .expect("activity recorded");
+
+    let expired = registry
+        .expire_idle_lobbies(Duration::from_secs(3600))
+        .await;
+    let lobby = registry.lobby_view(invite).await.expect("retained");
+
+    assert_eq!(expired, 0);
+    assert_eq!(lobby.status, LobbyStatus::Open);
 }
 
 async fn recv_lobby_event(events: &mut crate::lobbies::LobbyEventReceiver) -> LobbyEvent {

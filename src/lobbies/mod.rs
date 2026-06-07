@@ -7,10 +7,12 @@
 mod errors;
 mod in_memory_lobby_registry;
 mod lobby;
+mod lobby_activity;
 mod lobby_capabilities;
 mod lobby_chat;
 mod lobby_debug_event;
 mod lobby_event;
+mod lobby_expiration_task;
 mod lobby_game;
 mod lobby_launch;
 mod lobby_player;
@@ -28,6 +30,7 @@ use serde::{Deserialize, Serialize};
 pub use errors::LobbyError;
 pub use in_memory_lobby_registry::InMemoryLobbyRegistry;
 pub use lobby::{Lobby, LobbyStatus, MAX_LOBBY_PLAYERS};
+pub use lobby_activity::LobbyActivityKind;
 pub use lobby_capabilities::{LobbyClientCapabilities, LobbyServerCapabilities};
 pub use lobby_chat::LobbyChatMessageView;
 pub use lobby_debug_event::{
@@ -35,6 +38,7 @@ pub use lobby_debug_event::{
     NoopLobbyDebugEventSink,
 };
 pub use lobby_event::LobbyEvent;
+pub use lobby_expiration_task::spawn_lobby_expiration_task;
 pub use lobby_game::{LobbyGameCandidate, LobbyGameSelectionView};
 pub use lobby_launch::{
     LobbyGameLaunchStatus, LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView,

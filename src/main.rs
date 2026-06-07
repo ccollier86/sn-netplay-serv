@@ -10,7 +10,9 @@ use sb_netplay_serv::file_relay::{
     DisabledFileRelayBroker, FileRelayBroker, FileRelayBrokerConfig, HttpFileRelayBroker,
 };
 use sb_netplay_serv::http::{AdminAuthorizer, AppServices, FileRelayPolicy, build_router};
-use sb_netplay_serv::lobbies::{InMemoryLobbyRegistry, LobbyServerCapabilities, MAX_LOBBY_PLAYERS};
+use sb_netplay_serv::lobbies::{
+    InMemoryLobbyRegistry, LobbyServerCapabilities, MAX_LOBBY_PLAYERS, spawn_lobby_expiration_task,
+};
 use sb_netplay_serv::observability::{
     InMemoryMetrics, ensure_telemetry_schema, init_tracing, spawn_telemetry_sink,
 };
@@ -101,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let admin_authorizer = AdminAuthorizer::new(config.admin_token.clone());
     let _room_expiration_task = spawn_room_expiration_task(rooms.clone());
     let _room_frame_clock_task = spawn_room_frame_clock_task(rooms.clone());
+    let _lobby_expiration_task = spawn_lobby_expiration_task(lobbies.clone(), config.lobby_idle);
     let services = AppServices::new(
         license_authority,
         rooms,
@@ -121,7 +124,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = build_router(services);
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
 
-    info!(bind_addr = %config.bind_addr, "starting ShadowBoy netplay server");
+    info!(
+        bind_addr = %config.bind_addr,
+        lobby_idle_seconds = config.lobby_idle.as_secs(),
+        "starting ShadowBoy netplay server"
+    );
     axum::serve(listener, app).await?;
 
     Ok(())

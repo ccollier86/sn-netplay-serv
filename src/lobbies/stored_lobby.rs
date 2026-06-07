@@ -77,6 +77,14 @@ impl StoredLobby {
         let _ = self.events.send(LobbyEvent::ChatMessage(chat));
     }
 
+    /// Broadcasts final lobby closure.
+    pub(super) fn emit_lobby_closed(&self, reason: String) {
+        let _ = self.events.send(LobbyEvent::LobbyClosed {
+            lobby: self.view(),
+            reason,
+        });
+    }
+
     /// Sends private ROM transfer grants to the two involved sockets.
     pub(super) fn emit_rom_transfer_grants(
         &self,

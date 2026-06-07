@@ -26,6 +26,8 @@ pub struct LobbyView {
     pub created_at_ms: u128,
     /// Last state-change timestamp in milliseconds since unix epoch.
     pub updated_at_ms: u128,
+    /// Last user/game activity timestamp used by idle cleanup.
+    pub last_meaningful_activity_at_ms: u128,
     /// Current lobby lifecycle status.
     pub status: LobbyStatus,
     /// Server capability flags for this lobby.

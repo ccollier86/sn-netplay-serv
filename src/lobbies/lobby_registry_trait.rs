@@ -5,9 +5,10 @@
 
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
-    CreateLobbyParams, JoinLobbyParams, LobbyChatMessageView, LobbyDebugEvent, LobbyError,
-    LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyRegistrySnapshot,
-    LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyView, LobbyVoiceTokenRefresh,
+    CreateLobbyParams, JoinLobbyParams, LobbyActivityKind, LobbyChatMessageView, LobbyDebugEvent,
+    LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin,
+    LobbyRegistrySnapshot, LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyView,
+    LobbyVoiceTokenRefresh,
 };
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
@@ -150,6 +151,14 @@ pub trait LobbyRegistry: Send + Sync {
         invite_code: InviteCode,
         connection_id: ConnectionId,
     ) -> Result<LobbyVoiceTokenRefresh, LobbyError>;
+
+    /// Records meaningful activity that should keep an open lobby retained.
+    async fn record_lobby_activity(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        kind: LobbyActivityKind,
+    ) -> Result<(), LobbyError>;
 
     /// Returns the current lobby view.
     async fn lobby_view(&self, invite_code: InviteCode) -> Result<LobbyView, LobbyError>;

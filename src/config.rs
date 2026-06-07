@@ -29,6 +29,8 @@ pub struct ServerConfig {
     pub rate_limits: RateLimitPolicy,
     /// In-memory room recovery and heartbeat timing.
     pub recovery: RoomRecoveryConfig,
+    /// How long a lobby may remain without meaningful user or gameplay activity.
+    pub lobby_idle: std::time::Duration,
     /// Logging output settings.
     pub log: LogConfig,
     /// Optional durable analytics sink.
@@ -82,6 +84,7 @@ impl ServerConfig {
             )?,
             room_idle: optional_duration_seconds_env("SB_NETPLAY_ROOM_IDLE_SECONDS", 300)?,
         };
+        let lobby_idle = optional_duration_seconds_env("SB_NETPLAY_LOBBY_IDLE_SECONDS", 3600)?;
         let log = LogConfig {
             format: optional_log_format_env("SB_NETPLAY_LOG_FORMAT", LogFormat::Compact)?,
         };
@@ -97,6 +100,7 @@ impl ServerConfig {
             trust_proxy_headers,
             rate_limits,
             recovery,
+            lobby_idle,
             log,
             telemetry,
             voice,

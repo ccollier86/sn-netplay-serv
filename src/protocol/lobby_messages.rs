@@ -4,7 +4,8 @@
 //! without affecting Android's existing direct room path.
 
 use crate::lobbies::{
-    LobbyChatMessageView, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyView,
+    LobbyActivityKind, LobbyChatMessageView, LobbyGameCandidate, LobbyGameReadinessStatus,
+    LobbyView,
 };
 use crate::protocol::LobbyFileRelayGrant;
 use crate::rooms::PlayerVoiceJoinGrant;
@@ -83,6 +84,13 @@ pub enum LobbyClientMessage {
         /// Lobby epoch observed by the client.
         lobby_epoch: u64,
     },
+    /// Reports meaningful activity that should retain the lobby.
+    ReportActivity {
+        /// Lobby epoch observed by the client.
+        lobby_epoch: u64,
+        /// Activity type safe for telemetry.
+        kind: LobbyActivityKind,
+    },
     /// Client intentionally leaves the lobby.
     Leave {
         /// Lobby epoch observed by the client.
@@ -155,6 +163,17 @@ pub enum LobbyServerMessage {
         /// Fresh private voice grant.
         voice: PlayerVoiceJoinGrant,
     },
+    /// Lobby was closed by the server.
+    LobbyClosed {
+        /// Final lobby event sequence.
+        event_seq: u64,
+        /// Final lobby epoch.
+        lobby_epoch: u64,
+        /// Safe close reason.
+        reason: String,
+        /// Final lobby state.
+        lobby: LobbyView,
+    },
     /// Stable lobby protocol error.
     Error {
         /// Machine-readable error code.
@@ -204,6 +223,7 @@ mod tests {
                 invite_code: "AB23-CD".to_string(),
                 created_at_ms: 1,
                 updated_at_ms: 2,
+                last_meaningful_activity_at_ms: 2,
                 status: LobbyStatus::Open,
                 capabilities: LobbyServerCapabilities::current(4, true, true),
                 players: Vec::new(),

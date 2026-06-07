@@ -12,6 +12,10 @@ Build locally:
 ./scripts/build-ghcr-image.sh latest
 ```
 
+The build script defaults to `linux/amd64` so Mac builds still produce the
+Coolify server image. Override `SB_NETPLAY_IMAGE_PLATFORM` only if the deploy
+host changes architecture.
+
 Push locally:
 
 ```bash

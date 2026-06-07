@@ -14,6 +14,13 @@ pub enum LobbyEvent {
     LobbyStateChanged(LobbyView),
     /// Lobby chat message should be broadcast to subscribers.
     ChatMessage(LobbyChatMessageView),
+    /// Lobby closed intentionally on the server side.
+    LobbyClosed {
+        /// Final serializable lobby state.
+        lobby: LobbyView,
+        /// Safe close reason.
+        reason: String,
+    },
     /// Private ROM upload grant for one lobby socket.
     RomTransferUploadGranted {
         /// Sender lobby socket.

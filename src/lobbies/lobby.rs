@@ -5,9 +5,9 @@
 
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
-    LobbyClientCapabilities, LobbyError, LobbyGameCandidate, LobbyGameLaunchView,
-    LobbyGameReadinessStatus, LobbyGameReadinessView, LobbyGameSelectionView, LobbyPlayerRole,
-    LobbyPlayerSlot, LobbyPlayerStatus, LobbyServerCapabilities, LobbyView,
+    LobbyActivityKind, LobbyClientCapabilities, LobbyError, LobbyGameCandidate,
+    LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView, LobbyGameSelectionView,
+    LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerStatus, LobbyServerCapabilities, LobbyView,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, ResumeTokenHash, RoomId, RoomVoiceState,
@@ -41,6 +41,7 @@ pub struct Lobby {
     lobby_epoch: u64,
     created_at_ms: u128,
     updated_at_ms: u128,
+    last_meaningful_activity_at_ms: u128,
     status: LobbyStatus,
     players: Vec<LobbyPlayerSlot>,
     selected_game: Option<LobbyGameSelectionView>,
@@ -88,6 +89,7 @@ impl Lobby {
             lobby_epoch: 1,
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
+            last_meaningful_activity_at_ms: now_ms,
             status,
             players,
             selected_game,
@@ -127,7 +129,7 @@ impl Lobby {
                 resume_token_hash,
                 now_ms,
             );
-            self.bump(now_ms);
+            self.bump_with_activity(now_ms);
             return Ok(player_index);
         }
 
@@ -144,7 +146,7 @@ impl Lobby {
             resume_token_hash,
             now_ms,
         );
-        self.bump(now_ms);
+        self.bump_with_activity(now_ms);
 
         Ok(player_index)
     }
@@ -186,7 +188,7 @@ impl Lobby {
             hash_resume_token(resume_token),
             now_ms,
         );
-        self.bump(now_ms);
+        self.bump_with_activity(now_ms);
 
         Ok(player_index)
     }
@@ -233,7 +235,7 @@ impl Lobby {
         } else {
             LobbyStatus::Open
         };
-        self.bump(now_ms);
+        self.bump_with_activity(now_ms);
 
         Ok(())
     }
@@ -259,7 +261,7 @@ impl Lobby {
         self.game_readiness.clear();
         self.pending_launch = None;
         self.status = LobbyStatus::GameSelected;
-        self.bump(now_ms);
+        self.bump_with_activity(now_ms);
 
         Ok(proposal)
     }
@@ -289,7 +291,7 @@ impl Lobby {
         }
         self.pending_launch = None;
         self.status = LobbyStatus::GameSelected;
-        self.bump(now_ms);
+        self.bump_with_activity(now_ms);
 
         Ok(readiness)
     }
@@ -316,7 +318,7 @@ impl Lobby {
         let launch = LobbyGameLaunchView::new(proposal_id, player_index, now_ms);
         self.pending_launch = Some(launch.clone());
         self.status = LobbyStatus::InGame;
-        self.bump(now_ms);
+        self.bump_with_activity(now_ms);
 
         Ok(launch)
     }
@@ -348,7 +350,7 @@ impl Lobby {
         launch.publish_room(room_invite_code.display(), now_ms);
         let launch = launch.clone();
         self.status = LobbyStatus::InGame;
-        self.bump(now_ms);
+        self.bump_with_activity(now_ms);
 
         Ok(launch)
     }
@@ -374,7 +376,7 @@ impl Lobby {
         } else {
             LobbyStatus::Open
         };
-        self.bump(now_ms);
+        self.bump_with_activity(now_ms);
 
         Ok(())
     }
@@ -396,6 +398,19 @@ impl Lobby {
         self.lobby_epoch
     }
 
+    /// Records transport-confirmed activity that should retain this lobby.
+    pub fn record_activity(
+        &mut self,
+        connection_id: ConnectionId,
+        _kind: LobbyActivityKind,
+        now_ms: u128,
+    ) -> Result<(), LobbyError> {
+        self.player_index_for_connection(connection_id)?;
+        self.mark_meaningful_activity(now_ms);
+
+        Ok(())
+    }
+
     /// Returns this lobby's stable id.
     pub(super) fn lobby_id(&self) -> RoomId {
         self.lobby_id
@@ -409,6 +424,34 @@ impl Lobby {
     /// Returns this lobby's lifecycle status.
     pub(super) fn status(&self) -> LobbyStatus {
         self.status
+    }
+
+    /// Returns the timestamp used by idle cleanup.
+    pub(super) fn last_meaningful_activity_at_ms(&self) -> u128 {
+        self.last_meaningful_activity_at_ms
+    }
+
+    /// Returns whether this lobby exceeded the meaningful-activity idle window.
+    pub(super) fn is_meaningfully_idle(
+        &self,
+        now_ms: u128,
+        idle_timeout: std::time::Duration,
+    ) -> bool {
+        if self.status == LobbyStatus::Closed {
+            return false;
+        }
+
+        now_ms.saturating_sub(self.last_meaningful_activity_at_ms) >= idle_timeout.as_millis()
+    }
+
+    /// Closes the lobby for idle cleanup.
+    pub(super) fn close_due_to_idle(&mut self, now_ms: u128) -> bool {
+        if self.status == LobbyStatus::Closed {
+            return false;
+        }
+
+        self.close(now_ms);
+        true
     }
 
     /// Returns the current selected game proposal, if any.
@@ -425,6 +468,7 @@ impl Lobby {
             invite_code: self.invite_code.display(),
             created_at_ms: self.created_at_ms,
             updated_at_ms: self.updated_at_ms,
+            last_meaningful_activity_at_ms: self.last_meaningful_activity_at_ms,
             status: self.status,
             capabilities,
             players: self.players.iter().map(LobbyPlayerSlot::view).collect(),
@@ -439,6 +483,15 @@ impl Lobby {
         self.event_seq += 1;
         self.lobby_epoch += 1;
         self.updated_at_ms = now_ms;
+    }
+
+    fn bump_with_activity(&mut self, now_ms: u128) {
+        self.bump(now_ms);
+        self.mark_meaningful_activity(now_ms);
+    }
+
+    pub(super) fn mark_meaningful_activity(&mut self, now_ms: u128) {
+        self.last_meaningful_activity_at_ms = now_ms;
     }
 
     fn close(&mut self, now_ms: u128) {

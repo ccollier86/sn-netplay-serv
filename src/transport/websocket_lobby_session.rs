@@ -407,6 +407,21 @@ async fn handle_lobby_message(
                 Err(error) => send_lobby_error(sender, error).await,
             }
         }
+        LobbyClientMessage::ReportActivity { lobby_epoch, kind } => {
+            apply_lobby_result(
+                sender,
+                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
+            )
+            .await?;
+            apply_lobby_result(
+                sender,
+                services
+                    .lobbies
+                    .record_lobby_activity(invite_code.clone(), connection_id, kind)
+                    .await,
+            )
+            .await
+        }
         LobbyClientMessage::Leave {
             lobby_epoch,
             reason,
@@ -466,6 +481,19 @@ async fn handle_lobby_event(
             lobby,
         },
         Ok(LobbyEvent::ChatMessage(message)) => LobbyServerMessage::ChatMessage { message },
+        Ok(LobbyEvent::LobbyClosed { lobby, reason }) => {
+            let event_seq = lobby.event_seq;
+            let lobby_epoch = lobby.lobby_epoch;
+            let message = LobbyServerMessage::LobbyClosed {
+                event_seq,
+                lobby_epoch,
+                reason,
+                lobby,
+            };
+
+            let _ = send_lobby_server_message(sender, &message).await;
+            return false;
+        }
         Ok(LobbyEvent::RomTransferUploadGranted {
             source,
             lobby_epoch,
