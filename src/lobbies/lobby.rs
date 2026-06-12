@@ -13,7 +13,7 @@ use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, ResumeTokenHash, RoomId, RoomVoiceState,
     hash_resume_token,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Maximum supported lobby size while game sessions remain focused on MVP rooms.
 pub const MAX_LOBBY_PLAYERS: u8 = 4;
@@ -32,6 +32,17 @@ pub enum LobbyStatus {
     Closed,
 }
 
+/// Whether a lobby can appear in public discovery.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LobbyVisibility {
+    /// Lobby can only be joined through its invite code.
+    #[default]
+    Private,
+    /// Lobby can be listed for other signed-in desktop clients.
+    Public,
+}
+
 /// Mutable lobby state.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Lobby {
@@ -43,6 +54,7 @@ pub struct Lobby {
     updated_at_ms: u128,
     last_meaningful_activity_at_ms: u128,
     status: LobbyStatus,
+    visibility: LobbyVisibility,
     players: Vec<LobbyPlayerSlot>,
     selected_game: Option<LobbyGameSelectionView>,
     game_readiness: Vec<LobbyGameReadinessView>,
@@ -60,6 +72,7 @@ impl Lobby {
         host_capabilities: LobbyClientCapabilities,
         host_resume_token_hash: ResumeTokenHash,
         initial_game: Option<LobbyGameCandidate>,
+        visibility: LobbyVisibility,
         now_ms: u128,
     ) -> Self {
         let mut players = (0..MAX_LOBBY_PLAYERS)
@@ -91,6 +104,7 @@ impl Lobby {
             updated_at_ms: now_ms,
             last_meaningful_activity_at_ms: now_ms,
             status,
+            visibility,
             players,
             selected_game,
             game_readiness: Vec::new(),
@@ -470,6 +484,7 @@ impl Lobby {
             updated_at_ms: self.updated_at_ms,
             last_meaningful_activity_at_ms: self.last_meaningful_activity_at_ms,
             status: self.status,
+            visibility: self.visibility,
             capabilities,
             players: self.players.iter().map(LobbyPlayerSlot::view).collect(),
             selected_game: self.selected_game.clone(),

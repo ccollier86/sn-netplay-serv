@@ -9,7 +9,7 @@ use crate::http::errors::HttpError;
 use crate::http::services::AppServices;
 use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, LobbyClientCapabilities, LobbyJoin, LobbyView,
-    MAX_LOBBY_PLAYERS,
+    MAX_LOBBY_PLAYERS, PublicLobbySummary,
 };
 use crate::protocol::validate_client_protocol_version;
 use crate::rate_limit::RateLimitAction;
@@ -108,6 +108,33 @@ pub async fn lobby_status(
     let lobby = services.lobbies.lobby_view(invite_code).await?;
 
     Ok(Json(LobbyStatusResponse { lobby }))
+}
+
+/// Returns public lobby summaries for signed-in desktop clients.
+pub async fn public_lobbies(
+    State(services): State<AppServices>,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Result<Json<PublicLobbyListResponse>, HttpError> {
+    enforce_rate_limit(&services, RateLimitAction::RoomStatus, &headers)?;
+    let path_and_query = uri
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or(uri.path());
+    let auth = client_auth_proof(&headers, "GET", path_and_query, &[])?;
+
+    if let Err(error) = services
+        .license_authority
+        .verify_client_access(auth, NETPLAY_FEATURE)
+        .await
+    {
+        services.metrics.record_auth_rejected();
+        return Err(error.into());
+    }
+
+    Ok(Json(PublicLobbyListResponse {
+        lobbies: services.lobbies.public_lobbies().await,
+    }))
 }
 
 /// Upgrades an authenticated ShadowBoy client into a lobby WebSocket.
@@ -224,6 +251,14 @@ impl From<LobbyJoin> for LobbySessionResponse {
 pub struct LobbyStatusResponse {
     /// Current lobby view.
     pub lobby: LobbyView,
+}
+
+/// Public lobby list response.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicLobbyListResponse {
+    /// Current public lobbies, newest first.
+    pub lobbies: Vec<PublicLobbySummary>,
 }
 
 /// Create-lobby request body supplied by Desktop.

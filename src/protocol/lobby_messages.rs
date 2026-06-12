@@ -186,7 +186,7 @@ pub enum LobbyServerMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lobbies::{LobbyServerCapabilities, LobbyStatus};
+    use crate::lobbies::{LobbyServerCapabilities, LobbyStatus, LobbyVisibility};
     use crate::rooms::RoomId;
     use serde_json::json;
 
@@ -225,6 +225,7 @@ mod tests {
                 updated_at_ms: 2,
                 last_meaningful_activity_at_ms: 2,
                 status: LobbyStatus::Open,
+                visibility: LobbyVisibility::Private,
                 capabilities: LobbyServerCapabilities::current(4, true, true),
                 players: Vec::new(),
                 selected_game: None,

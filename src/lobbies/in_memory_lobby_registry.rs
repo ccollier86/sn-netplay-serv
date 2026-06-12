@@ -9,7 +9,7 @@ use crate::lobbies::{
     LobbyDebugEvent, LobbyDebugEventLog, LobbyDebugEventSink, LobbyError, LobbyEventReceiver,
     LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyRegistry, LobbyRegistrySnapshot,
     LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyView,
-    MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink, StoredLobby,
+    MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink, PublicLobbySummary, StoredLobby,
 };
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::{
@@ -185,6 +185,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             params.capabilities.clone(),
             resume_token.hash(),
             params.initial_game,
+            params.visibility,
             crate::rooms::current_timestamp_ms(),
         );
         if let Some(voice) = self
@@ -679,6 +680,20 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             active_lobby_count: lobbies.len(),
             lobbies,
         }
+    }
+
+    async fn public_lobbies(&self) -> Vec<PublicLobbySummary> {
+        let mut lobbies = self
+            .lobbies
+            .read()
+            .await
+            .values()
+            .filter_map(|lobby| lobby.view().public_summary())
+            .collect::<Vec<_>>();
+
+        lobbies.sort_by(|left, right| right.created_at_ms.cmp(&left.created_at_ms));
+
+        lobbies
     }
 
     async fn lobby_events(

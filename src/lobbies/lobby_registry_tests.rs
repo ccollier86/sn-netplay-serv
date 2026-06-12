@@ -5,7 +5,7 @@ use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyActivityKind,
     LobbyClientCapabilities, LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus,
     LobbyPlayerRole, LobbyPlayerStatus, LobbyRegistry, LobbyServerCapabilities, LobbyStatus,
-    MAX_LOBBY_PLAYERS,
+    LobbyVisibility, MAX_LOBBY_PLAYERS,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, ResumeToken, ResumeTokenGenerator,
@@ -53,6 +53,56 @@ async fn join_lobby_assigns_players_by_join_order() {
     assert_eq!(player_two.lobby.players[1].color, "violet");
     assert_eq!(player_three.player_index.zero_based(), 2);
     assert_eq!(player_three.lobby.players[2].color, "amber");
+}
+
+#[tokio::test]
+async fn public_lobbies_only_include_public_joinable_lobbies() {
+    let registry = registry();
+
+    registry
+        .create_lobby(license("private-host"), create_params())
+        .await
+        .expect("private created");
+    assert!(registry.public_lobbies().await.is_empty());
+
+    let host_join = registry
+        .create_lobby(license("public-host"), create_public_params())
+        .await
+        .expect("public created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let public_lobbies = registry.public_lobbies().await;
+
+    assert_eq!(public_lobbies.len(), 1);
+    assert_eq!(public_lobbies[0].visibility, LobbyVisibility::Public);
+    assert_eq!(public_lobbies[0].hosted_by, "Host");
+    assert_eq!(public_lobbies[0].player_count, 1);
+    assert_eq!(public_lobbies[0].open_slots, 1);
+    assert_eq!(
+        public_lobbies[0]
+            .selected_game
+            .as_ref()
+            .expect("selected")
+            .title,
+        "Starlight Ruins"
+    );
+
+    let guest_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_params(),
+            guest_connection,
+        )
+        .await
+        .expect("guest connected");
+    assert!(registry.public_lobbies().await.is_empty());
+
+    registry
+        .leave_lobby(invite, guest_connection)
+        .await
+        .expect("guest left");
+    assert_eq!(registry.public_lobbies().await.len(), 1);
 }
 
 #[tokio::test]
@@ -639,6 +689,17 @@ fn create_params() -> CreateLobbyParams {
         capabilities: LobbyClientCapabilities::desktop_default(),
         initial_game: None,
         voice: None,
+        visibility: LobbyVisibility::Private,
+    }
+}
+
+fn create_public_params() -> CreateLobbyParams {
+    CreateLobbyParams {
+        display_name: Some("Host".to_string()),
+        capabilities: LobbyClientCapabilities::desktop_default(),
+        initial_game: Some(game_candidate()),
+        voice: None,
+        visibility: LobbyVisibility::Public,
     }
 }
 

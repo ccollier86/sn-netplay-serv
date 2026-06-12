@@ -215,6 +215,81 @@ async fn create_lobby_returns_invite_player_slot_and_initial_game() {
         value["lobby"]["selectedGame"]["game"]["title"],
         "Starlight Ruins"
     );
+    assert_eq!(value["lobby"]["visibility"], "private");
+}
+
+#[tokio::test]
+async fn public_lobbies_require_auth_and_return_safe_summaries() {
+    let app = app();
+    let unauthorized = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/lobbies/public")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/lobbies")
+                .header("authorization", "Bearer valid")
+                .header("x-install-id", "host-install")
+                .body(Body::from(create_public_lobby_body()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(create_response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/lobbies/public")
+                .header("authorization", "Bearer valid")
+                .header("x-install-id", "browser-install")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let value = serde_json::from_slice::<Value>(&body).expect("json");
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["lobbies"].as_array().expect("lobbies").len(), 1);
+    assert_eq!(value["lobbies"][0]["inviteCode"], "AB23-CD");
+    assert_eq!(value["lobbies"][0]["visibility"], "public");
+    assert_eq!(value["lobbies"][0]["status"], "gameSelected");
+    assert_eq!(value["lobbies"][0]["hostedBy"], "Host");
+    assert_eq!(value["lobbies"][0]["playerCount"], 1);
+    assert_eq!(value["lobbies"][0]["maxPlayers"], 2);
+    assert_eq!(value["lobbies"][0]["openSlots"], 1);
+    assert_eq!(
+        value["lobbies"][0]["selectedGame"]["title"],
+        "Starlight Ruins"
+    );
+    assert!(
+        value["lobbies"][0]["selectedGame"]
+            .get("contentSha256")
+            .is_none()
+    );
+    assert!(
+        value["lobbies"][0]["selectedGame"]
+            .get("romSizeBytes")
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -550,6 +625,14 @@ fn create_lobby_body() -> String {
         }
     })
     .to_string()
+}
+
+fn create_public_lobby_body() -> String {
+    let mut value = serde_json::from_str::<Value>(&create_lobby_body()).expect("lobby body");
+
+    value["visibility"] = json!("public");
+
+    value.to_string()
 }
 
 fn join_lobby_body() -> String {

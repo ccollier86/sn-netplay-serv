@@ -1,7 +1,8 @@
 use crate::auth::{ClientKind, VerifiedLicense};
 use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyClientCapabilities, LobbyEvent,
-    LobbyRegistry, LobbyRomRelayLimits, LobbyServerCapabilities, MAX_LOBBY_PLAYERS,
+    LobbyRegistry, LobbyRomRelayLimits, LobbyServerCapabilities, LobbyVisibility,
+    MAX_LOBBY_PLAYERS,
 };
 use crate::protocol::{LobbyFileRelayGrant, LobbyFileRelayGrantPair, LobbyFileRelayGrantRole};
 use crate::rooms::{
@@ -95,6 +96,7 @@ fn create_params() -> CreateLobbyParams {
             start_state_label: None,
         }),
         voice: None,
+        visibility: LobbyVisibility::Private,
     }
 }
 

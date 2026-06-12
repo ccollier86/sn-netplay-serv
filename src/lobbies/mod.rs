@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 pub use errors::LobbyError;
 pub use in_memory_lobby_registry::InMemoryLobbyRegistry;
-pub use lobby::{Lobby, LobbyStatus, MAX_LOBBY_PLAYERS};
+pub use lobby::{Lobby, LobbyStatus, LobbyVisibility, MAX_LOBBY_PLAYERS};
 pub use lobby_activity::LobbyActivityKind;
 pub use lobby_capabilities::{LobbyClientCapabilities, LobbyServerCapabilities};
 pub use lobby_chat::LobbyChatMessageView;
@@ -46,7 +46,7 @@ pub use lobby_launch::{
 pub use lobby_player::{LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerSlotView, LobbyPlayerStatus};
 pub use lobby_registry_trait::{LobbyEventReceiver, LobbyRegistry};
 pub use lobby_rom_relay::{LobbyRomRelayLimits, LobbyRomRelayTransferIntent};
-pub use lobby_view::LobbyView;
+pub use lobby_view::{LobbyView, PublicLobbySummary};
 pub(crate) use stored_lobby::StoredLobby;
 
 /// Parameters used to create a lobby.
@@ -65,6 +65,9 @@ pub struct CreateLobbyParams {
     /// Optional lobby-scoped voice request.
     #[serde(default)]
     pub voice: Option<NetplayVoiceDescriptor>,
+    /// Discovery visibility for this lobby.
+    #[serde(default)]
+    pub visibility: LobbyVisibility,
 }
 
 /// Parameters used by a player joining a lobby.

@@ -6,7 +6,7 @@
 use crate::auth::{ClientKind, VerifiedLicense};
 use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyClientCapabilities,
-    LobbyRegistry, LobbyServerCapabilities, MAX_LOBBY_PLAYERS,
+    LobbyRegistry, LobbyServerCapabilities, LobbyVisibility, MAX_LOBBY_PLAYERS,
 };
 use crate::protocol::{NetplayVoiceDescriptor, NetplayVoiceMode};
 use crate::rooms::{
@@ -187,6 +187,7 @@ fn create_params_with_voice() -> CreateLobbyParams {
             enabled: true,
             mode: NetplayVoiceMode::VoiceActivation,
         }),
+        visibility: LobbyVisibility::Private,
     }
 }
 

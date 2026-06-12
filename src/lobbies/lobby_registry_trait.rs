@@ -8,7 +8,7 @@ use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, LobbyActivityKind, LobbyChatMessageView, LobbyDebugEvent,
     LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin,
     LobbyRegistrySnapshot, LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyView,
-    LobbyVoiceTokenRefresh,
+    LobbyVoiceTokenRefresh, PublicLobbySummary,
 };
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
@@ -165,6 +165,9 @@ pub trait LobbyRegistry: Send + Sync {
 
     /// Returns all active lobby views retained by this relay process.
     async fn snapshot(&self) -> LobbyRegistrySnapshot;
+
+    /// Returns public lobby summaries safe for lobby browsing.
+    async fn public_lobbies(&self) -> Vec<PublicLobbySummary>;
 
     /// Returns sanitized event history for one active lobby.
     async fn lobby_events(
