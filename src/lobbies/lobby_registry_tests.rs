@@ -5,7 +5,7 @@ use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyActivityKind,
     LobbyClientCapabilities, LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus,
     LobbyPlayerRole, LobbyPlayerStatus, LobbyRegistry, LobbyServerCapabilities, LobbyStatus,
-    LobbyVisibility, MAX_LOBBY_PLAYERS,
+    LobbyVisibility, MAX_LOBBY_PLAYERS, PublicLobbyEventReceiver,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, ResumeToken, ResumeTokenGenerator,
@@ -103,6 +103,37 @@ async fn public_lobbies_only_include_public_joinable_lobbies() {
         .await
         .expect("guest left");
     assert_eq!(registry.public_lobbies().await.len(), 1);
+}
+
+#[tokio::test]
+async fn public_lobby_directory_emits_when_joinable_set_changes() {
+    let registry = registry();
+    let mut public_events = registry.subscribe_public_lobbies().await;
+
+    let host_join = registry
+        .create_lobby(license("public-host"), create_public_params())
+        .await
+        .expect("public created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    expect_public_lobby_event(&mut public_events).await;
+
+    let guest_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_params(),
+            guest_connection,
+        )
+        .await
+        .expect("guest connected");
+    expect_public_lobby_event(&mut public_events).await;
+
+    registry
+        .leave_lobby(invite, guest_connection)
+        .await
+        .expect("guest left");
+    expect_public_lobby_event(&mut public_events).await;
 }
 
 #[tokio::test]
@@ -681,6 +712,13 @@ fn registry() -> InMemoryLobbyRegistry {
         Arc::new(SequenceInviteCodeGenerator::default()),
         Arc::new(SequenceResumeTokenGenerator::default()),
     )
+}
+
+async fn expect_public_lobby_event(receiver: &mut PublicLobbyEventReceiver) {
+    timeout(Duration::from_secs(1), receiver.recv())
+        .await
+        .expect("public lobby event timed out")
+        .expect("public lobby event channel open");
 }
 
 fn create_params() -> CreateLobbyParams {

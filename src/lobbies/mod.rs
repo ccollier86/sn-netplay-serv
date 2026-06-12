@@ -44,7 +44,7 @@ pub use lobby_launch::{
     LobbyGameLaunchStatus, LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView,
 };
 pub use lobby_player::{LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerSlotView, LobbyPlayerStatus};
-pub use lobby_registry_trait::{LobbyEventReceiver, LobbyRegistry};
+pub use lobby_registry_trait::{LobbyEventReceiver, LobbyRegistry, PublicLobbyEventReceiver};
 pub use lobby_rom_relay::{LobbyRomRelayLimits, LobbyRomRelayTransferIntent};
 pub use lobby_view::{LobbyView, PublicLobbySummary};
 pub(crate) use stored_lobby::StoredLobby;

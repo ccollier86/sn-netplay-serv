@@ -8,6 +8,7 @@ use crate::http::client_identity::request_rate_limit_key;
 use crate::http::errors::HttpError;
 use crate::http::lobby_routes::{
     LobbyStatusResponse, create_lobby, join_lobby, lobby_status, public_lobbies, websocket_lobby,
+    websocket_public_lobbies,
 };
 use crate::http::services::AppServices;
 use crate::limits::{
@@ -47,6 +48,7 @@ pub fn build_router(services: AppServices) -> Router {
         .route("/v1/rooms/{invite_code}/status", get(room_status))
         .route("/v1/lobbies", post(create_lobby))
         .route("/v1/lobbies/public", get(public_lobbies))
+        .route("/v1/lobbies/public/ws", get(websocket_public_lobbies))
         .route("/v1/lobbies/{invite_code}/join", post(join_lobby))
         .route("/v1/lobbies/{invite_code}/status", get(lobby_status))
         .route("/v1/lobbies/ws", get(websocket_lobby))

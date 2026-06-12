@@ -9,7 +9,8 @@ use crate::lobbies::{
     LobbyDebugEvent, LobbyDebugEventLog, LobbyDebugEventSink, LobbyError, LobbyEventReceiver,
     LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyRegistry, LobbyRegistrySnapshot,
     LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyView,
-    MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink, PublicLobbySummary, StoredLobby,
+    MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink, PublicLobbyEventReceiver, PublicLobbySummary,
+    StoredLobby,
 };
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::{
@@ -20,7 +21,15 @@ use crate::voice::{DisabledVoiceBroker, VoiceBroker};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, broadcast};
+
+const PUBLIC_LOBBY_EVENT_CHANNEL_CAPACITY: usize = 256;
+
+fn public_lobby_event_sender() -> broadcast::Sender<()> {
+    let (sender, _) = broadcast::channel(PUBLIC_LOBBY_EVENT_CHANNEL_CAPACITY);
+
+    sender
+}
 
 /// Thread-safe in-memory lobby registry.
 pub struct InMemoryLobbyRegistry {
@@ -31,6 +40,7 @@ pub struct InMemoryLobbyRegistry {
     recent_events: Mutex<LobbyDebugEventLog>,
     event_sink: Arc<dyn LobbyDebugEventSink>,
     pub(super) voice_broker: Arc<dyn VoiceBroker>,
+    public_lobby_events: broadcast::Sender<()>,
 }
 
 impl InMemoryLobbyRegistry {
@@ -44,6 +54,7 @@ impl InMemoryLobbyRegistry {
             recent_events: Mutex::new(LobbyDebugEventLog::default()),
             event_sink: Arc::new(NoopLobbyDebugEventSink),
             voice_broker: Arc::new(DisabledVoiceBroker),
+            public_lobby_events: public_lobby_event_sender(),
         }
     }
 
@@ -60,6 +71,7 @@ impl InMemoryLobbyRegistry {
             recent_events: Mutex::new(LobbyDebugEventLog::default()),
             event_sink: Arc::new(NoopLobbyDebugEventSink),
             voice_broker: Arc::new(DisabledVoiceBroker),
+            public_lobby_events: public_lobby_event_sender(),
         }
     }
 
@@ -77,6 +89,7 @@ impl InMemoryLobbyRegistry {
             recent_events: Mutex::new(LobbyDebugEventLog::default()),
             event_sink: Arc::new(NoopLobbyDebugEventSink),
             voice_broker: Arc::new(DisabledVoiceBroker),
+            public_lobby_events: public_lobby_event_sender(),
         }
     }
 
@@ -112,7 +125,12 @@ impl InMemoryLobbyRegistry {
             recent_events: Mutex::new(LobbyDebugEventLog::default()),
             event_sink,
             voice_broker,
+            public_lobby_events: public_lobby_event_sender(),
         }
+    }
+
+    fn emit_public_lobbies_changed(&self) {
+        let _ = self.public_lobby_events.send(());
     }
 
     fn record_lobby_event(&self, lobby: &mut StoredLobby, kind: &str, detail: String) {
@@ -159,6 +177,10 @@ impl InMemoryLobbyRegistry {
             lobbies.remove(key);
         }
         drop(lobbies);
+
+        if !expired_keys.is_empty() {
+            self.emit_public_lobbies_changed();
+        }
 
         for voice_room_id in voice_cleanup {
             self.cleanup_lobby_voice_room(voice_room_id, "lobby-idle-expired");
@@ -208,6 +230,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             .write()
             .await
             .insert(invite_code.normalized().to_string(), stored_lobby);
+        self.emit_public_lobbies_changed();
 
         Ok(LobbyJoin {
             lobby: lobby_view,
@@ -242,6 +265,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             "lobbyJoined",
             player_detail("player joined lobby", player_index),
         );
+        self.emit_public_lobbies_changed();
 
         Ok(LobbyJoin {
             lobby: lobby.view(),
@@ -277,6 +301,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             "lobbySocketConnected",
             player_detail("lobby socket connected", player_index),
         );
+        self.emit_public_lobbies_changed();
 
         Ok(LobbyJoin {
             lobby: lobby.view(),
@@ -316,6 +341,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             "lobbyPlayerReconnected",
             player_detail("lobby player reconnected", player_index),
         );
+        self.emit_public_lobbies_changed();
 
         Ok(LobbyJoin {
             lobby: lobby.view(),
@@ -342,6 +368,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             lobby.emit_state_changed();
             let detail = "lobby socket disconnected".to_string();
             self.record_lobby_event(lobby, "lobbySocketDisconnected", detail);
+            self.emit_public_lobbies_changed();
         }
 
         Ok(lobby.view())
@@ -373,6 +400,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         };
         self.record_lobby_event(lobby, "lobbyPlayerLeft", detail);
         self.cleanup_lobby_voice_room(voice_cleanup, "lobby-left");
+        self.emit_public_lobbies_changed();
 
         Ok(lobby.view())
     }
@@ -404,6 +432,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             .select_game(connection_id, game, crate::rooms::current_timestamp_ms())?;
         lobby.emit_state_changed();
         self.record_lobby_event(lobby, "lobbyGameSelected", "host selected game".to_string());
+        self.emit_public_lobbies_changed();
 
         Ok(lobby.view())
     }
@@ -458,6 +487,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             "lobbyLaunchRequested",
             "host requested game launch".to_string(),
         );
+        self.emit_public_lobbies_changed();
 
         Ok(lobby.view())
     }
@@ -554,6 +584,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             "lobbyGameRoomPublished",
             "gameplay room published to lobby".to_string(),
         );
+        self.emit_public_lobbies_changed();
 
         Ok(lobby.view())
     }
@@ -579,6 +610,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             "lobbyReturned",
             "lobby returned from game".to_string(),
         );
+        self.emit_public_lobbies_changed();
 
         Ok(lobby.view())
     }
@@ -694,6 +726,10 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         lobbies.sort_by(|left, right| right.created_at_ms.cmp(&left.created_at_ms));
 
         lobbies
+    }
+
+    async fn subscribe_public_lobbies(&self) -> PublicLobbyEventReceiver {
+        self.public_lobby_events.subscribe()
     }
 
     async fn lobby_events(

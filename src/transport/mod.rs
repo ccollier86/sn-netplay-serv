@@ -11,6 +11,7 @@ mod websocket_lobby_session;
 mod websocket_message_handler;
 mod websocket_outbound;
 mod websocket_peer_close;
+mod websocket_public_lobbies_session;
 mod websocket_rom_relay_handler;
 mod websocket_session;
 mod websocket_snapshot_file_relay_handler;
@@ -21,4 +22,5 @@ pub use websocket_join::{
     WebSocketInputJoinRequest, WebSocketJoinRequest, WebSocketJoinRole, WebSocketLobbyJoinRequest,
 };
 pub use websocket_lobby_session::handle_websocket_lobby_session;
+pub use websocket_public_lobbies_session::handle_public_lobbies_websocket_session;
 pub use websocket_session::handle_websocket_session;

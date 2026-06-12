@@ -17,6 +17,9 @@ use tokio::sync::broadcast;
 /// Receiver for lobby domain events.
 pub type LobbyEventReceiver = broadcast::Receiver<LobbyEvent>;
 
+/// Receiver for public lobby directory change notifications.
+pub type PublicLobbyEventReceiver = broadcast::Receiver<()>;
+
 /// Lobby storage behavior used by HTTP and future WebSocket transports.
 #[async_trait::async_trait]
 pub trait LobbyRegistry: Send + Sync {
@@ -168,6 +171,9 @@ pub trait LobbyRegistry: Send + Sync {
 
     /// Returns public lobby summaries safe for lobby browsing.
     async fn public_lobbies(&self) -> Vec<PublicLobbySummary>;
+
+    /// Subscribes to public lobby directory changes.
+    async fn subscribe_public_lobbies(&self) -> PublicLobbyEventReceiver;
 
     /// Returns sanitized event history for one active lobby.
     async fn lobby_events(

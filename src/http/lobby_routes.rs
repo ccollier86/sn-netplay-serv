@@ -15,7 +15,10 @@ use crate::protocol::validate_client_protocol_version;
 use crate::rate_limit::RateLimitAction;
 use crate::rooms::PlayerVoiceJoinGrant;
 use crate::rooms::{InviteCode, PlayerIndex};
-use crate::transport::{WebSocketLobbyJoinRequest, handle_websocket_lobby_session};
+use crate::transport::{
+    WebSocketLobbyJoinRequest, handle_public_lobbies_websocket_session,
+    handle_websocket_lobby_session,
+};
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::ws::WebSocketUpgrade;
@@ -135,6 +138,35 @@ pub async fn public_lobbies(
     Ok(Json(PublicLobbyListResponse {
         lobbies: services.lobbies.public_lobbies().await,
     }))
+}
+
+/// Upgrades an authenticated ShadowBoy client into the public lobby directory.
+pub async fn websocket_public_lobbies(
+    websocket: WebSocketUpgrade,
+    State(services): State<AppServices>,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Result<Response, HttpError> {
+    enforce_rate_limit(&services, RateLimitAction::WebSocketJoin, &headers)?;
+    let path_and_query = uri
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or(uri.path());
+    let auth = client_auth_proof(&headers, "GET", path_and_query, &[])?;
+
+    if let Err(error) = services
+        .license_authority
+        .verify_client_access(auth, NETPLAY_FEATURE)
+        .await
+    {
+        services.metrics.record_auth_rejected();
+        return Err(error.into());
+    }
+
+    Ok(websocket
+        .max_message_size(crate::limits::MAX_WEBSOCKET_MESSAGE_BYTES)
+        .max_frame_size(crate::limits::MAX_WEBSOCKET_FRAME_BYTES)
+        .on_upgrade(move |socket| handle_public_lobbies_websocket_session(socket, services)))
 }
 
 /// Upgrades an authenticated ShadowBoy client into a lobby WebSocket.
