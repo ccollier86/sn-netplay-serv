@@ -5,7 +5,7 @@ use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyActivityKind,
     LobbyClientCapabilities, LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus,
     LobbyPlayerRole, LobbyPlayerStatus, LobbyRegistry, LobbyServerCapabilities, LobbyStatus,
-    LobbyVisibility, MAX_LOBBY_PLAYERS, PublicLobbyEventReceiver,
+    LobbyVisibility, MAX_LOBBY_PLAYERS, PublicLobbyEventReceiver, ReconnectLobbyPlayerRequest,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, ResumeToken, ResumeTokenGenerator,
@@ -185,15 +185,15 @@ async fn reconnect_reclaims_slot_with_prior_epoch_and_matching_identity() {
         .expect("disconnected");
 
     let reconnected = registry
-        .reconnect_lobby_player(
-            invite,
-            license("guest"),
-            join_params(),
-            joined.player_index,
-            observed_epoch_before_disconnect,
-            joined.resume_token,
-            ConnectionId::new(),
-        )
+        .reconnect_lobby_player(ReconnectLobbyPlayerRequest {
+            invite_code: invite,
+            player: license("guest"),
+            params: join_params(),
+            player_index: joined.player_index,
+            lobby_epoch: observed_epoch_before_disconnect,
+            resume_token: joined.resume_token,
+            connection_id: ConnectionId::new(),
+        })
         .await
         .expect("reconnected");
 
@@ -224,15 +224,15 @@ async fn reconnect_rejects_valid_token_from_different_identity() {
         .expect("joined");
 
     let error = registry
-        .reconnect_lobby_player(
-            invite,
-            license("attacker"),
-            join_params(),
-            joined.player_index,
-            joined.lobby.lobby_epoch,
-            joined.resume_token,
-            ConnectionId::new(),
-        )
+        .reconnect_lobby_player(ReconnectLobbyPlayerRequest {
+            invite_code: invite,
+            player: license("attacker"),
+            params: join_params(),
+            player_index: joined.player_index,
+            lobby_epoch: joined.lobby.lobby_epoch,
+            resume_token: joined.resume_token,
+            connection_id: ConnectionId::new(),
+        })
         .await
         .expect_err("identity mismatch");
 

@@ -26,6 +26,8 @@ mod query_ops;
 mod relay_ops;
 #[path = "room_registry_rom_relay_ops.rs"]
 mod rom_relay_ops;
+#[path = "room_registry_start_sync_ops.rs"]
+mod start_sync_ops;
 #[path = "room_registry_sync_ops.rs"]
 mod sync_ops;
 #[path = "room_registry_trait_impl.rs"]
@@ -39,6 +41,7 @@ pub struct InMemoryRoomRegistry {
     invite_code_generator: Arc<dyn InviteCodeGenerator>,
     resume_token_generator: Arc<dyn ResumeTokenGenerator>,
     clock: Arc<dyn Clock>,
+    time_origin: Instant,
     recovery_config: RoomRecoveryConfig,
     recent_events: Mutex<RoomDebugEventLog>,
     event_sink: Arc<dyn RoomDebugEventSink>,
@@ -103,6 +106,7 @@ impl InMemoryRoomRegistry {
             invite_codes: RwLock::new(HashMap::new()),
             invite_code_generator,
             resume_token_generator,
+            time_origin: clock.now(),
             clock,
             recovery_config,
             recent_events: Mutex::new(RoomDebugEventLog::default()),
@@ -126,6 +130,18 @@ impl InMemoryRoomRegistry {
         self.event_sink.record_performance_sample(sample);
     }
 
+    /// Returns monotonic milliseconds since this registry started.
+    pub fn server_time_ms(&self) -> u64 {
+        self.server_time_ms_at(self.clock.now())
+    }
+
+    pub(super) fn server_time_ms_at(&self, now: Instant) -> u64 {
+        now.saturating_duration_since(self.time_origin)
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX)
+    }
+
     /// Removes rooms still waiting for a guest after `join_timeout`.
     pub async fn remove_expired_waiting_rooms(
         &self,
@@ -139,10 +155,14 @@ impl InMemoryRoomRegistry {
     pub async fn release_next_controller_frames(&self) -> usize {
         let mut rooms = self.invite_codes.write().await;
         let now = self.clock.now();
+        let server_time_ms = self.server_time_ms_at(now);
         let mut released_count = 0;
 
         for stored_room in rooms.values_mut() {
-            if stored_room.emit_next_server_frame(now).is_some() {
+            if stored_room
+                .emit_next_server_frame(now, server_time_ms)
+                .is_some()
+            {
                 released_count += 1;
             }
         }
@@ -172,6 +192,14 @@ impl InMemoryRoomRegistry {
 #[cfg(test)]
 #[path = "room_registry_link_tests.rs"]
 mod room_registry_link_tests;
+
+#[cfg(test)]
+#[path = "room_registry_start_sync_tests.rs"]
+mod room_registry_start_sync_tests;
+
+#[cfg(test)]
+#[path = "room_registry_fast_input_tests.rs"]
+mod room_registry_fast_input_tests;
 
 #[cfg(test)]
 #[path = "room_registry_tests.rs"]

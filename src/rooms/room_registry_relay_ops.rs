@@ -5,11 +5,11 @@
 
 use super::InMemoryRoomRegistry;
 use crate::protocol::{
-    ClientNetworkQualityReport, ClientRuntimeState, InputFrame, InputFrameBatch, InputFrameLimits,
-    LinkCablePacket, LinkCablePacketLimits, SessionPauseReason, StateHashReport,
+    ClientNetworkQualityReport, ClientRuntimeState, FastInputBatch, InputFrame, InputFrameBatch,
+    InputFrameLimits, LinkCablePacket, LinkCablePacketLimits, SessionPauseReason, StateHashReport,
 };
 use crate::rooms::{
-    ConnectionId, InputFrameAcceptance, InviteCode, RoomError, RoomView,
+    ConnectionId, InputFrameAcceptance, InputFrameCursor, InviteCode, RoomError, RoomView,
     SessionPauseReachedOutcome, SessionResumeOutcome, StateHashEvaluation,
 };
 
@@ -57,22 +57,72 @@ impl InMemoryRoomRegistry {
             return Err(RoomError::StaleSessionEpoch);
         }
 
-        let mut next_room = stored_room.room.clone();
-        let mut accepted_frames = Vec::with_capacity(batch.frames.len());
+        let cursors = batch
+            .frames
+            .iter()
+            .map(InputFrameCursor::from_input)
+            .collect::<Vec<_>>();
+        let acceptances = stored_room.room.accept_input_frame_cursors(
+            connection_id,
+            &cursors,
+            InputFrameLimits::default(),
+        )?;
 
-        for input in batch.frames {
-            let acceptance =
-                next_room.accept_input_frame(connection_id, &input, InputFrameLimits::default())?;
-
+        for (input, acceptance) in batch.frames.into_iter().zip(acceptances) {
             if acceptance == InputFrameAcceptance::Relay {
-                accepted_frames.push(input);
+                stored_room.relay_accepted_input_frame(connection_id, input);
             }
         }
 
-        if !accepted_frames.is_empty() {
-            stored_room.room = next_room;
-            for input in accepted_frames {
-                stored_room.relay_accepted_input_frame(connection_id, input);
+        Ok(())
+    }
+
+    /// Validates and broadcasts zero-copy fast input records.
+    pub(super) async fn relay_fast_input_batch_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        batch: FastInputBatch,
+    ) -> Result<(), RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+
+        if !stored_room
+            .room
+            .connected_players_support_fast_input_relay()
+        {
+            return Err(RoomError::RoomNotReady);
+        }
+
+        for input in &batch.frames {
+            if input.room_epoch != stored_room.room.room_epoch {
+                return Err(RoomError::StaleRoomEpoch);
+            }
+
+            if input.session_epoch != stored_room.room.session_epoch {
+                return Err(RoomError::StaleSessionEpoch);
+            }
+        }
+
+        let cursors = batch
+            .frames
+            .iter()
+            .map(|frame| InputFrameCursor {
+                player_index: frame.player_index,
+                frame: frame.frame,
+            })
+            .collect::<Vec<_>>();
+        let acceptances = stored_room.room.accept_input_frame_cursors(
+            connection_id,
+            &cursors,
+            InputFrameLimits::default(),
+        )?;
+
+        for (input, acceptance) in batch.frames.into_iter().zip(acceptances) {
+            if acceptance == InputFrameAcceptance::Relay {
+                stored_room.relay_accepted_fast_input_frame(connection_id, input);
             }
         }
 

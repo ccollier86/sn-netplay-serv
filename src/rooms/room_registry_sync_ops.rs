@@ -96,6 +96,11 @@ impl InMemoryRoomRegistry {
 
         if started {
             stored_room.emit_start(now, stored_room.room.sync_start_frame());
+        } else if stored_room.room.should_request_clock_sync_sample() {
+            let request = stored_room
+                .room
+                .request_clock_sync_sample(self.server_time_ms_at(now));
+            stored_room.emit_clock_sync_sample_requested(now, request);
         } else {
             stored_room.emit_state(now, "playerReady", "player marked ready");
         }

@@ -8,15 +8,16 @@ use crate::auth::VerifiedLicense;
 use crate::limits::MVP_ROOM_CAPACITY;
 use crate::protocol::{
     ClientNetworkQualityReport, CompatibilityFingerprint, InputDelayChange, NetplayProtocolView,
-    NetplaySessionDescriptor, NetplaySessionMode,
+    NetplaySessionDescriptor, NetplaySessionMode, ScheduledSessionStart,
 };
 use crate::rooms::{
-    AdaptiveInputDelayPolicy, ConnectionId, InviteCode, LinkCableRoomState, PlayerIndex,
-    PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus, ResumeTokenHash,
-    RomRelayTransferState, RoomError, RoomId, RoomStatus, RoomView, RoomVoiceState,
-    SessionPauseStateTracker, SnapshotFileRelayTransferState, SnapshotTransferState,
+    AdaptiveInputDelayPolicy, ClockSyncSampleRequestState, ConnectionId, InviteCode,
+    LinkCableRoomState, PlayerIndex, PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus,
+    ResumeTokenHash, RomRelayTransferState, RoomError, RoomId, RoomStatus, RoomView,
+    RoomVoiceState, SessionPauseStateTracker, SnapshotFileRelayTransferState,
+    SnapshotTransferState,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::time::Instant;
 
 /// Active netplay room.
@@ -32,6 +33,11 @@ pub struct NetplayRoom {
     pub(super) session_epoch: u64,
     pub(super) compatibility: HashMap<PlayerIndex, CompatibilityFingerprint>,
     pub(super) ready_players: HashSet<PlayerIndex>,
+    pub(super) deterministic_ready_players: HashSet<PlayerIndex>,
+    pub(super) clock_sync_request: Option<ClockSyncSampleRequestState>,
+    pub(super) clock_uncertainty_by_player: HashMap<PlayerIndex, u64>,
+    pub(super) clock_sample_indices_by_player: HashMap<PlayerIndex, BTreeSet<u8>>,
+    pub(super) next_clock_sync_request_id: u64,
     pub(super) last_input_frames: HashMap<PlayerIndex, u64>,
     pub(super) next_input_frames: HashMap<PlayerIndex, u64>,
     pub(super) link_cable_state: LinkCableRoomState,
@@ -49,6 +55,7 @@ pub struct NetplayRoom {
     pub(super) input_delay_policy: AdaptiveInputDelayPolicy,
     pub(super) state_hashes: BTreeMap<u64, HashMap<PlayerIndex, String>>,
     pub(super) state_hash_true_mismatch_streak: u8,
+    pub(super) scheduled_start: Option<ScheduledSessionStart>,
     pub(super) voice: Option<RoomVoiceState>,
 }
 
@@ -107,6 +114,11 @@ impl NetplayRoom {
             session_epoch: 1,
             compatibility: HashMap::new(),
             ready_players: HashSet::new(),
+            deterministic_ready_players: HashSet::new(),
+            clock_sync_request: None,
+            clock_uncertainty_by_player: HashMap::new(),
+            clock_sample_indices_by_player: HashMap::new(),
+            next_clock_sync_request_id: 1,
             last_input_frames: HashMap::new(),
             next_input_frames: HashMap::new(),
             link_cable_state: LinkCableRoomState::default(),
@@ -124,6 +136,7 @@ impl NetplayRoom {
             input_delay_policy: AdaptiveInputDelayPolicy::new(now),
             state_hashes: BTreeMap::new(),
             state_hash_true_mismatch_streak: 0,
+            scheduled_start: None,
             voice: None,
         }
     }
@@ -248,6 +261,11 @@ impl NetplayRoom {
             return Ok(false);
         }
 
+        if self.connected_players_support_scheduled_start() {
+            self.status = RoomStatus::Ready;
+            return Ok(false);
+        }
+
         self.apply_initial_adaptive_input_delay(now);
         self.status = RoomStatus::Playing;
         self.players
@@ -304,6 +322,9 @@ impl NetplayRoom {
                     input_connected: slot.input_connection_id.is_some(),
                     supports_state_file_relay: slot.supports_state_file_relay,
                     supports_rom_file_relay: slot.supports_rom_file_relay,
+                    supports_scheduled_start: slot.supports_scheduled_start,
+                    supports_clock_sync: slot.supports_clock_sync,
+                    supports_fast_input_relay: slot.supports_fast_input_relay,
                     last_seen_age_ms: slot
                         .last_seen_at
                         .map(|last_seen| now.saturating_duration_since(last_seen).as_millis()),
@@ -418,6 +439,7 @@ impl NetplayRoom {
         self.pending_input_delay_change = None;
         self.state_hashes.clear();
         self.state_hash_true_mismatch_streak = 0;
+        self.reset_start_sync_state();
     }
 
     pub(super) fn bump_room_epoch(&mut self) {

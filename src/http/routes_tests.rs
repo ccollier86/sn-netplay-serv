@@ -8,8 +8,8 @@ use crate::auth::{
     AuthError, ClientKind, LicenseAuthority, ProtectedClientAuthProof, VerifiedLicense,
 };
 use crate::file_relay::DisabledFileRelayBroker;
-use crate::http::AdminAuthorizer;
 use crate::http::services::{AppServices, FileRelayPolicy};
+use crate::http::{AdminAuthorizer, AppServiceDependencies};
 use crate::limits::MAX_CREATE_ROOM_BODY_BYTES;
 use crate::lobbies::InMemoryLobbyRegistry;
 use crate::observability::InMemoryMetrics;
@@ -572,31 +572,31 @@ fn app() -> axum::Router {
 }
 
 fn limited_app(create_room_per_minute: u32) -> axum::Router {
-    let services = AppServices::new(
-        Arc::new(FakeLicenseAuthority),
-        Arc::new(InMemoryRoomRegistry::new(Arc::new(
+    let services = AppServices::new(AppServiceDependencies {
+        license_authority: Arc::new(FakeLicenseAuthority),
+        rooms: Arc::new(InMemoryRoomRegistry::new(Arc::new(
             StaticInviteCodeGenerator,
         ))),
-        Arc::new(InMemoryLobbyRegistry::new(Arc::new(
+        lobbies: Arc::new(InMemoryLobbyRegistry::new(Arc::new(
             StaticInviteCodeGenerator,
         ))),
-        Arc::new(DisabledFileRelayBroker),
-        FileRelayPolicy {
+        file_relay: Arc::new(DisabledFileRelayBroker),
+        file_relay_policy: FileRelayPolicy {
             save_states_enabled: false,
             temporary_roms_enabled: false,
             temporary_rom_max_bytes: 104_857_600,
             direct_roms_enabled: false,
             direct_rom_allowed_systems: Vec::new(),
         },
-        Arc::new(InMemoryRateLimiter::new(RateLimitPolicy {
+        rate_limiter: Arc::new(InMemoryRateLimiter::new(RateLimitPolicy {
             create_room_per_minute,
             websocket_join_per_minute: 30,
             room_status_per_minute: 120,
         })),
-        Arc::new(InMemoryMetrics::new()),
-        AdminAuthorizer::new(Some("admin-token".to_string())),
-        false,
-    );
+        metrics: Arc::new(InMemoryMetrics::new()),
+        admin_authorizer: AdminAuthorizer::new(Some("admin-token".to_string())),
+        trust_proxy_headers: false,
+    });
 
     build_router(services)
 }

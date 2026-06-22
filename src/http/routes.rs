@@ -176,6 +176,9 @@ pub async fn websocket_room(
         role: query.role,
         supports_state_file_relay: query.supports_state_file_relay.unwrap_or(false),
         supports_rom_file_relay: query.supports_rom_file_relay.unwrap_or(false),
+        supports_scheduled_start: query.supports_scheduled_start.unwrap_or(false),
+        supports_clock_sync: query.supports_clock_sync.unwrap_or(false),
+        supports_fast_input_relay: query.supports_fast_input_relay.unwrap_or(false),
         license,
     };
 
@@ -488,6 +491,12 @@ pub struct WebSocketRoomQuery {
     supports_state_file_relay: Option<bool>,
     #[serde(default)]
     supports_rom_file_relay: Option<bool>,
+    #[serde(default)]
+    supports_scheduled_start: Option<bool>,
+    #[serde(default)]
+    supports_clock_sync: Option<bool>,
+    #[serde(default)]
+    supports_fast_input_relay: Option<bool>,
 }
 
 #[derive(Deserialize)]

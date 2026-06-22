@@ -133,8 +133,7 @@ async fn joined_link_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, 
             invite.clone(),
             license("guest"),
             guest_connection,
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("guest");

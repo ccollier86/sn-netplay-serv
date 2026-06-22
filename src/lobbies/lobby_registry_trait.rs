@@ -8,7 +8,7 @@ use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, LobbyActivityKind, LobbyChatMessageView, LobbyDebugEvent,
     LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin,
     LobbyRegistrySnapshot, LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyView,
-    LobbyVoiceTokenRefresh, PublicLobbySummary,
+    LobbyVoiceTokenRefresh, PublicLobbySummary, ReconnectLobbyPlayerRequest,
 };
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
@@ -50,13 +50,7 @@ pub trait LobbyRegistry: Send + Sync {
     /// Reclaims a lobby slot with a valid resume token.
     async fn reconnect_lobby_player(
         &self,
-        invite_code: InviteCode,
-        player: VerifiedLicense,
-        params: JoinLobbyParams,
-        player_index: PlayerIndex,
-        lobby_epoch: u64,
-        resume_token: String,
-        connection_id: ConnectionId,
+        request: ReconnectLobbyPlayerRequest,
     ) -> Result<LobbyJoin, LobbyError>;
 
     /// Marks a lobby WebSocket disconnected.

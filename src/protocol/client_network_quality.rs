@@ -30,4 +30,7 @@ pub struct ClientNetworkQualityReport {
     /// Audio underruns observed since the previous health report.
     #[serde(default)]
     pub audio_underruns: Option<u32>,
+    /// Latest clock-sync uncertainty estimate in milliseconds.
+    #[serde(default)]
+    pub clock_uncertainty_ms: Option<u32>,
 }

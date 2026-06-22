@@ -6,11 +6,12 @@
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, Lobby, LobbyActivityKind, LobbyChatMessageView,
-    LobbyDebugEvent, LobbyDebugEventLog, LobbyDebugEventSink, LobbyError, LobbyEventReceiver,
-    LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin, LobbyRegistry, LobbyRegistrySnapshot,
-    LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyView,
-    MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink, PublicLobbyEventReceiver, PublicLobbySummary,
-    StoredLobby,
+    LobbyCreateRequest, LobbyDebugEvent, LobbyDebugEventLog, LobbyDebugEventSink, LobbyError,
+    LobbyEventReceiver, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin,
+    LobbyReconnectRequest, LobbyRegistry, LobbyRegistrySnapshot, LobbyRomRelayLimits,
+    LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyView, MAX_LOBBY_PLAYERS,
+    NoopLobbyDebugEventSink, PublicLobbyEventReceiver, PublicLobbySummary,
+    ReconnectLobbyPlayerRequest, StoredLobby,
 };
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::{
@@ -199,17 +200,17 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
     ) -> Result<LobbyJoin, LobbyError> {
         let invite_code = self.invite_code_generator.generate();
         let resume_token = self.resume_token_generator.generate();
-        let mut lobby = Lobby::new(
-            invite_code.clone(),
-            &host,
-            ConnectionId::new(),
-            params.display_name.clone(),
-            params.capabilities.clone(),
-            resume_token.hash(),
-            params.initial_game,
-            params.visibility,
-            crate::rooms::current_timestamp_ms(),
-        );
+        let mut lobby = Lobby::new(LobbyCreateRequest {
+            invite_code: invite_code.clone(),
+            host: &host,
+            host_connection: ConnectionId::new(),
+            host_display_name: params.display_name.clone(),
+            host_capabilities: params.capabilities.clone(),
+            host_resume_token_hash: resume_token.hash(),
+            initial_game: params.initial_game,
+            visibility: params.visibility,
+            now_ms: crate::rooms::current_timestamp_ms(),
+        });
         if let Some(voice) = self
             .create_voice_state_for_lobby(
                 &lobby,
@@ -313,28 +314,22 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
 
     async fn reconnect_lobby_player(
         &self,
-        invite_code: InviteCode,
-        player: VerifiedLicense,
-        params: JoinLobbyParams,
-        player_index: PlayerIndex,
-        lobby_epoch: u64,
-        resume_token: String,
-        connection_id: ConnectionId,
+        request: ReconnectLobbyPlayerRequest,
     ) -> Result<LobbyJoin, LobbyError> {
         let mut lobbies = self.lobbies.write().await;
         let lobby = lobbies
-            .get_mut(invite_code.normalized())
+            .get_mut(request.invite_code.normalized())
             .ok_or(LobbyError::NotFound)?;
-        let player_index = lobby.lobby.reconnect_player(
-            &player,
-            player_index,
-            lobby_epoch,
-            &resume_token,
-            connection_id,
-            params.display_name,
-            params.capabilities,
-            crate::rooms::current_timestamp_ms(),
-        )?;
+        let player_index = lobby.lobby.reconnect_player(LobbyReconnectRequest {
+            license: &request.player,
+            player_index: request.player_index,
+            lobby_epoch: request.lobby_epoch,
+            resume_token: &request.resume_token,
+            connection_id: request.connection_id,
+            display_name: request.params.display_name,
+            capabilities: request.params.capabilities,
+            now_ms: crate::rooms::current_timestamp_ms(),
+        })?;
         lobby.emit_state_changed();
         self.record_lobby_event(
             lobby,
@@ -346,7 +341,7 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         Ok(LobbyJoin {
             lobby: lobby.view(),
             player_index,
-            resume_token,
+            resume_token: request.resume_token,
             voice: lobby.lobby.voice_grant_for(player_index),
         })
     }

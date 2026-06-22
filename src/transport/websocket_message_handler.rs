@@ -5,7 +5,7 @@
 
 use crate::http::AppServices;
 use crate::limits::MAX_WEBSOCKET_MESSAGE_BYTES;
-use crate::protocol::{ClientMessage, RomRelayBlocked, ServerMessage};
+use crate::protocol::{ClientMessage, ClockSyncPong, RomRelayBlocked, ServerMessage};
 use crate::rooms::{ConnectionId, InviteCode, RoomError};
 use crate::transport::websocket_outbound::{
     SocketSender, send_room_error, send_server_message, send_static_error,
@@ -51,6 +51,16 @@ async fn handle_client_message(
 ) -> Result<(), axum::Error> {
     match message {
         ClientMessage::Ping => send_server_message(sender, &ServerMessage::Pong).await,
+        ClientMessage::ClockSyncPing { ping } => {
+            let server_receive_time_ms = services.rooms.server_time_ms();
+            let pong = ClockSyncPong {
+                sample_id: ping.sample_id,
+                client_send_time_ms: ping.client_send_time_ms,
+                server_receive_time_ms,
+                server_send_time_ms: services.rooms.server_time_ms(),
+            };
+            send_server_message(sender, &ServerMessage::ClockSyncPong { pong }).await
+        }
         ClientMessage::SetCompatibilityFingerprint {
             room_epoch,
             session_epoch,
@@ -106,6 +116,47 @@ async fn handle_client_message(
                 services
                     .rooms
                     .mark_ready(invite_code.clone(), connection_id, network)
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
+        ClientMessage::ClockSyncSample {
+            room_epoch,
+            session_epoch,
+            sample,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            apply_room_result(
+                sender,
+                services
+                    .rooms
+                    .record_clock_sync_sample(invite_code.clone(), connection_id, sample)
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
+        ClientMessage::DeterministicReady {
+            room_epoch,
+            session_epoch,
+            report,
+            network,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            apply_room_result(
+                sender,
+                services
+                    .rooms
+                    .mark_deterministic_ready(invite_code.clone(), connection_id, report, network)
                     .await
                     .map(|_| ()),
             )

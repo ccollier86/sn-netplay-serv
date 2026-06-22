@@ -94,6 +94,12 @@ pub struct PlayerSlotView {
     pub supports_state_file_relay: bool,
     /// Whether this client can use file relay for temporary direct-invite ROMs.
     pub supports_rom_file_relay: bool,
+    /// Whether this client can use v2 scheduled synchronized start.
+    pub supports_scheduled_start: bool,
+    /// Whether this client can answer v2 clock-sample requests.
+    pub supports_clock_sync: bool,
+    /// Whether this client can use the v2 fast binary input relay.
+    pub supports_fast_input_relay: bool,
     /// Milliseconds since this slot was last seen by heartbeat or socket IO.
     pub last_seen_age_ms: Option<u128>,
     /// Milliseconds remaining before reconnect grace expires.

@@ -15,6 +15,17 @@ use crate::rooms::{
 const SESSION_PAUSE_LEAD_FRAMES: u64 = 8;
 
 impl NetplayRoom {
+    /// Returns whether all occupied connected players advertised fast input relay.
+    pub(super) fn connected_players_support_fast_input_relay(&self) -> bool {
+        let connected = self.connected_player_indices();
+        connected.len() == usize::from(self.max_players)
+            && connected.iter().all(|player_index| {
+                self.players.iter().any(|slot| {
+                    slot.player_index == *player_index && slot.supports_fast_input_relay
+                })
+            })
+    }
+
     /// Validates and records an input frame from one connection.
     pub fn accept_input_frame(
         &mut self,
@@ -22,6 +33,24 @@ impl NetplayRoom {
         input: &InputFrame,
         limits: InputFrameLimits,
     ) -> Result<InputFrameAcceptance, RoomError> {
+        let [acceptance] = self.accept_input_frame_cursors(
+            connection_id,
+            &[InputFrameCursor::from_input(input)],
+            limits,
+        )?[..] else {
+            return Err(RoomError::InvalidPayload);
+        };
+
+        Ok(acceptance)
+    }
+
+    /// Atomically validates and records frame cursors from one connection.
+    pub(crate) fn accept_input_frame_cursors(
+        &mut self,
+        connection_id: ConnectionId,
+        inputs: &[InputFrameCursor],
+        limits: InputFrameLimits,
+    ) -> Result<Vec<InputFrameAcceptance>, RoomError> {
         if self.session.mode != NetplaySessionMode::ControllerNetplay {
             return Err(RoomError::NotPlaying);
         }
@@ -29,36 +58,38 @@ impl NetplayRoom {
         let owned_index = self
             .player_index_for_input_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
+        let mut staged = InputFrameCursorStage::from_room(self);
+        let mut acceptances = Vec::with_capacity(inputs.len());
 
-        if owned_index != input.player_index {
-            return Err(RoomError::SlotSpoofing(input.player_index));
+        for input in inputs {
+            if owned_index != input.player_index {
+                return Err(RoomError::SlotSpoofing(input.player_index));
+            }
+
+            let acceptance = self.input_frame_acceptance(input.frame)?;
+
+            if acceptance == InputFrameAcceptance::Ignore {
+                acceptances.push(InputFrameAcceptance::Ignore);
+                continue;
+            }
+
+            if input.frame > self.room_frame + limits.max_future_frame_distance {
+                return Err(RoomError::FutureFrameTooLarge);
+            }
+
+            let next_frame = staged.next_input_frame_for_player(input.player_index);
+
+            if input.frame < next_frame {
+                acceptances.push(InputFrameAcceptance::Ignore);
+                continue;
+            }
+
+            staged.accept(input.player_index, input.frame);
+            acceptances.push(InputFrameAcceptance::Relay);
         }
 
-        let acceptance = self.input_frame_acceptance(input.frame)?;
-
-        if acceptance == InputFrameAcceptance::Ignore {
-            return Ok(InputFrameAcceptance::Ignore);
-        }
-
-        if input.frame > self.room_frame + limits.max_future_frame_distance {
-            return Err(RoomError::FutureFrameTooLarge);
-        }
-
-        let next_frame = self.next_input_frame_for_player(input.player_index);
-
-        if input.frame < next_frame {
-            return Ok(InputFrameAcceptance::Ignore);
-        }
-
-        // Bounded gaps can happen at startup or after resync if a client begins
-        // relaying from its current runtime frame. Peers fill those missing
-        // frames with predicted input, so the relay must not tear down the room.
-        self.last_input_frames
-            .insert(input.player_index, input.frame);
-        self.next_input_frames
-            .insert(input.player_index, input.frame.saturating_add(1));
-
-        Ok(InputFrameAcceptance::Relay)
+        staged.apply(self);
+        Ok(acceptances)
     }
 
     /// Schedules or extends a coordinated session pause.
@@ -283,12 +314,61 @@ impl NetplayRoom {
             InputFrameAcceptance::Ignore
         }
     }
+}
+
+/// Minimal input cursor used by staged relay validation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct InputFrameCursor {
+    /// Player slot that owns the input.
+    pub player_index: PlayerIndex,
+    /// Canonical emulation frame number.
+    pub frame: u64,
+}
+
+impl InputFrameCursor {
+    /// Builds a cursor from a legacy input frame payload.
+    pub(crate) fn from_input(input: &InputFrame) -> Self {
+        Self {
+            player_index: input.player_index,
+            frame: input.frame,
+        }
+    }
+}
+
+struct InputFrameCursorStage {
+    sync_start_frame: u64,
+    last_input_frames: std::collections::HashMap<PlayerIndex, u64>,
+    next_input_frames: std::collections::HashMap<PlayerIndex, u64>,
+}
+
+impl InputFrameCursorStage {
+    fn from_room(room: &NetplayRoom) -> Self {
+        Self {
+            sync_start_frame: room.sync_start_frame,
+            last_input_frames: room.last_input_frames.clone(),
+            next_input_frames: room.next_input_frames.clone(),
+        }
+    }
+
+    fn accept(&mut self, player_index: PlayerIndex, frame: u64) {
+        // Bounded gaps can happen at startup or after resync if a client begins
+        // relaying from its current runtime frame. Peers fill those missing
+        // frames with predicted input, so the relay must not tear down the room.
+        self.last_input_frames.insert(player_index, frame);
+        self.next_input_frames
+            .insert(player_index, frame.saturating_add(1));
+    }
 
     fn next_input_frame_for_player(&self, player_index: PlayerIndex) -> u64 {
         self.next_input_frames
             .get(&player_index)
             .copied()
             .unwrap_or(self.sync_start_frame)
+    }
+
+    fn apply(self, room: &mut NetplayRoom) {
+        room.last_input_frames = self.last_input_frames;
+        room.next_input_frames = self.next_input_frames;
     }
 }
 

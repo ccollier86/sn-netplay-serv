@@ -9,7 +9,9 @@ use sb_netplay_serv::config::{ServerConfig, VoiceBrokerConfig};
 use sb_netplay_serv::file_relay::{
     DisabledFileRelayBroker, FileRelayBroker, FileRelayBrokerConfig, HttpFileRelayBroker,
 };
-use sb_netplay_serv::http::{AdminAuthorizer, AppServices, FileRelayPolicy, build_router};
+use sb_netplay_serv::http::{
+    AdminAuthorizer, AppServiceDependencies, AppServices, FileRelayPolicy, build_router,
+};
 use sb_netplay_serv::lobbies::{
     InMemoryLobbyRegistry, LobbyServerCapabilities, MAX_LOBBY_PLAYERS, spawn_lobby_expiration_task,
 };
@@ -104,12 +106,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _room_expiration_task = spawn_room_expiration_task(rooms.clone());
     let _room_frame_clock_task = spawn_room_frame_clock_task(rooms.clone());
     let _lobby_expiration_task = spawn_lobby_expiration_task(lobbies.clone(), config.lobby_idle);
-    let services = AppServices::new(
+    let services = AppServices::new(AppServiceDependencies {
         license_authority,
         rooms,
         lobbies,
-        file_relay_broker,
-        FileRelayPolicy {
+        file_relay: file_relay_broker,
+        file_relay_policy: FileRelayPolicy {
             save_states_enabled: config.file_relay.save_states_enabled,
             temporary_roms_enabled: config.file_relay.temporary_roms_enabled,
             direct_roms_enabled: config.file_relay.direct_roms_enabled,
@@ -119,8 +121,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_limiter,
         metrics,
         admin_authorizer,
-        config.trust_proxy_headers,
-    );
+        trust_proxy_headers: config.trust_proxy_headers,
+    });
     let app = build_router(services);
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
 

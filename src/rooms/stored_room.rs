@@ -5,14 +5,16 @@
 //! messages or apply room-domain rules.
 
 use crate::protocol::{
-    ClientNetworkQualityReport, ClientRuntimeState, InputDelayChange, InputFrame, InputFrameBatch,
-    LinkCablePacket, RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayGrant,
-    RomRelayProgress, ServerFrame, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant,
-    SnapshotManifest, StateHashMismatchView,
+    ClientNetworkQualityReport, ClientRuntimeState, ClockSyncSampleRequest, FastInputFrame,
+    InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket, RomRelayCancelled,
+    RomRelayCompletion, RomRelayFailure, RomRelayGrant, RomRelayProgress, ScheduledSessionStart,
+    ServerFrame, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant, SnapshotManifest,
+    StateHashMismatchView,
 };
 use crate::rooms::{
-    ConnectionId, InputFrameRelayBuffer, NetplayRoom, RoomDebugEvent, RoomDebugEventLog, RoomEvent,
-    RoomInputEvent, RoomPerformanceSample, RoomView, current_timestamp_ms,
+    ConnectionId, FastInputRelayBuffer, InputFrameRelayBuffer, NetplayRoom, RoomDebugEvent,
+    RoomDebugEventLog, RoomEvent, RoomInputEvent, RoomPerformanceSample, RoomView,
+    current_timestamp_ms,
 };
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
@@ -26,6 +28,7 @@ pub(super) struct StoredRoom {
     events: broadcast::Sender<RoomEvent>,
     input_events: broadcast::Sender<RoomInputEvent>,
     input_relay_buffer: InputFrameRelayBuffer,
+    fast_input_relay_buffer: FastInputRelayBuffer,
     event_seq: u64,
     debug_events: RoomDebugEventLog,
     created_at: Instant,
@@ -42,6 +45,7 @@ impl StoredRoom {
             events,
             input_events,
             input_relay_buffer: InputFrameRelayBuffer::default(),
+            fast_input_relay_buffer: FastInputRelayBuffer::default(),
             event_seq: 0,
             debug_events: RoomDebugEventLog::default(),
             created_at: Instant::now(),
@@ -163,9 +167,35 @@ impl StoredRoom {
     /// Emits a session-start event.
     pub(super) fn emit_start(&mut self, now: Instant, start_frame: u64) {
         let room = self.record_event(now, "sessionStarted", "session started");
-        let _ = self
-            .events
-            .send(RoomEvent::SessionStarted { start_frame, room });
+        let _ = self.events.send(RoomEvent::SessionStarted {
+            start_frame,
+            scheduled_start: None,
+            room,
+        });
+    }
+
+    /// Emits a future scheduled session-start event.
+    pub(super) fn emit_scheduled_start(&mut self, now: Instant, start: ScheduledSessionStart) {
+        let room = self.record_event(now, "sessionStartScheduled", "session start scheduled");
+        let _ = self.events.send(RoomEvent::SessionStarted {
+            start_frame: start.start_frame,
+            scheduled_start: Some(start),
+            room,
+        });
+    }
+
+    /// Emits a v2 startup clock-sample request.
+    pub(super) fn emit_clock_sync_sample_requested(
+        &mut self,
+        now: Instant,
+        request: ClockSyncSampleRequest,
+    ) {
+        let room = self.record_event(now, "clockSyncSampleRequested", "clock sample requested");
+        let _ = self.events.send(RoomEvent::ClockSyncSampleRequested {
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            request,
+        });
     }
 
     /// Emits a coordinated pause schedule.
@@ -445,9 +475,31 @@ impl StoredRoom {
             .push(source, self.room.room_epoch, self.room.session_epoch, input);
     }
 
+    /// Relays an accepted fast-input record when its server frame is available.
+    pub(super) fn relay_accepted_fast_input_frame(
+        &mut self,
+        source: ConnectionId,
+        input: FastInputFrame,
+    ) {
+        if self
+            .room
+            .released_frame
+            .is_some_and(|released_frame| input.frame <= released_frame)
+        {
+            self.emit_fast_input_frame(source, input);
+            return;
+        }
+
+        self.fast_input_relay_buffer.push(source, input);
+    }
+
     /// Releases one canonical server frame and its ready input batches.
-    pub(super) fn emit_next_server_frame(&mut self, _now: Instant) -> Option<ServerFrame> {
-        let frame = self.room.release_next_server_frame()?;
+    pub(super) fn emit_next_server_frame(
+        &mut self,
+        _now: Instant,
+        server_time_ms: u64,
+    ) -> Option<ServerFrame> {
+        let frame = self.room.release_next_server_frame(server_time_ms)?;
 
         for ready_batch in
             self.input_relay_buffer
@@ -459,11 +511,28 @@ impl StoredRoom {
             });
         }
 
+        for ready_frame in self.fast_input_relay_buffer.drain_frame(
+            frame.frame,
+            frame.room_epoch,
+            frame.session_epoch,
+        ) {
+            let _ = self.input_events.send(RoomInputEvent::FastInputFrame {
+                source: ready_frame.source,
+                frame: ready_frame.frame,
+            });
+        }
+
         let _ = self.input_events.send(RoomInputEvent::ServerFrame {
             frame: frame.clone(),
         });
 
         Some(frame)
+    }
+
+    fn emit_fast_input_frame(&self, source: ConnectionId, frame: FastInputFrame) {
+        let _ = self
+            .input_events
+            .send(RoomInputEvent::FastInputFrame { source, frame });
     }
 
     fn emit_input_frame_batch(&self, source: ConnectionId, input: InputFrame) {

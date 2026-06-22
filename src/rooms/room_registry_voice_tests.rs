@@ -73,13 +73,17 @@ async fn voice_join_returns_only_the_matching_player_grant() {
             invite.clone(),
             license("host"),
             host_connection,
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("host join");
     let guest_join = registry
-        .connect_guest(invite, license("guest"), guest_connection, false, false)
+        .connect_guest(
+            invite,
+            license("guest"),
+            guest_connection,
+            crate::rooms::ClientTransportCapabilities::default(),
+        )
         .await
         .expect("guest join");
 
@@ -108,7 +112,12 @@ async fn voice_broker_failure_keeps_room_playable_without_grants() {
     let invite = InviteCode::parse(view.invite_code).expect("invite");
 
     let guest_join = registry
-        .connect_guest(invite, license("guest"), ConnectionId::new(), false, false)
+        .connect_guest(
+            invite,
+            license("guest"),
+            ConnectionId::new(),
+            crate::rooms::ClientTransportCapabilities::default(),
+        )
         .await
         .expect("guest join");
 
@@ -140,8 +149,7 @@ async fn voice_room_is_closed_when_player_exits() {
             invite.clone(),
             license("host"),
             host_connection,
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("host join");
@@ -150,8 +158,7 @@ async fn voice_room_is_closed_when_player_exits() {
             invite.clone(),
             license("guest"),
             guest_connection,
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("guest join");
@@ -193,8 +200,7 @@ async fn voice_token_refresh_updates_only_requesting_player_grant() {
             invite.clone(),
             license("host"),
             host_connection,
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("host join");
@@ -203,8 +209,7 @@ async fn voice_token_refresh_updates_only_requesting_player_grant() {
             invite.clone(),
             license("guest"),
             guest_connection,
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("guest join");

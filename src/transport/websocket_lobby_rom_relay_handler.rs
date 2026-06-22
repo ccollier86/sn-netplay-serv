@@ -172,7 +172,7 @@ fn rom_relay_broker_failure_reason(error: &FileRelayBrokerError) -> String {
         FileRelayBrokerError::InvalidUrl => "invalid-url".to_string(),
         FileRelayBrokerError::RequestFailed => "request-failed".to_string(),
         FileRelayBrokerError::RequestTimedOut => "request-timeout".to_string(),
-        FileRelayBrokerError::UnexpectedStatus(status) => format!("status-{}", status),
+        FileRelayBrokerError::UnexpectedStatus(status) => format!("status-{status}"),
         FileRelayBrokerError::InvalidResponse => "invalid-response".to_string(),
     }
 }

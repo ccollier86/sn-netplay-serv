@@ -85,8 +85,8 @@ pub fn print_file_relay_report(report: &FileRelayReport, events: &[FileRelayEven
 /// Prints recent file-relay events.
 pub fn print_file_relay_events(events: &[FileRelayEventRow]) {
     println!(
-        "{:<13} {:<34} {:<12} {:<12} {:<12} {:>10} {:>10} {:>10} {}",
-        "timestamp", "transfer", "kind", "phase", "status", "size", "up", "down", "detail"
+        "{:<13} {:<34} {:<12} {:<12} {:<12} {:>10} {:>10} {:>10} detail",
+        "timestamp", "transfer", "kind", "phase", "status", "size", "up", "down"
     );
 
     for event in events {

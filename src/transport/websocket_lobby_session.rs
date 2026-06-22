@@ -4,7 +4,7 @@
 //! does not relay gameplay input or snapshot bytes.
 
 use crate::http::AppServices;
-use crate::lobbies::{JoinLobbyParams, LobbyEvent, MAX_LOBBY_PLAYERS};
+use crate::lobbies::{JoinLobbyParams, LobbyEvent, MAX_LOBBY_PLAYERS, ReconnectLobbyPlayerRequest};
 use crate::protocol::{LobbyClientMessage, LobbyServerMessage};
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
 use crate::transport::WebSocketLobbyJoinRequest;
@@ -49,10 +49,10 @@ pub async fn handle_websocket_lobby_session(
     let join = if let Some((player_index, lobby_epoch, resume_token)) = reconnect {
         services
             .lobbies
-            .reconnect_lobby_player(
-                request.invite_code.clone(),
-                request.license.clone(),
-                JoinLobbyParams {
+            .reconnect_lobby_player(ReconnectLobbyPlayerRequest {
+                invite_code: request.invite_code.clone(),
+                player: request.license.clone(),
+                params: JoinLobbyParams {
                     display_name: request.display_name.clone(),
                     capabilities: request.capabilities.clone(),
                 },
@@ -60,7 +60,7 @@ pub async fn handle_websocket_lobby_session(
                 lobby_epoch,
                 resume_token,
                 connection_id,
-            )
+            })
             .await
     } else {
         services

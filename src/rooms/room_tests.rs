@@ -573,14 +573,14 @@ fn startup_input_gap_releases_missing_server_frames() {
 
     let released = (0..3)
         .map(|_| {
-            room.release_next_server_frame()
+            room.release_next_server_frame(0)
                 .expect("server frame should release")
                 .frame
         })
         .collect::<Vec<_>>();
 
     assert_eq!(released, vec![0, 1, 2]);
-    assert!(room.release_next_server_frame().is_none());
+    assert!(room.release_next_server_frame(0).is_none());
 }
 
 #[test]
@@ -632,13 +632,13 @@ fn server_frame_clock_follows_host_cursor() {
     .expect("host input");
 
     let released_frame = room
-        .release_next_server_frame()
+        .release_next_server_frame(0)
         .expect("host frame releases");
     assert_eq!(released_frame.frame, 0);
     assert_eq!(room.room_frame, 0);
     assert_eq!(room.released_frame, Some(0));
 
-    assert!(room.release_next_server_frame().is_none());
+    assert!(room.release_next_server_frame(0).is_none());
 }
 
 #[test]
@@ -1034,8 +1034,10 @@ fn file_relay_supported_room(
         String::new(),
         String::new(),
         std::time::Instant::now(),
-        true,
-        false,
+        crate::rooms::ClientTransportCapabilities {
+            supports_state_file_relay: true,
+            ..crate::rooms::ClientTransportCapabilities::default()
+        },
     )
     .expect("host attaches with file relay support");
     room.join_guest_with_resume(
@@ -1044,8 +1046,10 @@ fn file_relay_supported_room(
         String::new(),
         String::new(),
         std::time::Instant::now(),
-        true,
-        false,
+        crate::rooms::ClientTransportCapabilities {
+            supports_state_file_relay: true,
+            ..crate::rooms::ClientTransportCapabilities::default()
+        },
     )
     .expect("guest joins with file relay support");
     room.set_compatibility_for_connection(host_connection, fingerprint("rom"))
@@ -1072,8 +1076,10 @@ fn rom_relay_room(
         String::new(),
         String::new(),
         std::time::Instant::now(),
-        false,
-        supports_rom_file_relay,
+        crate::rooms::ClientTransportCapabilities {
+            supports_rom_file_relay,
+            ..crate::rooms::ClientTransportCapabilities::default()
+        },
     )
     .expect("host attaches with rom relay support");
     room.join_guest_with_resume(
@@ -1082,8 +1088,10 @@ fn rom_relay_room(
         String::new(),
         String::new(),
         std::time::Instant::now(),
-        false,
-        supports_rom_file_relay,
+        crate::rooms::ClientTransportCapabilities {
+            supports_rom_file_relay,
+            ..crate::rooms::ClientTransportCapabilities::default()
+        },
     )
     .expect("guest joins with rom relay support");
     room

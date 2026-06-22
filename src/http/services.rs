@@ -113,29 +113,41 @@ pub struct AppServices {
     pub trust_proxy_headers: bool,
 }
 
+/// Dependency bundle used to assemble route services.
+pub struct AppServiceDependencies {
+    /// License verifier used before creating or joining rooms.
+    pub license_authority: Arc<dyn LicenseAuthority>,
+    /// Active room registry.
+    pub rooms: Arc<dyn RoomRegistry>,
+    /// Persistent multiplayer lobby registry.
+    pub lobbies: Arc<dyn LobbyRegistry>,
+    /// Trusted temporary file relay broker.
+    pub file_relay: Arc<dyn FileRelayBroker>,
+    /// File-relay feature and size policy.
+    pub file_relay_policy: FileRelayPolicy,
+    /// Public request limiter.
+    pub rate_limiter: Arc<dyn RateLimiter>,
+    /// Process metrics recorder.
+    pub metrics: Arc<dyn MetricsRecorder>,
+    /// Internal endpoint authorizer.
+    pub admin_authorizer: AdminAuthorizer,
+    /// Whether proxy forwarding headers are trusted for client identity.
+    pub trust_proxy_headers: bool,
+}
+
 impl AppServices {
     /// Creates a service container from independently testable dependencies.
-    pub fn new(
-        license_authority: Arc<dyn LicenseAuthority>,
-        rooms: Arc<dyn RoomRegistry>,
-        lobbies: Arc<dyn LobbyRegistry>,
-        file_relay: Arc<dyn FileRelayBroker>,
-        file_relay_policy: FileRelayPolicy,
-        rate_limiter: Arc<dyn RateLimiter>,
-        metrics: Arc<dyn MetricsRecorder>,
-        admin_authorizer: AdminAuthorizer,
-        trust_proxy_headers: bool,
-    ) -> Self {
+    pub fn new(dependencies: AppServiceDependencies) -> Self {
         Self {
-            license_authority,
-            rooms,
-            lobbies,
-            file_relay,
-            file_relay_policy,
-            rate_limiter,
-            metrics,
-            admin_authorizer,
-            trust_proxy_headers,
+            license_authority: dependencies.license_authority,
+            rooms: dependencies.rooms,
+            lobbies: dependencies.lobbies,
+            file_relay: dependencies.file_relay,
+            file_relay_policy: dependencies.file_relay_policy,
+            rate_limiter: dependencies.rate_limiter,
+            metrics: dependencies.metrics,
+            admin_authorizer: dependencies.admin_authorizer,
+            trust_proxy_headers: dependencies.trust_proxy_headers,
         }
     }
 }

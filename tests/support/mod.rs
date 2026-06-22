@@ -7,7 +7,9 @@ use sb_netplay_serv::auth::{
     AuthError, ClientKind, LicenseAuthority, ProtectedClientAuthProof, VerifiedLicense,
 };
 use sb_netplay_serv::file_relay::DisabledFileRelayBroker;
-use sb_netplay_serv::http::{AdminAuthorizer, AppServices, FileRelayPolicy, build_router};
+use sb_netplay_serv::http::{
+    AdminAuthorizer, AppServiceDependencies, AppServices, FileRelayPolicy, build_router,
+};
 use sb_netplay_serv::lobbies::InMemoryLobbyRegistry;
 use sb_netplay_serv::observability::InMemoryMetrics;
 use sb_netplay_serv::protocol::{
@@ -464,29 +466,29 @@ impl SmokeClient {
 }
 
 fn test_services(rooms: Arc<InMemoryRoomRegistry>) -> AppServices {
-    AppServices::new(
-        Arc::new(FakeLicenseAuthority),
+    AppServices::new(AppServiceDependencies {
+        license_authority: Arc::new(FakeLicenseAuthority),
         rooms,
-        Arc::new(InMemoryLobbyRegistry::new(Arc::new(
+        lobbies: Arc::new(InMemoryLobbyRegistry::new(Arc::new(
             StaticInviteCodeGenerator,
         ))),
-        Arc::new(DisabledFileRelayBroker),
-        FileRelayPolicy {
+        file_relay: Arc::new(DisabledFileRelayBroker),
+        file_relay_policy: FileRelayPolicy {
             save_states_enabled: false,
             temporary_roms_enabled: false,
             temporary_rom_max_bytes: 104_857_600,
             direct_roms_enabled: false,
             direct_rom_allowed_systems: Vec::new(),
         },
-        Arc::new(InMemoryRateLimiter::new(RateLimitPolicy {
+        rate_limiter: Arc::new(InMemoryRateLimiter::new(RateLimitPolicy {
             create_room_per_minute: 100,
             websocket_join_per_minute: 100,
             room_status_per_minute: 100,
         })),
-        Arc::new(InMemoryMetrics::new()),
-        AdminAuthorizer::new(None),
-        false,
-    )
+        metrics: Arc::new(InMemoryMetrics::new()),
+        admin_authorizer: AdminAuthorizer::new(None),
+        trust_proxy_headers: false,
+    })
 }
 
 fn create_room_body() -> Value {

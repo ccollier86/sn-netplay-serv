@@ -5,7 +5,7 @@
 
 use crate::auth::VerifiedLicense;
 use crate::protocol::ClientNetworkQualityReport;
-use crate::rooms::{ConnectionId, PlayerIndex, ResumeTokenHash};
+use crate::rooms::{ClientTransportCapabilities, ConnectionId, PlayerIndex, ResumeTokenHash};
 use serde::Serialize;
 use std::time::Instant;
 
@@ -61,6 +61,8 @@ pub enum PlayerRuntimeState {
     Syncing,
     /// Client is ready to start.
     Ready,
+    /// Client is warmed and ready for scheduled deterministic release.
+    DeterministicReady,
     /// Gameplay is active.
     Playing,
     /// A coordinated pause has been scheduled.
@@ -112,6 +114,12 @@ pub struct PlayerSlot {
     pub supports_state_file_relay: bool,
     /// Whether this control socket can use file relay for temporary ROMs.
     pub supports_rom_file_relay: bool,
+    /// Whether this control socket can use scheduled synchronized start.
+    pub supports_scheduled_start: bool,
+    /// Whether this control socket can provide clock samples for scheduled start.
+    pub supports_clock_sync: bool,
+    /// Whether this input socket can use the v2 fast binary input relay.
+    pub supports_fast_input_relay: bool,
     /// Time the latest network/runtime health sample was reported.
     pub latest_network_reported_at: Option<Instant>,
     /// Deadline for reclaiming this slot after transport loss.
@@ -140,6 +148,9 @@ impl PlayerSlot {
             latest_network_report: None,
             supports_state_file_relay: false,
             supports_rom_file_relay: false,
+            supports_scheduled_start: false,
+            supports_clock_sync: false,
+            supports_fast_input_relay: false,
             latest_network_reported_at: None,
             reconnect_deadline: None,
             reconnect_room_epoch: None,
@@ -171,6 +182,9 @@ impl PlayerSlot {
             latest_network_report: None,
             supports_state_file_relay: false,
             supports_rom_file_relay: false,
+            supports_scheduled_start: false,
+            supports_clock_sync: false,
+            supports_fast_input_relay: false,
             latest_network_reported_at: None,
             reconnect_deadline: None,
             reconnect_room_epoch: None,
@@ -185,8 +199,7 @@ impl PlayerSlot {
         resume_token_hash: ResumeTokenHash,
         input_socket_token_hash: ResumeTokenHash,
         now: Instant,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) {
         self.role = PlayerRole::Guest;
         self.subject_key = Some(license.identity_key());
@@ -200,8 +213,11 @@ impl PlayerSlot {
         self.latest_local_frame = None;
         self.latest_local_frame_reported_at = None;
         self.latest_network_report = None;
-        self.supports_state_file_relay = supports_state_file_relay;
-        self.supports_rom_file_relay = supports_rom_file_relay;
+        self.supports_state_file_relay = capabilities.supports_state_file_relay;
+        self.supports_rom_file_relay = capabilities.supports_rom_file_relay;
+        self.supports_scheduled_start = capabilities.supports_scheduled_start;
+        self.supports_clock_sync = capabilities.supports_clock_sync;
+        self.supports_fast_input_relay = capabilities.supports_fast_input_relay;
         self.latest_network_reported_at = None;
         self.reconnect_deadline = None;
         self.reconnect_room_epoch = None;

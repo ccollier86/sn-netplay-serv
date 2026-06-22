@@ -4,11 +4,15 @@
 //! only binary input batches and relays only binary input batches to peers.
 
 use crate::http::AppServices;
-use crate::protocol::{decode_input_frame_batch, encode_input_frame_batch, encode_server_frame};
+use crate::protocol::{
+    decode_fast_input_batch, decode_input_frame_batch, encode_input_frame_batch,
+    encode_server_frame,
+};
 use crate::rooms::{ConnectionId, RoomError, RoomInputEvent};
 use crate::transport::WebSocketInputJoinRequest;
 use crate::transport::websocket_outbound::{
-    SocketSender, send_binary_message, send_room_error, send_static_error, send_upgrade_error,
+    SocketSender, send_binary_bytes, send_binary_message, send_room_error, send_static_error,
+    send_upgrade_error,
 };
 use crate::transport::websocket_peer_close::{peer_close_detail, peer_error_detail};
 use axum::extract::ws::{Message, WebSocket};
@@ -103,44 +107,10 @@ async fn handle_incoming(
 ) -> bool {
     match incoming {
         Some(Ok(Message::Binary(payload))) => {
-            let batch = match decode_input_frame_batch(&payload) {
-                Ok(batch) => batch,
-                Err(error) => {
-                    services.metrics.record_protocol_error();
-                    record_transport_close(
-                        services,
-                        invite_code,
-                        connection_id,
-                        format!("relay rejected input batch: {error}"),
-                    )
-                    .await;
-                    let _ =
-                        send_static_error(sender, "invalidInputBatch", "Input batch is invalid.")
-                            .await;
-                    return false;
-                }
-            };
-            match services
-                .rooms
-                .relay_input_frame_batch(invite_code.clone(), connection_id, batch)
-                .await
-            {
-                Ok(()) => true,
-                Err(error) => {
-                    if is_droppable_input_error(&error) {
-                        return true;
-                    }
-
-                    record_transport_close(
-                        services,
-                        invite_code,
-                        connection_id,
-                        format!("relay rejected input batch: {error}"),
-                    )
-                    .await;
-                    let _ = send_room_error(sender, error).await;
-                    false
-                }
+            if payload.starts_with(b"SBI2") {
+                handle_fast_input(sender, services, invite_code, connection_id, payload).await
+            } else {
+                handle_legacy_input(sender, services, invite_code, connection_id, &payload).await
             }
         }
         Some(Ok(Message::Close(frame))) => {
@@ -193,6 +163,105 @@ async fn handle_incoming(
     }
 }
 
+async fn handle_legacy_input(
+    sender: &mut SocketSender,
+    services: &AppServices,
+    invite_code: &crate::rooms::InviteCode,
+    connection_id: ConnectionId,
+    payload: &[u8],
+) -> bool {
+    let batch = match decode_input_frame_batch(payload) {
+        Ok(batch) => batch,
+        Err(error) => {
+            services.metrics.record_protocol_error();
+            record_transport_close(
+                services,
+                invite_code,
+                connection_id,
+                format!("relay rejected input batch: {error}"),
+            )
+            .await;
+            let _ = send_static_error(sender, "invalidInputBatch", "Input batch is invalid.").await;
+            return false;
+        }
+    };
+
+    relay_input_result(
+        sender,
+        services,
+        invite_code,
+        connection_id,
+        services
+            .rooms
+            .relay_input_frame_batch(invite_code.clone(), connection_id, batch)
+            .await,
+    )
+    .await
+}
+
+async fn handle_fast_input(
+    sender: &mut SocketSender,
+    services: &AppServices,
+    invite_code: &crate::rooms::InviteCode,
+    connection_id: ConnectionId,
+    payload: bytes::Bytes,
+) -> bool {
+    let batch = match decode_fast_input_batch(payload) {
+        Ok(batch) => batch,
+        Err(error) => {
+            services.metrics.record_protocol_error();
+            record_transport_close(
+                services,
+                invite_code,
+                connection_id,
+                format!("relay rejected fast input: {error}"),
+            )
+            .await;
+            let _ = send_static_error(sender, "invalidFastInput", "Fast input is invalid.").await;
+            return false;
+        }
+    };
+
+    relay_input_result(
+        sender,
+        services,
+        invite_code,
+        connection_id,
+        services
+            .rooms
+            .relay_fast_input_batch(invite_code.clone(), connection_id, batch)
+            .await,
+    )
+    .await
+}
+
+async fn relay_input_result(
+    sender: &mut SocketSender,
+    services: &AppServices,
+    invite_code: &crate::rooms::InviteCode,
+    connection_id: ConnectionId,
+    result: Result<(), RoomError>,
+) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(error) => {
+            if is_droppable_input_error(&error) {
+                return true;
+            }
+
+            record_transport_close(
+                services,
+                invite_code,
+                connection_id,
+                format!("relay rejected input batch: {error}"),
+            )
+            .await;
+            let _ = send_room_error(sender, error).await;
+            false
+        }
+    }
+}
+
 async fn record_transport_close(
     services: &AppServices,
     invite_code: &crate::rooms::InviteCode,
@@ -228,6 +297,13 @@ async fn handle_room_event(
                 Err(_) => return false,
             };
             send_binary_message(sender, payload).await.is_ok()
+        }
+        Ok(RoomInputEvent::FastInputFrame { source, frame }) => {
+            if source == connection_id {
+                return true;
+            }
+
+            send_binary_bytes(sender, frame.encoded()).await.is_ok()
         }
         Ok(RoomInputEvent::ServerFrame { frame }) => {
             send_binary_message(sender, encode_server_frame(&frame))

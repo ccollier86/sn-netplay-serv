@@ -4,10 +4,10 @@
 //! concepts inside the room domain model.
 
 use crate::protocol::{
-    InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket, RomRelayCancelled,
-    RomRelayCompletion, RomRelayFailure, RomRelayGrant, RomRelayProgress, ServerFrame,
-    SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant, SnapshotManifest,
-    StateHashMismatchView,
+    FastInputFrame, InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket,
+    RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayGrant, RomRelayProgress,
+    ScheduledSessionStart, ServerFrame, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant,
+    SnapshotManifest, StateHashMismatchView,
 };
 use crate::rooms::{ConnectionId, RoomView};
 
@@ -17,7 +17,23 @@ pub enum RoomEvent {
     /// Serializable room state should be broadcast to subscribers.
     RoomStateChanged(RoomView),
     /// Room reached the gameplay start state.
-    SessionStarted { start_frame: u64, room: RoomView },
+    SessionStarted {
+        /// Canonical start frame.
+        start_frame: u64,
+        /// Optional future server-time start contract for v2 clients.
+        scheduled_start: Option<ScheduledSessionStart>,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Room requested startup clock samples from v2 clients.
+    ClockSyncSampleRequested {
+        /// Clock-sample request sent to each connected client.
+        request: crate::protocol::ClockSyncSampleRequest,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+    },
     /// Room scheduled a coordinated pause.
     SessionPauseScheduled {
         /// Current pause state.
@@ -199,6 +215,13 @@ pub enum RoomInputEvent {
         source: ConnectionId,
         /// Validated input frame batch.
         batch: InputFrameBatch,
+    },
+    /// Validated fast-input record should be relayed without re-encoding.
+    FastInputFrame {
+        /// Connection that supplied the input record.
+        source: ConnectionId,
+        /// Validated self-contained fast-input record.
+        frame: FastInputFrame,
     },
     /// Canonical server frame released to every input socket.
     ServerFrame {

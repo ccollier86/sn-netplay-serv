@@ -6,7 +6,7 @@
 
 use crate::http::AppServices;
 use crate::protocol::ServerMessage;
-use crate::rooms::{ConnectionId, RoomEvent};
+use crate::rooms::{ClientTransportCapabilities, ConnectionId, RoomEvent};
 use crate::transport::websocket_message_handler::handle_client_text;
 use crate::transport::websocket_outbound::{
     SocketSender, send_server_message, send_static_error, send_upgrade_error,
@@ -24,6 +24,13 @@ pub async fn handle_websocket_session(
     request: WebSocketJoinRequest,
 ) {
     let connection_id = ConnectionId::new();
+    let capabilities = ClientTransportCapabilities {
+        supports_state_file_relay: request.supports_state_file_relay,
+        supports_rom_file_relay: request.supports_rom_file_relay,
+        supports_scheduled_start: request.supports_scheduled_start,
+        supports_clock_sync: request.supports_clock_sync,
+        supports_fast_input_relay: request.supports_fast_input_relay,
+    };
     let mut events = match services.rooms.subscribe(request.invite_code.clone()).await {
         Ok(events) => events,
         Err(error) => {
@@ -50,8 +57,7 @@ pub async fn handle_websocket_session(
                 room_epoch,
                 resume_token,
                 connection_id,
-                request.supports_state_file_relay,
-                request.supports_rom_file_relay,
+                capabilities,
             )
             .await
     } else {
@@ -63,8 +69,7 @@ pub async fn handle_websocket_session(
                         request.invite_code.clone(),
                         request.license,
                         connection_id,
-                        request.supports_state_file_relay,
-                        request.supports_rom_file_relay,
+                        capabilities,
                     )
                     .await
             }
@@ -75,8 +80,7 @@ pub async fn handle_websocket_session(
                         request.invite_code.clone(),
                         request.license,
                         connection_id,
-                        request.supports_state_file_relay,
-                        request.supports_rom_file_relay,
+                        capabilities,
                     )
                     .await
             }
@@ -237,16 +241,30 @@ async fn handle_room_event(
 ) -> bool {
     let message = match event {
         Ok(RoomEvent::RoomStateChanged(room)) => room_state_message(room),
-        Ok(RoomEvent::SessionStarted { start_frame, room }) => {
+        Ok(RoomEvent::SessionStarted {
+            start_frame,
+            scheduled_start,
+            room,
+        }) => {
             services.metrics.record_session_started();
             ServerMessage::StartSession {
                 event_seq: room.event_seq,
                 room_epoch: room.room_epoch,
                 session_epoch: room.session_epoch,
                 start_frame,
+                scheduled_start,
                 room,
             }
         }
+        Ok(RoomEvent::ClockSyncSampleRequested {
+            request,
+            room_epoch,
+            session_epoch,
+        }) => ServerMessage::ClockSyncSampleRequested {
+            room_epoch,
+            session_epoch,
+            request,
+        },
         Ok(RoomEvent::SessionPauseScheduled { pause, room }) => {
             ServerMessage::SessionPauseScheduled {
                 event_seq: room.event_seq,

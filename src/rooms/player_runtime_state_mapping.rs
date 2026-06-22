@@ -10,6 +10,7 @@ impl From<ClientRuntimeState> for PlayerRuntimeState {
             ClientRuntimeState::CheckingCompatibility => PlayerRuntimeState::CheckingCompatibility,
             ClientRuntimeState::Syncing => PlayerRuntimeState::Syncing,
             ClientRuntimeState::Ready => PlayerRuntimeState::Ready,
+            ClientRuntimeState::DeterministicReady => PlayerRuntimeState::DeterministicReady,
             ClientRuntimeState::Playing => PlayerRuntimeState::Playing,
             ClientRuntimeState::Pausing => PlayerRuntimeState::Pausing,
             ClientRuntimeState::Paused => PlayerRuntimeState::Paused,

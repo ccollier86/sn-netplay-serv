@@ -53,3 +53,6 @@ pub const ROOM_EXPIRATION_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// it at 60 Hz instead of 16 ms/62.5 Hz so clients do not slowly drift behind
 /// the server under normal NTSC cores.
 pub const ROOM_FRAME_CLOCK_INTERVAL: Duration = Duration::from_nanos(16_666_667);
+
+/// Minimum future delay before v2 scheduled gameplay release.
+pub const SCHEDULED_START_MINIMUM_DELAY: Duration = Duration::from_secs(3);

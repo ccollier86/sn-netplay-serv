@@ -3,19 +3,23 @@
 use super::InMemoryRoomRegistry;
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
+    ClientRuntimeState, CompatibilityFingerprint, FastInputBatch, InputFrame, InputFrameBatch,
     LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, RomRelayBlockReason,
     RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayProgress, SessionPauseReason,
     SnapshotChunk, SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, PlayerIndex, RomRelayGrantPair, RomRelayTransferIntent,
-    RoomDebugEvent, RoomError, RoomEventReceiver, RoomJoin, RoomRegistry, RoomRegistrySnapshot,
-    RoomView, SnapshotFileRelayTransferIntent,
+    ClientTransportCapabilities, ConnectionId, InviteCode, PlayerIndex, RomRelayGrantPair,
+    RomRelayTransferIntent, RoomDebugEvent, RoomError, RoomEventReceiver, RoomJoin, RoomRegistry,
+    RoomRegistrySnapshot, RoomView, SnapshotFileRelayTransferIntent,
 };
 
 #[async_trait::async_trait]
 impl RoomRegistry for InMemoryRoomRegistry {
+    fn server_time_ms(&self) -> u64 {
+        InMemoryRoomRegistry::server_time_ms(self)
+    }
+
     async fn create_room(
         &self,
         host: VerifiedLicense,
@@ -40,17 +44,10 @@ impl RoomRegistry for InMemoryRoomRegistry {
         invite_code: InviteCode,
         host: VerifiedLicense,
         connection_id: ConnectionId,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) -> Result<RoomJoin, RoomError> {
-        self.connect_host_impl(
-            invite_code,
-            host,
-            connection_id,
-            supports_state_file_relay,
-            supports_rom_file_relay,
-        )
-        .await
+        self.connect_host_impl(invite_code, host, connection_id, capabilities)
+            .await
     }
 
     async fn connect_guest(
@@ -58,17 +55,10 @@ impl RoomRegistry for InMemoryRoomRegistry {
         invite_code: InviteCode,
         guest: VerifiedLicense,
         connection_id: ConnectionId,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) -> Result<RoomJoin, RoomError> {
-        self.connect_guest_impl(
-            invite_code,
-            guest,
-            connection_id,
-            supports_state_file_relay,
-            supports_rom_file_relay,
-        )
-        .await
+        self.connect_guest_impl(invite_code, guest, connection_id, capabilities)
+            .await
     }
 
     async fn reconnect_player(
@@ -78,8 +68,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
         room_epoch: u64,
         resume_token: String,
         connection_id: ConnectionId,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) -> Result<RoomJoin, RoomError> {
         self.reconnect_player_impl(
             invite_code,
@@ -87,8 +76,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
             room_epoch,
             resume_token,
             connection_id,
-            supports_state_file_relay,
-            supports_rom_file_relay,
+            capabilities,
         )
         .await
     }
@@ -198,6 +186,27 @@ impl RoomRegistry for InMemoryRoomRegistry {
         network: Option<crate::protocol::ClientNetworkQualityReport>,
     ) -> Result<RoomView, RoomError> {
         self.mark_ready_impl(invite_code, connection_id, network)
+            .await
+    }
+
+    async fn record_clock_sync_sample(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        sample: crate::protocol::ClockSyncSample,
+    ) -> Result<RoomView, RoomError> {
+        self.record_clock_sync_sample_impl(invite_code, connection_id, sample)
+            .await
+    }
+
+    async fn mark_deterministic_ready(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        report: crate::protocol::DeterministicReadyReport,
+        network: Option<crate::protocol::ClientNetworkQualityReport>,
+    ) -> Result<RoomView, RoomError> {
+        self.mark_deterministic_ready_impl(invite_code, connection_id, report, network)
             .await
     }
 
@@ -344,6 +353,16 @@ impl RoomRegistry for InMemoryRoomRegistry {
         batch: InputFrameBatch,
     ) -> Result<(), RoomError> {
         self.relay_input_frame_batch_impl(invite_code, connection_id, batch)
+            .await
+    }
+
+    async fn relay_fast_input_batch(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        batch: FastInputBatch,
+    ) -> Result<(), RoomError> {
+        self.relay_fast_input_batch_impl(invite_code, connection_id, batch)
             .await
     }
 

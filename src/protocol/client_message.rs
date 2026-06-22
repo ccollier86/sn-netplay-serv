@@ -4,8 +4,9 @@
 //! happens in room modules before input or state is accepted.
 
 use crate::protocol::{
-    ClientNetworkQualityReport, ClientRuntimeState, CompatibilityFingerprint, InputFrame,
-    LinkCableCompatibility, LinkCablePacket, RomRelayCancelled as RomRelayCancelledPayload,
+    ClientNetworkQualityReport, ClientRuntimeState, ClockSyncPing, ClockSyncSample,
+    CompatibilityFingerprint, DeterministicReadyReport, InputFrame, LinkCableCompatibility,
+    LinkCablePacket, RomRelayCancelled as RomRelayCancelledPayload,
     RomRelayCompletion as RomRelayCompletionPayload, RomRelayFailure as RomRelayFailurePayload,
     RomRelayProgress as RomRelayProgressPayload, SessionPauseReason, SnapshotChunk,
     SnapshotManifest, StateHashReport,
@@ -22,6 +23,20 @@ use serde::Deserialize;
 pub enum ClientMessage {
     /// Lightweight connection keepalive.
     Ping,
+    /// Client-originated clock ping for diagnostics and clock estimates.
+    ClockSyncPing {
+        /// Clock ping payload.
+        ping: ClockSyncPing,
+    },
+    /// Client response to a server-requested startup clock sample.
+    ClockSyncSample {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+        /// Clock sample payload.
+        sample: ClockSyncSample,
+    },
     /// Client compatibility fingerprint for the current game/core.
     SetCompatibilityFingerprint {
         /// Current room epoch observed by the client.
@@ -46,6 +61,18 @@ pub enum ClientMessage {
         room_epoch: u64,
         /// Current session epoch observed by the client.
         session_epoch: u64,
+        /// Latest network/runtime health sample, when the client has one.
+        #[serde(default)]
+        network: Option<ClientNetworkQualityReport>,
+    },
+    /// Client reports its runner is ready for synchronized frame release.
+    DeterministicReady {
+        /// Current room epoch observed by the client.
+        room_epoch: u64,
+        /// Current session epoch observed by the client.
+        session_epoch: u64,
+        /// Deterministic readiness payload.
+        report: DeterministicReadyReport,
         /// Latest network/runtime health sample, when the client has one.
         #[serde(default)]
         network: Option<ClientNetworkQualityReport>,

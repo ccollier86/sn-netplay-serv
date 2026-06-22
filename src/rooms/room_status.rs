@@ -18,6 +18,8 @@ pub enum RoomStatus {
     SyncingState,
     /// Clients are ready for snapshot sync or start.
     Ready,
+    /// V2 clients have a future synchronized start scheduled.
+    StartScheduled,
     /// Gameplay input relay is active.
     Playing,
     /// Gameplay is paused by the coordinated netplay pause contract.

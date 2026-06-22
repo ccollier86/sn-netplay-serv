@@ -29,7 +29,10 @@ use serde::{Deserialize, Serialize};
 
 pub use errors::LobbyError;
 pub use in_memory_lobby_registry::InMemoryLobbyRegistry;
-pub use lobby::{Lobby, LobbyStatus, LobbyVisibility, MAX_LOBBY_PLAYERS};
+pub use lobby::{
+    Lobby, LobbyCreateRequest, LobbyReconnectRequest, LobbyStatus, LobbyVisibility,
+    MAX_LOBBY_PLAYERS,
+};
 pub use lobby_activity::LobbyActivityKind;
 pub use lobby_capabilities::{LobbyClientCapabilities, LobbyServerCapabilities};
 pub use lobby_chat::LobbyChatMessageView;
@@ -43,7 +46,9 @@ pub use lobby_game::{LobbyGameCandidate, LobbyGameSelectionView};
 pub use lobby_launch::{
     LobbyGameLaunchStatus, LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView,
 };
-pub use lobby_player::{LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerSlotView, LobbyPlayerStatus};
+pub use lobby_player::{
+    LobbyPlayerOccupancy, LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerSlotView, LobbyPlayerStatus,
+};
 pub use lobby_registry_trait::{LobbyEventReceiver, LobbyRegistry, PublicLobbyEventReceiver};
 pub use lobby_rom_relay::{LobbyRomRelayLimits, LobbyRomRelayTransferIntent};
 pub use lobby_view::{LobbyView, PublicLobbySummary};
@@ -80,6 +85,24 @@ pub struct JoinLobbyParams {
     /// Client feature support.
     #[serde(default = "LobbyClientCapabilities::desktop_default")]
     pub capabilities: LobbyClientCapabilities,
+}
+
+/// Registry-level request to reclaim a lobby slot from a reconnecting socket.
+pub struct ReconnectLobbyPlayerRequest {
+    /// Lobby invite code being rejoined.
+    pub invite_code: crate::rooms::InviteCode,
+    /// Verified reconnecting player.
+    pub player: crate::auth::VerifiedLicense,
+    /// Display name and client capability refresh.
+    pub params: JoinLobbyParams,
+    /// Slot the player is trying to reclaim.
+    pub player_index: PlayerIndex,
+    /// Lobby epoch observed by the reconnecting client.
+    pub lobby_epoch: u64,
+    /// Raw resume token supplied by the reconnecting client.
+    pub resume_token: String,
+    /// Fresh lobby socket connection id.
+    pub connection_id: crate::rooms::ConnectionId,
 }
 
 /// Successful lobby join grant.

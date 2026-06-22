@@ -126,7 +126,7 @@ fn deserialize_legacy_time_array(parts: &[Value]) -> Result<String, String> {
     let fraction = if nanosecond == 0 {
         String::new()
     } else {
-        format!(".{:09}", nanosecond)
+        format!(".{nanosecond:09}")
             .trim_end_matches('0')
             .to_string()
     };

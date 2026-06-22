@@ -92,6 +92,24 @@ pub struct LobbyPlayerSlotView {
     pub last_seen_at_ms: Option<u128>,
 }
 
+/// Verified player claim used to occupy or refresh a lobby slot.
+pub struct LobbyPlayerOccupancy<'a> {
+    /// Server-assigned role for the occupied slot.
+    pub role: LobbyPlayerRole,
+    /// Verified license for the player occupying this slot.
+    pub license: &'a VerifiedLicense,
+    /// Active lobby control connection.
+    pub connection_id: ConnectionId,
+    /// Optional display name chosen by the player.
+    pub display_name: Option<String>,
+    /// Client-reported lobby capabilities.
+    pub capabilities: LobbyClientCapabilities,
+    /// One-way hash of the issued resume token.
+    pub resume_token_hash: ResumeTokenHash,
+    /// Activity timestamp in milliseconds since unix epoch.
+    pub now_ms: u128,
+}
+
 impl LobbyPlayerSlot {
     /// Creates an empty lobby player slot.
     pub fn empty(player_index: PlayerIndex) -> Self {
@@ -120,15 +138,15 @@ impl LobbyPlayerSlot {
         now_ms: u128,
     ) -> Self {
         let mut slot = Self::empty(PlayerIndex::ONE);
-        slot.occupy(
-            LobbyPlayerRole::Host,
+        slot.occupy(LobbyPlayerOccupancy {
+            role: LobbyPlayerRole::Host,
             license,
             connection_id,
             display_name,
             capabilities,
             resume_token_hash,
             now_ms,
-        );
+        });
         slot
     }
 
@@ -145,27 +163,18 @@ impl LobbyPlayerSlot {
     }
 
     /// Occupies or refreshes a slot with verified player data.
-    pub fn occupy(
-        &mut self,
-        role: LobbyPlayerRole,
-        license: &VerifiedLicense,
-        connection_id: ConnectionId,
-        display_name: Option<String>,
-        capabilities: LobbyClientCapabilities,
-        resume_token_hash: ResumeTokenHash,
-        now_ms: u128,
-    ) {
-        self.role = role;
-        self.subject_key = Some(license.identity_key());
-        self.client_kind = Some(license.client_kind);
-        self.connection_id = Some(connection_id);
-        if display_name.is_some() {
-            self.display_name = display_name;
+    pub fn occupy(&mut self, occupancy: LobbyPlayerOccupancy<'_>) {
+        self.role = occupancy.role;
+        self.subject_key = Some(occupancy.license.identity_key());
+        self.client_kind = Some(occupancy.license.client_kind);
+        self.connection_id = Some(occupancy.connection_id);
+        if occupancy.display_name.is_some() {
+            self.display_name = occupancy.display_name;
         }
         self.status = LobbyPlayerStatus::Connected;
-        self.capabilities = capabilities;
-        self.resume_token_hash = Some(resume_token_hash);
-        self.last_seen_at_ms = Some(now_ms);
+        self.capabilities = occupancy.capabilities;
+        self.resume_token_hash = Some(occupancy.resume_token_hash);
+        self.last_seen_at_ms = Some(occupancy.now_ms);
     }
 
     /// Converts the slot into the API view.

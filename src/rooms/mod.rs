@@ -5,8 +5,10 @@
 //! authority.
 
 mod adaptive_input_delay_policy;
+mod client_transport_capabilities;
 mod clock;
 mod errors;
+mod fast_input_relay_buffer;
 mod ids;
 mod input_frame_acceptance;
 mod input_frame_relay_buffer;
@@ -36,6 +38,7 @@ mod room_registry_snapshot;
 mod room_registry_trait;
 mod room_rom_relay_ops;
 mod room_snapshot_ops;
+mod room_start_sync;
 mod room_state_hash_ops;
 mod room_status;
 mod room_view;
@@ -48,8 +51,10 @@ mod snapshot_transfer;
 mod stored_room;
 
 pub(crate) use adaptive_input_delay_policy::AdaptiveInputDelayPolicy;
+pub use client_transport_capabilities::ClientTransportCapabilities;
 pub use clock::{Clock, SystemClock};
 pub use errors::RoomError;
+pub(crate) use fast_input_relay_buffer::FastInputRelayBuffer;
 pub use ids::{ConnectionId, PlayerIndex, RoomId};
 pub use input_frame_acceptance::InputFrameAcceptance;
 pub(crate) use input_frame_relay_buffer::InputFrameRelayBuffer;
@@ -63,6 +68,8 @@ pub use resume_token::{
 pub(crate) use rom_relay::RomRelayTransferState;
 pub use rom_relay::{RomRelayGrantPair, RomRelayTransferIntent};
 pub use room::NetplayRoom;
+pub(crate) use room_connection_ops::PlayerReconnectRequest;
+pub(crate) use room_controller_netplay_ops::InputFrameCursor;
 pub use room_controller_netplay_ops::{SessionPauseReachedOutcome, SessionResumeOutcome};
 pub use room_debug_event::{
     NoopRoomDebugEventSink, RoomDebugEvent, RoomDebugEventLog, RoomDebugEventSink,
@@ -76,6 +83,7 @@ pub use room_performance_sample::RoomPerformanceSample;
 pub use room_registry::InMemoryRoomRegistry;
 pub use room_registry_snapshot::RoomRegistrySnapshot;
 pub use room_registry_trait::{RoomEventReceiver, RoomInputEventReceiver, RoomRegistry};
+pub(crate) use room_start_sync::{ClockSyncSampleRequestState, StartSyncOutcome};
 pub(crate) use room_state_hash_ops::StateHashEvaluation;
 pub use room_status::RoomStatus;
 pub use room_view::{PlayerFrameCursorView, PlayerSlotView, RoomFrameClockView, RoomView};

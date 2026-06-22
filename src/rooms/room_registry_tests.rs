@@ -75,8 +75,7 @@ async fn connect_guest_returns_joined_room_view() {
             InviteCode::parse(view.invite_code).expect("invite"),
             license("guest"),
             ConnectionId::new(),
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("guest");
@@ -96,7 +95,12 @@ async fn join_broadcasts_room_state_event() {
     let mut events = registry.subscribe(invite.clone()).await.expect("events");
 
     registry
-        .connect_guest(invite, license("guest"), ConnectionId::new(), false, false)
+        .connect_guest(
+            invite,
+            license("guest"),
+            ConnectionId::new(),
+            crate::rooms::ClientTransportCapabilities::default(),
+        )
         .await
         .expect("guest");
 
@@ -159,8 +163,7 @@ async fn joined_rooms_do_not_expire_as_waiting_rooms() {
             InviteCode::parse(view.invite_code).expect("invite"),
             license("guest"),
             ConnectionId::new(),
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("guest");
@@ -233,8 +236,7 @@ async fn compatibility_mismatch_broadcasts_room_state() {
             invite.clone(),
             license("guest"),
             guest_connection,
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("guest");
@@ -950,8 +952,7 @@ async fn reconnect_with_valid_resume_token_restores_player_slot() {
             known_epoch,
             guest_token,
             ConnectionId::new(),
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("guest reconnect");
@@ -987,8 +988,7 @@ async fn reconnect_rejects_stale_room_epoch() {
             stale_epoch,
             guest_token,
             ConnectionId::new(),
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await;
 
@@ -1074,8 +1074,7 @@ async fn second_disconnect_during_recovery_keeps_both_slots_reconnectable() {
             known_epoch,
             host_token,
             ConnectionId::new(),
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("host reconnect");
@@ -1086,8 +1085,7 @@ async fn second_disconnect_during_recovery_keeps_both_slots_reconnectable() {
             known_epoch,
             guest_token,
             ConnectionId::new(),
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("guest reconnect");
@@ -1122,8 +1120,7 @@ async fn compatible_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, C
             invite.clone(),
             license("host"),
             host_connection,
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("host");
@@ -1132,8 +1129,7 @@ async fn compatible_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, C
             invite.clone(),
             license("guest"),
             guest_connection,
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("guest");
@@ -1217,8 +1213,7 @@ async fn reconnectable_room() -> (
             invite.clone(),
             license("host"),
             host_connection,
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("host");
@@ -1227,8 +1222,7 @@ async fn reconnectable_room() -> (
             invite.clone(),
             license("guest"),
             guest_connection,
-            false,
-            false,
+            crate::rooms::ClientTransportCapabilities::default(),
         )
         .await
         .expect("guest");

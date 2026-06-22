@@ -9,8 +9,8 @@ use crate::auth::VerifiedLicense;
 use crate::protocol::NetplaySessionDescriptor;
 use crate::rooms::stored_room::StoredRoom;
 use crate::rooms::{
-    ConnectionId, InviteCode, NetplayRoom, PlayerIndex, RoomError, RoomJoin, RoomView,
-    hash_resume_token,
+    ClientTransportCapabilities, ConnectionId, InviteCode, NetplayRoom, PlayerIndex,
+    PlayerReconnectRequest, RoomError, RoomJoin, RoomView, hash_resume_token,
 };
 use std::time::{Duration, Instant};
 
@@ -68,8 +68,7 @@ impl InMemoryRoomRegistry {
             resume_token.hash(),
             input_socket_token.hash(),
             now,
-            false,
-            false,
+            ClientTransportCapabilities::default(),
         )?;
 
         stored_room.emit_state(now, "guestJoined", "guest joined room");
@@ -84,8 +83,7 @@ impl InMemoryRoomRegistry {
         invite_code: InviteCode,
         host: VerifiedLicense,
         connection_id: ConnectionId,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) -> Result<RoomJoin, RoomError> {
         let mut rooms = self.invite_codes.write().await;
         let stored_room = rooms
@@ -100,8 +98,7 @@ impl InMemoryRoomRegistry {
             resume_token.hash(),
             input_socket_token.hash(),
             now,
-            supports_state_file_relay,
-            supports_rom_file_relay,
+            capabilities,
         )?;
 
         stored_room.emit_state(now, "hostConnected", "host socket connected");
@@ -123,8 +120,7 @@ impl InMemoryRoomRegistry {
         invite_code: InviteCode,
         guest: VerifiedLicense,
         connection_id: ConnectionId,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) -> Result<RoomJoin, RoomError> {
         let mut rooms = self.invite_codes.write().await;
         let stored_room = rooms
@@ -139,8 +135,7 @@ impl InMemoryRoomRegistry {
             resume_token.hash(),
             input_socket_token.hash(),
             now,
-            supports_state_file_relay,
-            supports_rom_file_relay,
+            capabilities,
         )?;
 
         stored_room.emit_state(now, "guestConnected", "guest socket connected");
@@ -164,8 +159,7 @@ impl InMemoryRoomRegistry {
         room_epoch: u64,
         resume_token: String,
         connection_id: ConnectionId,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) -> Result<RoomJoin, RoomError> {
         let mut rooms = self.invite_codes.write().await;
         let stored_room = rooms
@@ -173,16 +167,16 @@ impl InMemoryRoomRegistry {
             .ok_or(RoomError::NotFound)?;
         let now = self.clock.now();
         let input_socket_token = self.resume_token_generator.generate();
-        stored_room.room.reconnect_player(
+        let resume_token_hash = hash_resume_token(&resume_token);
+        stored_room.room.reconnect_player(PlayerReconnectRequest {
             player_index,
-            &hash_resume_token(&resume_token),
-            input_socket_token.hash(),
+            resume_token_hash: &resume_token_hash,
+            input_socket_token_hash: input_socket_token.hash(),
             room_epoch,
             connection_id,
             now,
-            supports_state_file_relay,
-            supports_rom_file_relay,
-        )?;
+            capabilities,
+        })?;
         stored_room.emit_state(now, "playerReconnected", "player reconnected");
         let room = stored_room.view(now);
         self.record_recent_events(stored_room.debug_events(1));

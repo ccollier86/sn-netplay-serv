@@ -7,7 +7,8 @@ use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     LobbyActivityKind, LobbyClientCapabilities, LobbyError, LobbyGameCandidate,
     LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView, LobbyGameSelectionView,
-    LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerStatus, LobbyServerCapabilities, LobbyView,
+    LobbyPlayerOccupancy, LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerStatus,
+    LobbyServerCapabilities, LobbyView,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, ResumeTokenHash, RoomId, RoomVoiceState,
@@ -62,33 +63,66 @@ pub struct Lobby {
     pub(crate) voice: Option<RoomVoiceState>,
 }
 
+/// Data required to create a lobby and reserve the host slot.
+pub struct LobbyCreateRequest<'a> {
+    /// Invite code assigned to the lobby.
+    pub invite_code: InviteCode,
+    /// Verified host identity.
+    pub host: &'a VerifiedLicense,
+    /// Active host lobby connection.
+    pub host_connection: ConnectionId,
+    /// Optional host display name.
+    pub host_display_name: Option<String>,
+    /// Host client feature support.
+    pub host_capabilities: LobbyClientCapabilities,
+    /// One-way hash of the host resume token.
+    pub host_resume_token_hash: ResumeTokenHash,
+    /// Optional first game selected for the lobby.
+    pub initial_game: Option<LobbyGameCandidate>,
+    /// Lobby discovery visibility.
+    pub visibility: LobbyVisibility,
+    /// Creation timestamp in milliseconds since unix epoch.
+    pub now_ms: u128,
+}
+
+/// Data required to reclaim an existing lobby player slot.
+pub struct LobbyReconnectRequest<'a> {
+    /// Verified reconnecting player identity.
+    pub license: &'a VerifiedLicense,
+    /// Slot the player is trying to reclaim.
+    pub player_index: PlayerIndex,
+    /// Lobby epoch observed by the reconnecting client.
+    pub lobby_epoch: u64,
+    /// Raw resume token supplied by the reconnecting client.
+    pub resume_token: &'a str,
+    /// Fresh lobby control connection id.
+    pub connection_id: ConnectionId,
+    /// Optional display name refresh.
+    pub display_name: Option<String>,
+    /// Client feature support after reconnect.
+    pub capabilities: LobbyClientCapabilities,
+    /// Activity timestamp in milliseconds since unix epoch.
+    pub now_ms: u128,
+}
+
 impl Lobby {
     /// Creates a new lobby with Player 1 occupied by the host.
-    pub fn new(
-        invite_code: InviteCode,
-        host: &VerifiedLicense,
-        host_connection: ConnectionId,
-        host_display_name: Option<String>,
-        host_capabilities: LobbyClientCapabilities,
-        host_resume_token_hash: ResumeTokenHash,
-        initial_game: Option<LobbyGameCandidate>,
-        visibility: LobbyVisibility,
-        now_ms: u128,
-    ) -> Self {
+    pub fn new(request: LobbyCreateRequest<'_>) -> Self {
         let mut players = (0..MAX_LOBBY_PLAYERS)
             .filter_map(|index| PlayerIndex::new(index, MAX_LOBBY_PLAYERS))
             .map(LobbyPlayerSlot::empty)
             .collect::<Vec<_>>();
         players[0] = LobbyPlayerSlot::host(
-            host,
-            host_connection,
-            host_display_name,
-            host_capabilities,
-            host_resume_token_hash,
-            now_ms,
+            request.host,
+            request.host_connection,
+            request.host_display_name,
+            request.host_capabilities,
+            request.host_resume_token_hash,
+            request.now_ms,
         );
-        let selected_game =
-            initial_game.map(|game| LobbyGameSelectionView::new(game, PlayerIndex::ONE, now_ms));
+        let selected_game = request
+            .initial_game
+            .map(|game| LobbyGameSelectionView::new(game, PlayerIndex::ONE, request.now_ms));
         let status = if selected_game.is_some() {
             LobbyStatus::GameSelected
         } else {
@@ -97,14 +131,14 @@ impl Lobby {
 
         Self {
             lobby_id: RoomId::new(),
-            invite_code,
+            invite_code: request.invite_code,
             event_seq: 1,
             lobby_epoch: 1,
-            created_at_ms: now_ms,
-            updated_at_ms: now_ms,
-            last_meaningful_activity_at_ms: now_ms,
+            created_at_ms: request.now_ms,
+            updated_at_ms: request.now_ms,
+            last_meaningful_activity_at_ms: request.now_ms,
             status,
-            visibility,
+            visibility: request.visibility,
             players,
             selected_game,
             game_readiness: Vec::new(),
@@ -134,7 +168,7 @@ impl Lobby {
         {
             let role = slot.role;
             let player_index = slot.player_index;
-            slot.occupy(
+            slot.occupy(LobbyPlayerOccupancy {
                 role,
                 license,
                 connection_id,
@@ -142,7 +176,7 @@ impl Lobby {
                 capabilities,
                 resume_token_hash,
                 now_ms,
-            );
+            });
             self.bump_with_activity(now_ms);
             return Ok(player_index);
         }
@@ -151,15 +185,15 @@ impl Lobby {
             return Err(LobbyError::LobbyFull);
         };
         let player_index = slot.player_index;
-        slot.occupy(
-            LobbyPlayerRole::Guest,
+        slot.occupy(LobbyPlayerOccupancy {
+            role: LobbyPlayerRole::Guest,
             license,
             connection_id,
             display_name,
             capabilities,
             resume_token_hash,
             now_ms,
-        );
+        });
         self.bump_with_activity(now_ms);
 
         Ok(player_index)
@@ -168,43 +202,37 @@ impl Lobby {
     /// Reclaims a lobby slot with a valid resume token.
     pub fn reconnect_player(
         &mut self,
-        license: &VerifiedLicense,
-        player_index: PlayerIndex,
-        lobby_epoch: u64,
-        resume_token: &str,
-        connection_id: ConnectionId,
-        display_name: Option<String>,
-        capabilities: LobbyClientCapabilities,
-        now_ms: u128,
+        request: LobbyReconnectRequest<'_>,
     ) -> Result<PlayerIndex, LobbyError> {
         if self.status == LobbyStatus::Closed {
             return Err(LobbyError::LobbyClosed);
         }
-        if lobby_epoch > self.lobby_epoch {
+        if request.lobby_epoch > self.lobby_epoch {
             return Err(LobbyError::StaleLobbyEpoch);
         }
+        let resume_token_hash = hash_resume_token(request.resume_token);
         let slot = self
-            .slot_mut(player_index)
+            .slot_mut(request.player_index)
             .ok_or(LobbyError::PlayerSlotUnavailable)?;
-        if !slot.belongs_to(license) {
+        if !slot.belongs_to(request.license) {
             return Err(LobbyError::PlayerSlotUnavailable);
         }
-        if slot.resume_token_hash.as_deref() != Some(hash_resume_token(resume_token).as_str()) {
+        if slot.resume_token_hash.as_deref() != Some(resume_token_hash.as_str()) {
             return Err(LobbyError::ResumeTokenInvalid);
         }
 
-        slot.occupy(
-            slot.role,
-            license,
-            connection_id,
-            display_name,
-            capabilities,
-            hash_resume_token(resume_token),
-            now_ms,
-        );
-        self.bump_with_activity(now_ms);
+        slot.occupy(LobbyPlayerOccupancy {
+            role: slot.role,
+            license: request.license,
+            connection_id: request.connection_id,
+            display_name: request.display_name,
+            capabilities: request.capabilities,
+            resume_token_hash,
+            now_ms: request.now_ms,
+        });
+        self.bump_with_activity(request.now_ms);
 
-        Ok(player_index)
+        Ok(request.player_index)
     }
 
     /// Marks one lobby socket disconnected while preserving the slot.

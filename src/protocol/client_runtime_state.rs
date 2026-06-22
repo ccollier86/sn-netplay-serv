@@ -18,6 +18,8 @@ pub enum ClientRuntimeState {
     Syncing,
     /// Client has loaded required sync state.
     Ready,
+    /// Client is warmed and ready for scheduled deterministic release.
+    DeterministicReady,
     /// Client is running active netplay.
     Playing,
     /// Client is moving toward a scheduled pause frame.

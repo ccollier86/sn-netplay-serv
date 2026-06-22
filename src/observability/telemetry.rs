@@ -18,15 +18,18 @@ use tokio::task::JoinHandle;
 use tokio::time::{Duration, MissedTickBehavior};
 use tracing::warn;
 
+/// Room sink, lobby sink, and optional background drain task returned at startup.
+pub type TelemetrySinkHandles = (
+    Arc<dyn RoomDebugEventSink>,
+    Arc<dyn LobbyDebugEventSink>,
+    Option<JoinHandle<()>>,
+);
+
 /// Creates the configured room-event sink and optional background drain task.
 pub fn spawn_telemetry_sink(
     config: TelemetryConfig,
     metrics: Arc<dyn MetricsRecorder>,
-) -> (
-    Arc<dyn RoomDebugEventSink>,
-    Arc<dyn LobbyDebugEventSink>,
-    Option<JoinHandle<()>>,
-) {
+) -> TelemetrySinkHandles {
     match config.sink {
         TelemetrySinkConfig::Disabled => (
             Arc::new(NoopRoomDebugEventSink),

@@ -7,8 +7,10 @@ mod client_kind;
 mod client_message;
 mod client_network_quality;
 mod client_runtime_state;
+mod clock_sync;
 mod compatibility;
 mod descriptor_validation;
+mod fast_input;
 mod input_batch;
 mod input_delay_change;
 mod input_frame;
@@ -19,6 +21,7 @@ mod lobby_file_relay;
 mod lobby_messages;
 mod netplay_protocol;
 mod rom_relay;
+mod scheduled_start;
 mod server_frame;
 mod server_message;
 mod session_descriptor;
@@ -34,7 +37,14 @@ pub use client_kind::NetplayClientKind;
 pub use client_message::ClientMessage;
 pub use client_network_quality::ClientNetworkQualityReport;
 pub use client_runtime_state::ClientRuntimeState;
+pub use clock_sync::{
+    ClockSyncEstimate, ClockSyncPing, ClockSyncPong, ClockSyncSample, ClockSyncSampleRequest,
+};
 pub use compatibility::{CompatibilityFingerprint, CompatibilityMismatch};
+pub use fast_input::{
+    FastInputBatch, FastInputCodecError, FastInputFrame, decode_fast_input_batch,
+    encode_fast_input_frame,
+};
 pub use input_batch::{
     InputFrameBatch, InputFrameBatchCodecError, decode_input_frame_batch, encode_input_frame_batch,
 };
@@ -55,6 +65,7 @@ pub use rom_relay::{
     RomRelayFailure, RomRelayGrant, RomRelayGrantRole, RomRelayIntent, RomRelayProgress,
     is_content_hash, normalize_content_hash,
 };
+pub use scheduled_start::{DeterministicReadyReport, ScheduledSessionStart};
 pub use server_frame::{
     ServerFrame, ServerFrameCodecError, decode_server_frame, encode_server_frame,
 };

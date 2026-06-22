@@ -6,15 +6,15 @@
 
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
+    ClientRuntimeState, CompatibilityFingerprint, FastInputBatch, InputFrame, InputFrameBatch,
     LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, RomRelayBlockReason,
     RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayProgress, SessionPauseReason,
     SnapshotChunk, SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, PlayerIndex, RomRelayGrantPair, RomRelayTransferIntent,
-    RoomDebugEvent, RoomError, RoomEvent, RoomInputEvent, RoomJoin, RoomRegistrySnapshot, RoomView,
-    RoomVoiceTokenRefresh, SnapshotFileRelayTransferIntent,
+    ClientTransportCapabilities, ConnectionId, InviteCode, PlayerIndex, RomRelayGrantPair,
+    RomRelayTransferIntent, RoomDebugEvent, RoomError, RoomEvent, RoomInputEvent, RoomJoin,
+    RoomRegistrySnapshot, RoomView, RoomVoiceTokenRefresh, SnapshotFileRelayTransferIntent,
 };
 use tokio::sync::broadcast;
 
@@ -26,6 +26,9 @@ pub type RoomInputEventReceiver = broadcast::Receiver<RoomInputEvent>;
 /// Room storage behavior needed by transports and routes.
 #[async_trait::async_trait]
 pub trait RoomRegistry: Send + Sync {
+    /// Returns monotonic server milliseconds for protocol clock samples.
+    fn server_time_ms(&self) -> u64;
+
     /// Creates a new room for a verified host.
     async fn create_room(
         &self,
@@ -48,8 +51,7 @@ pub trait RoomRegistry: Send + Sync {
         invite_code: InviteCode,
         host: VerifiedLicense,
         connection_id: ConnectionId,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) -> Result<RoomJoin, RoomError>;
 
     /// Adds a verified guest socket and returns the joined room state.
@@ -58,8 +60,7 @@ pub trait RoomRegistry: Send + Sync {
         invite_code: InviteCode,
         guest: VerifiedLicense,
         connection_id: ConnectionId,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) -> Result<RoomJoin, RoomError>;
 
     /// Reclaims an occupied player slot with a valid resume token.
@@ -70,8 +71,7 @@ pub trait RoomRegistry: Send + Sync {
         room_epoch: u64,
         resume_token: String,
         connection_id: ConnectionId,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) -> Result<RoomJoin, RoomError>;
 
     /// Marks a socket connection as disconnected.
@@ -153,6 +153,23 @@ pub trait RoomRegistry: Send + Sync {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        network: Option<crate::protocol::ClientNetworkQualityReport>,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Records one v2 startup clock sample.
+    async fn record_clock_sync_sample(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        sample: crate::protocol::ClockSyncSample,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Marks one v2 client deterministic-ready for scheduled release.
+    async fn mark_deterministic_ready(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        report: crate::protocol::DeterministicReadyReport,
         network: Option<crate::protocol::ClientNetworkQualityReport>,
     ) -> Result<RoomView, RoomError>;
 
@@ -259,6 +276,14 @@ pub trait RoomRegistry: Send + Sync {
         invite_code: InviteCode,
         connection_id: ConnectionId,
         batch: InputFrameBatch,
+    ) -> Result<(), RoomError>;
+
+    /// Validates and relays fast binary input records.
+    async fn relay_fast_input_batch(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        batch: FastInputBatch,
     ) -> Result<(), RoomError>;
 
     /// Validates and broadcasts one virtual link-cable packet.

@@ -36,6 +36,12 @@ pub struct WebSocketJoinRequest {
     pub supports_state_file_relay: bool,
     /// Whether this socket can use file relay for temporary direct-invite ROMs.
     pub supports_rom_file_relay: bool,
+    /// Whether this socket can use v2 scheduled synchronized start.
+    pub supports_scheduled_start: bool,
+    /// Whether this socket can answer v2 clock-sample requests.
+    pub supports_clock_sync: bool,
+    /// Whether this socket can use the v2 fast binary input relay.
+    pub supports_fast_input_relay: bool,
     /// Verified Desktop install/license identity.
     pub license: VerifiedLicense,
 }

@@ -7,10 +7,28 @@
 use crate::auth::VerifiedLicense;
 use crate::protocol::{ClientNetworkQualityReport, ClientRuntimeState};
 use crate::rooms::{
-    ConnectionId, NetplayRoom, PlayerIndex, PlayerRole, PlayerRuntimeState, PlayerStatus,
-    ResumeTokenHash, RoomError, RoomStatus,
+    ClientTransportCapabilities, ConnectionId, NetplayRoom, PlayerIndex, PlayerRole,
+    PlayerRuntimeState, PlayerStatus, ResumeTokenHash, RoomError, RoomStatus,
 };
 use std::time::{Duration, Instant};
+
+/// Reconnect claim submitted by the room registry after validating transport context.
+pub(crate) struct PlayerReconnectRequest<'a> {
+    /// Slot index the reconnecting client is reclaiming.
+    pub player_index: PlayerIndex,
+    /// Server-side hash of the long-lived control resume token.
+    pub resume_token_hash: &'a str,
+    /// Server-side hash of the newly issued input socket token.
+    pub input_socket_token_hash: ResumeTokenHash,
+    /// Room epoch observed by the reconnecting client.
+    pub room_epoch: u64,
+    /// Fresh control socket connection id.
+    pub connection_id: ConnectionId,
+    /// Registry clock timestamp for timeout checks and liveness updates.
+    pub now: Instant,
+    /// Optional transport features this client can use after reconnecting.
+    pub capabilities: ClientTransportCapabilities,
+}
 
 impl NetplayRoom {
     /// Adds a guest to the first empty slot and returns their player index.
@@ -25,8 +43,7 @@ impl NetplayRoom {
             String::new(),
             String::new(),
             Instant::now(),
-            false,
-            false,
+            ClientTransportCapabilities::default(),
         )
     }
 
@@ -38,8 +55,7 @@ impl NetplayRoom {
         resume_token_hash: ResumeTokenHash,
         input_socket_token_hash: ResumeTokenHash,
         now: Instant,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) -> Result<PlayerIndex, RoomError> {
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
@@ -57,8 +73,7 @@ impl NetplayRoom {
                 resume_token_hash,
                 input_socket_token_hash,
                 now,
-                supports_state_file_relay,
-                supports_rom_file_relay,
+                capabilities,
             );
             slot.player_index
         };
@@ -79,8 +94,7 @@ impl NetplayRoom {
             String::new(),
             String::new(),
             Instant::now(),
-            false,
-            false,
+            ClientTransportCapabilities::default(),
         )
     }
 
@@ -92,8 +106,7 @@ impl NetplayRoom {
         resume_token_hash: ResumeTokenHash,
         input_socket_token_hash: ResumeTokenHash,
         now: Instant,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        capabilities: ClientTransportCapabilities,
     ) -> Result<PlayerIndex, RoomError> {
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
@@ -119,8 +132,11 @@ impl NetplayRoom {
         slot.runtime_state = PlayerRuntimeState::Connected;
         slot.resume_token_hash = Some(resume_token_hash);
         slot.input_socket_token_hash = Some(input_socket_token_hash);
-        slot.supports_state_file_relay = supports_state_file_relay;
-        slot.supports_rom_file_relay = supports_rom_file_relay;
+        slot.supports_state_file_relay = capabilities.supports_state_file_relay;
+        slot.supports_rom_file_relay = capabilities.supports_rom_file_relay;
+        slot.supports_scheduled_start = capabilities.supports_scheduled_start;
+        slot.supports_clock_sync = capabilities.supports_clock_sync;
+        slot.supports_fast_input_relay = capabilities.supports_fast_input_relay;
         slot.reconnect_deadline = None;
         slot.reconnect_room_epoch = None;
         slot.last_seen_at = Some(now);
@@ -187,7 +203,10 @@ impl NetplayRoom {
         let already_recovering = self.status == RoomStatus::Recovering;
         let recoverable = matches!(
             self.status,
-            RoomStatus::Playing | RoomStatus::Paused | RoomStatus::Recovering
+            RoomStatus::StartScheduled
+                | RoomStatus::Playing
+                | RoomStatus::Paused
+                | RoomStatus::Recovering
         );
         let reconnect_room_epoch = slot.reconnect_room_epoch.unwrap_or(if already_recovering {
             self.room_epoch.saturating_sub(1)
@@ -221,16 +240,9 @@ impl NetplayRoom {
     }
 
     /// Reclaims a disconnected player slot with a matching resume token hash.
-    pub fn reconnect_player(
+    pub(crate) fn reconnect_player(
         &mut self,
-        player_index: PlayerIndex,
-        resume_token_hash: &str,
-        input_socket_token_hash: ResumeTokenHash,
-        room_epoch: u64,
-        connection_id: ConnectionId,
-        now: Instant,
-        supports_state_file_relay: bool,
-        supports_rom_file_relay: bool,
+        request: PlayerReconnectRequest<'_>,
     ) -> Result<(), RoomError> {
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
@@ -239,34 +251,37 @@ impl NetplayRoom {
         let slot = self
             .players
             .iter_mut()
-            .find(|slot| slot.player_index == player_index)
+            .find(|slot| slot.player_index == request.player_index)
             .ok_or(RoomError::UnknownConnection)?;
 
-        if slot.resume_token_hash.as_deref() != Some(resume_token_hash) {
+        if slot.resume_token_hash.as_deref() != Some(request.resume_token_hash) {
             return Err(RoomError::ResumeTokenInvalid);
         }
 
         let accepted_epoch = slot.reconnect_room_epoch.unwrap_or(self.room_epoch);
-        if room_epoch != accepted_epoch && room_epoch != self.room_epoch {
+        if request.room_epoch != accepted_epoch && request.room_epoch != self.room_epoch {
             return Err(RoomError::StaleRoomEpoch);
         }
 
         if let Some(deadline) = slot.reconnect_deadline
-            && now > deadline
+            && request.now > deadline
         {
             slot.status = PlayerStatus::RecoveryExpired;
             slot.runtime_state = PlayerRuntimeState::RecoveryExpired;
             return Err(RoomError::RecoveryExpired);
         }
 
-        slot.connection_id = Some(connection_id);
+        slot.connection_id = Some(request.connection_id);
         slot.input_connection_id = None;
         slot.status = PlayerStatus::Connected;
         slot.runtime_state = PlayerRuntimeState::Reconnecting;
-        slot.input_socket_token_hash = Some(input_socket_token_hash);
-        slot.supports_state_file_relay = supports_state_file_relay;
-        slot.supports_rom_file_relay = supports_rom_file_relay;
-        slot.last_seen_at = Some(now);
+        slot.input_socket_token_hash = Some(request.input_socket_token_hash);
+        slot.supports_state_file_relay = request.capabilities.supports_state_file_relay;
+        slot.supports_rom_file_relay = request.capabilities.supports_rom_file_relay;
+        slot.supports_scheduled_start = request.capabilities.supports_scheduled_start;
+        slot.supports_clock_sync = request.capabilities.supports_clock_sync;
+        slot.supports_fast_input_relay = request.capabilities.supports_fast_input_relay;
+        slot.last_seen_at = Some(request.now);
         slot.latest_local_frame = None;
         slot.latest_local_frame_reported_at = None;
         slot.latest_network_report = None;
@@ -319,7 +334,10 @@ impl NetplayRoom {
         heartbeat_disconnect: Duration,
         reconnect_grace: Duration,
     ) -> bool {
-        if !matches!(self.status, RoomStatus::Playing | RoomStatus::Paused) {
+        if !matches!(
+            self.status,
+            RoomStatus::StartScheduled | RoomStatus::Playing | RoomStatus::Paused
+        ) {
             return false;
         }
 
@@ -369,7 +387,10 @@ impl NetplayRoom {
         heartbeat_stale: Duration,
         heartbeat_disconnect: Duration,
     ) -> bool {
-        if !matches!(self.status, RoomStatus::Playing | RoomStatus::Paused) {
+        if !matches!(
+            self.status,
+            RoomStatus::StartScheduled | RoomStatus::Playing | RoomStatus::Paused
+        ) {
             return false;
         }
 

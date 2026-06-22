@@ -6,6 +6,7 @@
 use crate::protocol::ServerMessage;
 use crate::rooms::RoomError;
 use axum::extract::ws::{Message, WebSocket};
+use bytes::Bytes;
 use futures_util::SinkExt;
 use futures_util::stream::SplitSink;
 
@@ -28,6 +29,14 @@ pub async fn send_binary_message(
     payload: Vec<u8>,
 ) -> Result<(), axum::Error> {
     sender.send(Message::Binary(payload.into())).await
+}
+
+/// Sends a binary WebSocket payload already held as shared bytes.
+pub async fn send_binary_bytes(
+    sender: &mut SocketSender,
+    payload: Bytes,
+) -> Result<(), axum::Error> {
+    sender.send(Message::Binary(payload)).await
 }
 
 /// Sends a stable protocol error.

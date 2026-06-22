@@ -4,11 +4,12 @@
 //! directly. They do not contain secrets or raw auth details.
 
 use crate::protocol::{
-    InputDelayChange, InputFrame, LinkCablePacket, RomRelayBlocked as RomRelayBlockedPayload,
-    RomRelayCancelled as RomRelayCancelledPayload, RomRelayCompletion as RomRelayCompletionPayload,
-    RomRelayFailure as RomRelayFailurePayload, RomRelayGrant,
-    RomRelayProgress as RomRelayProgressPayload, SessionPauseView, SnapshotChunk,
-    SnapshotFileRelayGrant, SnapshotManifest, StateHashMismatchView,
+    ClockSyncPong, ClockSyncSampleRequest, InputDelayChange, InputFrame, LinkCablePacket,
+    RomRelayBlocked as RomRelayBlockedPayload, RomRelayCancelled as RomRelayCancelledPayload,
+    RomRelayCompletion as RomRelayCompletionPayload, RomRelayFailure as RomRelayFailurePayload,
+    RomRelayGrant, RomRelayProgress as RomRelayProgressPayload, ScheduledSessionStart,
+    SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant, SnapshotManifest,
+    StateHashMismatchView,
 };
 use crate::rooms::{PlayerVoiceJoinGrant, RoomView};
 use serde::Serialize;
@@ -53,6 +54,20 @@ pub enum ServerMessage {
     },
     /// Relay keepalive response.
     Pong,
+    /// Server request for a short startup clock-sample burst.
+    ClockSyncSampleRequested {
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Clock-sample request payload.
+        request: ClockSyncSampleRequest,
+    },
+    /// Server response to a client-originated clock ping.
+    ClockSyncPong {
+        /// Clock ping response payload.
+        pong: ClockSyncPong,
+    },
     /// Session can begin from the supplied canonical start frame.
     StartSession {
         /// Monotonic event sequence included with the room view.
@@ -63,6 +78,9 @@ pub enum ServerMessage {
         session_epoch: u64,
         /// Canonical frame both clients should start from.
         start_frame: u64,
+        /// Optional future server-time start for v2 synchronized release.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scheduled_start: Option<ScheduledSessionStart>,
         /// Current room state.
         room: RoomView,
     },

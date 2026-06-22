@@ -64,7 +64,10 @@ impl NetplayRoom {
         let player_index = slot.player_index;
         let recoverable = matches!(
             self.status,
-            RoomStatus::Playing | RoomStatus::Paused | RoomStatus::Recovering
+            RoomStatus::StartScheduled
+                | RoomStatus::Playing
+                | RoomStatus::Paused
+                | RoomStatus::Recovering
         );
         let reconnect_room_epoch = slot.reconnect_room_epoch.unwrap_or(self.room_epoch);
 

@@ -8,7 +8,22 @@ use crate::rooms::{NetplayRoom, PlayerFrameCursorView, RoomFrameClockView, RoomS
 
 impl NetplayRoom {
     /// Releases the next relay-owned server frame if the canonical cursor allows it.
-    pub(super) fn release_next_server_frame(&mut self) -> Option<ServerFrame> {
+    pub(super) fn release_next_server_frame(&mut self, server_time_ms: u64) -> Option<ServerFrame> {
+        if self.status == RoomStatus::StartScheduled {
+            let start = self.scheduled_start()?;
+            if server_time_ms < start.server_time_ms {
+                return None;
+            }
+            self.status = RoomStatus::Playing;
+            self.players
+                .iter_mut()
+                .filter(|slot| slot.connection_id.is_some())
+                .for_each(|slot| {
+                    slot.status = crate::rooms::PlayerStatus::Playing;
+                    slot.runtime_state = crate::rooms::PlayerRuntimeState::Playing;
+                });
+        }
+
         if self.status != RoomStatus::Playing {
             return None;
         }
