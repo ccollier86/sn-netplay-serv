@@ -113,11 +113,13 @@ impl StoredLobby {
         grants: LobbyFileRelayGrantPair,
     ) {
         let lobby_epoch = self.lobby.lobby_epoch();
-        let _ = self.events.send(LobbyEvent::StartupStateTransferUploadGranted {
-            source,
-            lobby_epoch,
-            grant: grants.upload,
-        });
+        let _ = self
+            .events
+            .send(LobbyEvent::StartupStateTransferUploadGranted {
+                source,
+                lobby_epoch,
+                grant: grants.upload,
+            });
         let _ = self
             .events
             .send(LobbyEvent::StartupStateTransferDownloadReady {

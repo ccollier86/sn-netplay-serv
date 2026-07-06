@@ -212,6 +212,9 @@ pub enum LobbyServerMessage {
 mod tests {
     use super::*;
     use crate::lobbies::{LobbyServerCapabilities, LobbyStatus, LobbyVisibility};
+    use crate::protocol::{
+        LobbyFileRelayGrantRole, LobbyFileRelayMaterialKind, LobbyStartupStateRestorePolicy,
+    };
     use crate::rooms::RoomId;
     use serde_json::json;
 
@@ -268,5 +271,71 @@ mod tests {
         assert!(payload.get("event_seq").is_none());
         assert!(payload.get("lobby_epoch").is_none());
         assert!(payload.get("your_player_index").is_none());
+    }
+
+    #[test]
+    fn lobby_rom_transfer_grant_keeps_legacy_wire_shape() {
+        let grant = LobbyFileRelayGrant {
+            transfer_id: "rom-transfer-1".to_owned(),
+            relay_url: "https://relay.test".to_owned(),
+            token: "token".to_owned(),
+            role: LobbyFileRelayGrantRole::Download,
+            material_kind: LobbyFileRelayMaterialKind::Game,
+            proposal_id: uuid::Uuid::new_v4(),
+            sender_player_index: 0,
+            receiver_player_index: 1,
+            sha256: "a".repeat(64),
+            size_bytes: 128,
+            chunk_size_bytes: 128,
+            chunk_count: 1,
+            expires_at: "2026-06-22T12:00:00Z".to_owned(),
+            startup_state: None,
+        };
+
+        let payload = serde_json::to_value(LobbyServerMessage::RomTransferDownloadReady {
+            lobby_epoch: 5,
+            grant,
+        })
+        .expect("server message");
+
+        assert_eq!(payload["type"], "romTransferDownloadReady");
+        assert!(payload["grant"].get("materialKind").is_none());
+        assert!(payload["grant"].get("startupState").is_none());
+    }
+
+    #[test]
+    fn lobby_startup_state_transfer_grant_names_material_kind() {
+        let grant = LobbyFileRelayGrant {
+            transfer_id: "state-transfer-1".to_owned(),
+            relay_url: "https://relay.test".to_owned(),
+            token: "token".to_owned(),
+            role: LobbyFileRelayGrantRole::Download,
+            material_kind: LobbyFileRelayMaterialKind::StartupState,
+            proposal_id: uuid::Uuid::new_v4(),
+            sender_player_index: 0,
+            receiver_player_index: 1,
+            sha256: "b".repeat(64),
+            size_bytes: 128,
+            chunk_size_bytes: 128,
+            chunk_count: 1,
+            expires_at: "2026-06-22T12:00:00Z".to_owned(),
+            startup_state: Some(LobbyStartupStateTransferMetadata {
+                sha256: "b".repeat(64),
+                size_bytes: 128,
+                label: Some("Autosave".to_owned()),
+                restore_policy: LobbyStartupStateRestorePolicy::AfterFrames { frames: 30 },
+                state_format: Some("libretro-state".to_owned()),
+            }),
+        };
+
+        let payload = serde_json::to_value(LobbyServerMessage::StartupStateTransferDownloadReady {
+            lobby_epoch: 5,
+            grant,
+        })
+        .expect("server message");
+
+        assert_eq!(payload["type"], "startupStateTransferDownloadReady");
+        assert_eq!(payload["grant"]["materialKind"], "startupState");
+        assert_eq!(payload["grant"]["startupState"]["label"], "Autosave");
     }
 }

@@ -84,7 +84,13 @@ impl Lobby {
         if state.size_bytes > limits.max_bytes {
             return Err(LobbyError::StartupStateRelayTooLarge);
         }
-        if state.label.as_deref().map(str::trim).filter(|label| !label.is_empty()).is_none() {
+        if state
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .is_none()
+        {
             state.label = Some(selected_label.to_owned());
         }
 

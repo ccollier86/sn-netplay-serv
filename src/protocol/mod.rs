@@ -55,8 +55,7 @@ pub use link_cable_descriptor::{LinkCableDescriptor, LinkCableTransport};
 pub use link_cable_packet::{LinkCablePacket, LinkCablePacketError, LinkCablePacketLimits};
 pub use lobby_file_relay::{
     LobbyFileRelayGrant, LobbyFileRelayGrantPair, LobbyFileRelayGrantRole,
-    LobbyFileRelayMaterialKind, LobbyStartupStateRestorePolicy,
-    LobbyStartupStateTransferMetadata,
+    LobbyFileRelayMaterialKind, LobbyStartupStateRestorePolicy, LobbyStartupStateTransferMetadata,
 };
 pub use lobby_messages::{LobbyClientMessage, LobbyServerMessage};
 pub use netplay_protocol::{

@@ -73,7 +73,10 @@ pub struct LobbyFileRelayGrant {
     /// Whether this grant uploads or downloads the payload.
     pub role: LobbyFileRelayGrantRole,
     /// Type of lobby material this grant transfers.
-    #[serde(default = "default_lobby_file_relay_material_kind")]
+    #[serde(
+        default = "default_lobby_file_relay_material_kind",
+        skip_serializing_if = "is_default_lobby_file_relay_material_kind"
+    )]
     pub material_kind: LobbyFileRelayMaterialKind,
     /// Selected game proposal this transfer belongs to.
     pub proposal_id: Uuid,
@@ -92,7 +95,7 @@ pub struct LobbyFileRelayGrant {
     /// Transfer expiry timestamp from the file relay.
     pub expires_at: String,
     /// Startup-state metadata when this grant transfers selected startup state.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub startup_state: Option<LobbyStartupStateTransferMetadata>,
 }
 
@@ -107,4 +110,8 @@ pub struct LobbyFileRelayGrantPair {
 
 fn default_lobby_file_relay_material_kind() -> LobbyFileRelayMaterialKind {
     LobbyFileRelayMaterialKind::Game
+}
+
+fn is_default_lobby_file_relay_material_kind(kind: &LobbyFileRelayMaterialKind) -> bool {
+    *kind == LobbyFileRelayMaterialKind::Game
 }
