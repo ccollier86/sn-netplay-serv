@@ -83,6 +83,9 @@ pub struct LobbyGameLaunchView {
     /// Milliseconds since unix epoch when gameplay was confirmed running.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gameplay_started_at_ms: Option<u128>,
+    /// Player indexes whose runners have reported deterministic gameplay start.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub started_player_indexes: Vec<u8>,
 }
 
 /// Handoff state for launching the selected lobby game.
@@ -108,6 +111,7 @@ impl LobbyGameLaunchView {
             room_invite_code: None,
             room_published_at_ms: None,
             gameplay_started_at_ms: None,
+            started_player_indexes: Vec::new(),
         }
     }
 
@@ -118,13 +122,31 @@ impl LobbyGameLaunchView {
         self.room_published_at_ms = Some(published_at_ms);
     }
 
-    /// Records that launched gameplay reached the deterministic play state.
-    pub fn mark_playing(&mut self, started_at_ms: u128) -> Result<bool, LobbyError> {
+    /// Records one player's runner start report and marks the launch playing
+    /// once every expected player has reported.
+    pub fn mark_player_started(
+        &mut self,
+        player_index: PlayerIndex,
+        expected_player_indexes: &[PlayerIndex],
+        started_at_ms: u128,
+    ) -> Result<bool, LobbyError> {
         match self.status {
             LobbyGameLaunchStatus::Preparing => Err(LobbyError::GameLaunchNotReady),
             LobbyGameLaunchStatus::Ready => {
-                self.status = LobbyGameLaunchStatus::Playing;
-                self.gameplay_started_at_ms = Some(started_at_ms);
+                let player_index = player_index.zero_based();
+                if self.started_player_indexes.contains(&player_index) {
+                    return Ok(false);
+                }
+                self.started_player_indexes.push(player_index);
+                self.started_player_indexes.sort_unstable();
+                if !expected_player_indexes.is_empty()
+                    && expected_player_indexes.iter().all(|expected| {
+                        self.started_player_indexes.contains(&expected.zero_based())
+                    })
+                {
+                    self.status = LobbyGameLaunchStatus::Playing;
+                    self.gameplay_started_at_ms = Some(started_at_ms);
+                }
                 Ok(true)
             }
             LobbyGameLaunchStatus::Playing => Ok(false),

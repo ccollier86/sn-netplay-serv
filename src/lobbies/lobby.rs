@@ -409,7 +409,13 @@ impl Lobby {
         proposal_id: uuid::Uuid,
         now_ms: u128,
     ) -> Result<bool, LobbyError> {
-        self.player_index_for_connection(connection_id)?;
+        let player_index = self.player_index_for_connection(connection_id)?;
+        let Some(slot) = self.slot(player_index) else {
+            return Err(LobbyError::UnknownConnection);
+        };
+        if !slot.capabilities.supports_lobby_gameplay_started {
+            return Ok(false);
+        }
         self.require_selected_proposal(proposal_id)?;
         if lobby_epoch != self.lobby_epoch {
             return self
@@ -422,6 +428,9 @@ impl Lobby {
                 .map(|_| false)
                 .ok_or(LobbyError::StaleLobbyEpoch);
         }
+        let Some(expected_player_indexes) = self.gameplay_start_expected_player_indexes() else {
+            return Ok(false);
+        };
         let launch = self
             .pending_launch
             .as_mut()
@@ -430,7 +439,7 @@ impl Lobby {
             return Err(LobbyError::StaleGameProposal);
         }
 
-        let changed = launch.mark_playing(now_ms)?;
+        let changed = launch.mark_player_started(player_index, &expected_player_indexes, now_ms)?;
         if changed {
             self.status = LobbyStatus::InGame;
             self.bump_with_activity(now_ms);
@@ -639,6 +648,26 @@ impl Lobby {
                         && readiness.status == LobbyGameReadinessStatus::Ready
                 })
             })
+    }
+
+    fn gameplay_start_expected_player_indexes(&self) -> Option<Vec<PlayerIndex>> {
+        let connected_players = self
+            .players
+            .iter()
+            .filter(|slot| slot.subject_key.is_some() && slot.connection_id.is_some())
+            .collect::<Vec<_>>();
+        if connected_players
+            .iter()
+            .any(|slot| !slot.capabilities.supports_lobby_gameplay_started)
+        {
+            return None;
+        }
+        Some(
+            connected_players
+                .into_iter()
+                .map(|slot| slot.player_index)
+                .collect(),
+        )
     }
 
     fn idempotent_return_outcome(&self, proposal_id: uuid::Uuid) -> Option<LobbyReturnOutcome> {

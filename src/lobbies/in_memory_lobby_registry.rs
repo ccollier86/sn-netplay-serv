@@ -677,12 +677,18 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
             crate::rooms::current_timestamp_ms(),
         )?;
         if changed {
+            let pending_launch = lobby.view().pending_launch;
+            let event_kind = pending_launch
+                .as_ref()
+                .filter(|launch| launch.status == crate::lobbies::LobbyGameLaunchStatus::Playing)
+                .map(|_| "lobbyGameplayStarted")
+                .unwrap_or("lobbyGameplayStartReported");
             lobby.emit_state_changed();
             self.record_lobby_event(
                 lobby,
-                "lobbyGameplayStarted",
+                event_kind,
                 format!(
-                    "gameplay started proposal={proposal_id} reportedBy=p{}",
+                    "gameplay start reported proposal={proposal_id} reportedBy=p{}",
                     reporting_player.display_number()
                 ),
             );

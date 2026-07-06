@@ -654,6 +654,7 @@ fn lobby_view_for_client(
             launch.status = LobbyGameLaunchStatus::Ready;
         }
         launch.gameplay_started_at_ms = None;
+        launch.started_player_indexes.clear();
     }
 
     lobby
@@ -676,6 +677,7 @@ mod tests {
         let legacy_launch = legacy.pending_launch.expect("legacy launch");
         assert_eq!(legacy_launch.status, LobbyGameLaunchStatus::Ready);
         assert!(legacy_launch.gameplay_started_at_ms.is_none());
+        assert!(legacy_launch.started_player_indexes.is_empty());
 
         let modern = lobby_view_for_client(
             playing,
@@ -691,6 +693,7 @@ mod tests {
         let modern_launch = modern.pending_launch.expect("modern launch");
         assert_eq!(modern_launch.status, LobbyGameLaunchStatus::Playing);
         assert_eq!(modern_launch.gameplay_started_at_ms, Some(150));
+        assert_eq!(modern_launch.started_player_indexes, vec![0, 1]);
     }
 
     fn lobby_view_with_playing_launch() -> LobbyView {
@@ -716,6 +719,7 @@ mod tests {
                 room_invite_code: Some("ROOM-1".to_owned()),
                 room_published_at_ms: Some(120),
                 gameplay_started_at_ms: Some(150),
+                started_player_indexes: vec![0, 1],
             }),
             voice: None,
         }
