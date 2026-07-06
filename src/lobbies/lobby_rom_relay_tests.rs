@@ -115,6 +115,8 @@ fn capabilities() -> LobbyClientCapabilities {
         supports_lobby: true,
         supports_lobby_voice: true,
         supports_multi_game_lobby: true,
+        supports_lobby_returned_event: true,
+        supports_lobby_gameplay_started: true,
         supports_temporary_session_rom_relay: true,
     }
 }

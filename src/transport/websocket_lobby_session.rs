@@ -4,7 +4,10 @@
 //! does not relay gameplay input or snapshot bytes.
 
 use crate::http::AppServices;
-use crate::lobbies::{JoinLobbyParams, LobbyEvent, MAX_LOBBY_PLAYERS, ReconnectLobbyPlayerRequest};
+use crate::lobbies::{
+    JoinLobbyParams, LobbyClientCapabilities, LobbyEvent, LobbyGameLaunchStatus, LobbyView,
+    MAX_LOBBY_PLAYERS, ReconnectLobbyPlayerRequest,
+};
 use crate::protocol::{LobbyClientMessage, LobbyServerMessage};
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
 use crate::transport::WebSocketLobbyJoinRequest;
@@ -94,7 +97,7 @@ pub async fn handle_websocket_lobby_session(
             your_player_index: join.player_index.zero_based(),
             resume_token: join.resume_token,
             voice: join.voice,
-            lobby: join.lobby,
+            lobby: lobby_view_for_client(join.lobby, &request.capabilities),
         },
     )
     .await
@@ -113,6 +116,7 @@ pub async fn handle_websocket_lobby_session(
         &mut events,
         &services,
         &request.invite_code,
+        &request.capabilities,
         connection_id,
     )
     .await;
@@ -129,6 +133,7 @@ async fn session_loop(
     events: &mut crate::lobbies::LobbyEventReceiver,
     services: &AppServices,
     invite_code: &InviteCode,
+    capabilities: &LobbyClientCapabilities,
     connection_id: ConnectionId,
 ) {
     loop {
@@ -139,7 +144,7 @@ async fn session_loop(
                 }
             }
             event = events.recv() => {
-                if !handle_lobby_event(sender, connection_id, event).await {
+                if !handle_lobby_event(sender, connection_id, capabilities, event).await {
                     break;
                 }
             }
@@ -384,6 +389,25 @@ async fn handle_lobby_message(
             )
             .await
         }
+        LobbyClientMessage::GameplayStarted {
+            lobby_epoch,
+            proposal_id,
+        } => {
+            apply_lobby_result(
+                sender,
+                services
+                    .lobbies
+                    .mark_lobby_gameplay_started(
+                        invite_code.clone(),
+                        connection_id,
+                        lobby_epoch,
+                        proposal_id,
+                    )
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
         LobbyClientMessage::ReturnToLobby {
             lobby_epoch,
             proposal_id,
@@ -524,22 +548,38 @@ async fn apply_lobby_result(
 async fn handle_lobby_event(
     sender: &mut LobbySocketSender,
     connection_id: ConnectionId,
+    capabilities: &LobbyClientCapabilities,
     event: Result<LobbyEvent, tokio::sync::broadcast::error::RecvError>,
 ) -> bool {
     let message = match event {
-        Ok(LobbyEvent::LobbyStateChanged(lobby)) => LobbyServerMessage::LobbyStateChanged {
-            event_seq: lobby.event_seq,
-            lobby_epoch: lobby.lobby_epoch,
-            lobby,
-        },
-        Ok(LobbyEvent::LobbyReturned { lobby, returned }) => LobbyServerMessage::LobbyReturned {
-            event_seq: lobby.event_seq,
-            lobby_epoch: lobby.lobby_epoch,
-            returned,
-            lobby,
-        },
+        Ok(LobbyEvent::LobbyStateChanged(lobby)) => {
+            let lobby = lobby_view_for_client(lobby, capabilities);
+            LobbyServerMessage::LobbyStateChanged {
+                event_seq: lobby.event_seq,
+                lobby_epoch: lobby.lobby_epoch,
+                lobby,
+            }
+        }
+        Ok(LobbyEvent::LobbyReturned { lobby, returned }) => {
+            let lobby = lobby_view_for_client(lobby, capabilities);
+            if capabilities.supports_lobby_returned_event {
+                LobbyServerMessage::LobbyReturned {
+                    event_seq: lobby.event_seq,
+                    lobby_epoch: lobby.lobby_epoch,
+                    returned,
+                    lobby,
+                }
+            } else {
+                LobbyServerMessage::LobbyStateChanged {
+                    event_seq: lobby.event_seq,
+                    lobby_epoch: lobby.lobby_epoch,
+                    lobby,
+                }
+            }
+        }
         Ok(LobbyEvent::ChatMessage(message)) => LobbyServerMessage::ChatMessage { message },
         Ok(LobbyEvent::LobbyClosed { lobby, reason }) => {
+            let lobby = lobby_view_for_client(lobby, capabilities);
             let event_seq = lobby.event_seq;
             let lobby_epoch = lobby.lobby_epoch;
             let message = LobbyServerMessage::LobbyClosed {
@@ -601,4 +641,83 @@ async fn handle_lobby_event(
     };
 
     send_lobby_server_message(sender, &message).await.is_ok()
+}
+
+fn lobby_view_for_client(
+    mut lobby: LobbyView,
+    capabilities: &LobbyClientCapabilities,
+) -> LobbyView {
+    if !capabilities.supports_lobby_gameplay_started
+        && let Some(launch) = lobby.pending_launch.as_mut()
+    {
+        if launch.status == LobbyGameLaunchStatus::Playing {
+            launch.status = LobbyGameLaunchStatus::Ready;
+        }
+        launch.gameplay_started_at_ms = None;
+    }
+
+    lobby
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lobbies::{
+        LobbyGameLaunchView, LobbyServerCapabilities, LobbyStatus, LobbyVisibility,
+        MAX_LOBBY_PLAYERS,
+    };
+    use crate::rooms::{PlayerIndex, RoomId};
+
+    #[test]
+    fn lobby_view_for_legacy_client_downgrades_playing_launch_status() {
+        let playing = lobby_view_with_playing_launch();
+        let legacy = lobby_view_for_client(playing.clone(), &LobbyClientCapabilities::default());
+
+        let legacy_launch = legacy.pending_launch.expect("legacy launch");
+        assert_eq!(legacy_launch.status, LobbyGameLaunchStatus::Ready);
+        assert!(legacy_launch.gameplay_started_at_ms.is_none());
+
+        let modern = lobby_view_for_client(
+            playing,
+            &LobbyClientCapabilities {
+                supports_lobby: true,
+                supports_temporary_session_rom_relay: true,
+                supports_lobby_voice: true,
+                supports_multi_game_lobby: true,
+                supports_lobby_returned_event: true,
+                supports_lobby_gameplay_started: true,
+            },
+        );
+        let modern_launch = modern.pending_launch.expect("modern launch");
+        assert_eq!(modern_launch.status, LobbyGameLaunchStatus::Playing);
+        assert_eq!(modern_launch.gameplay_started_at_ms, Some(150));
+    }
+
+    fn lobby_view_with_playing_launch() -> LobbyView {
+        LobbyView {
+            lobby_id: RoomId::new(),
+            event_seq: 5,
+            lobby_epoch: 4,
+            invite_code: "AB23-CD".to_owned(),
+            created_at_ms: 1,
+            updated_at_ms: 150,
+            last_meaningful_activity_at_ms: 150,
+            status: LobbyStatus::InGame,
+            visibility: LobbyVisibility::Private,
+            capabilities: LobbyServerCapabilities::current(MAX_LOBBY_PLAYERS, true, true),
+            players: Vec::new(),
+            selected_game: None,
+            game_readiness: Vec::new(),
+            pending_launch: Some(LobbyGameLaunchView {
+                proposal_id: uuid::Uuid::new_v4(),
+                requested_by_player_index: PlayerIndex::ONE.zero_based(),
+                requested_at_ms: 100,
+                status: LobbyGameLaunchStatus::Playing,
+                room_invite_code: Some("ROOM-1".to_owned()),
+                room_published_at_ms: Some(120),
+                gameplay_started_at_ms: Some(150),
+            }),
+            voice: None,
+        }
+    }
 }

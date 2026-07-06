@@ -146,6 +146,15 @@ pub trait LobbyRegistry: Send + Sync {
         room_invite_code: InviteCode,
     ) -> Result<LobbyView, LobbyError>;
 
+    /// Marks a launched game as actively playing after a runner reaches gameplay.
+    async fn mark_lobby_gameplay_started(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        lobby_epoch: u64,
+        proposal_id: uuid::Uuid,
+    ) -> Result<LobbyView, LobbyError>;
+
     /// Clears the active child game and returns players to lobby setup.
     async fn return_lobby_from_game(
         &self,

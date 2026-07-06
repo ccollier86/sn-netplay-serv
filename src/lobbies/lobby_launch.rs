@@ -80,6 +80,9 @@ pub struct LobbyGameLaunchView {
     /// Milliseconds since unix epoch when the gameplay room was published.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub room_published_at_ms: Option<u128>,
+    /// Milliseconds since unix epoch when gameplay was confirmed running.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gameplay_started_at_ms: Option<u128>,
 }
 
 /// Handoff state for launching the selected lobby game.
@@ -90,6 +93,8 @@ pub enum LobbyGameLaunchStatus {
     Preparing,
     /// Host published the direct gameplay room invite code.
     Ready,
+    /// A launched runner reported that deterministic gameplay is active.
+    Playing,
 }
 
 impl LobbyGameLaunchView {
@@ -102,6 +107,7 @@ impl LobbyGameLaunchView {
             status: LobbyGameLaunchStatus::Preparing,
             room_invite_code: None,
             room_published_at_ms: None,
+            gameplay_started_at_ms: None,
         }
     }
 
@@ -110,6 +116,19 @@ impl LobbyGameLaunchView {
         self.status = LobbyGameLaunchStatus::Ready;
         self.room_invite_code = Some(invite_code);
         self.room_published_at_ms = Some(published_at_ms);
+    }
+
+    /// Records that launched gameplay reached the deterministic play state.
+    pub fn mark_playing(&mut self, started_at_ms: u128) -> Result<bool, LobbyError> {
+        match self.status {
+            LobbyGameLaunchStatus::Preparing => Err(LobbyError::GameLaunchNotReady),
+            LobbyGameLaunchStatus::Ready => {
+                self.status = LobbyGameLaunchStatus::Playing;
+                self.gameplay_started_at_ms = Some(started_at_ms);
+                Ok(true)
+            }
+            LobbyGameLaunchStatus::Playing => Ok(false),
+        }
     }
 }
 

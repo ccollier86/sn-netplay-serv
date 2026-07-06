@@ -38,6 +38,9 @@ pub enum LobbyError {
     /// One or more connected players are not ready to launch.
     #[error("lobby players are not ready")]
     PlayersNotReady,
+    /// Gameplay cannot be marked active before the room handoff is ready.
+    #[error("lobby game launch is not ready")]
+    GameLaunchNotReady,
     /// Temporary ROM relay is disabled or unavailable.
     #[error("temporary rom relay is unavailable")]
     RomRelayUnavailable,

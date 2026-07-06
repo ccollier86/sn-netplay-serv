@@ -658,6 +658,39 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         Ok(lobby.view())
     }
 
+    async fn mark_lobby_gameplay_started(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        lobby_epoch: u64,
+        proposal_id: uuid::Uuid,
+    ) -> Result<LobbyView, LobbyError> {
+        let mut lobbies = self.lobbies.write().await;
+        let lobby = lobbies
+            .get_mut(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+        let reporting_player = lobby.lobby.player_index_for_connection(connection_id)?;
+        let changed = lobby.lobby.mark_gameplay_started(
+            connection_id,
+            lobby_epoch,
+            proposal_id,
+            crate::rooms::current_timestamp_ms(),
+        )?;
+        if changed {
+            lobby.emit_state_changed();
+            self.record_lobby_event(
+                lobby,
+                "lobbyGameplayStarted",
+                format!(
+                    "gameplay started proposal={proposal_id} reportedBy=p{}",
+                    reporting_player.display_number()
+                ),
+            );
+        }
+
+        Ok(lobby.view())
+    }
+
     async fn return_lobby_from_game(
         &self,
         invite_code: InviteCode,

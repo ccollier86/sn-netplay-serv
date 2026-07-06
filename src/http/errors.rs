@@ -191,6 +191,11 @@ impl IntoResponse for HttpError {
                 "lobbyPlayersNotReady",
                 "Players are not ready yet.",
             ),
+            Self::Lobby(LobbyError::GameLaunchNotReady) => (
+                StatusCode::CONFLICT,
+                "lobbyGameLaunchNotReady",
+                "Gameplay launch is not ready yet.",
+            ),
             Self::Lobby(LobbyError::RomRelayUnavailable) => (
                 StatusCode::CONFLICT,
                 "lobbyRomRelayUnavailable",

@@ -84,6 +84,10 @@ fn lobby_error_message(error: LobbyError) -> LobbyServerMessage {
         LobbyError::PlayersNotReady => {
             lobby_static_error("lobbyPlayersNotReady", "Players are not ready yet.")
         }
+        LobbyError::GameLaunchNotReady => lobby_static_error(
+            "lobbyGameLaunchNotReady",
+            "Gameplay launch is not ready yet.",
+        ),
         LobbyError::RomRelayUnavailable => lobby_static_error(
             "lobbyRomRelayUnavailable",
             "Temporary session access is not available.",

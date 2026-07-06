@@ -3,10 +3,10 @@
 use crate::auth::{ClientKind, VerifiedLicense};
 use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyActivityKind,
-    LobbyClientCapabilities, LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus,
-    LobbyPlayerRole, LobbyPlayerStatus, LobbyRegistry, LobbyReturnReason, LobbyServerCapabilities,
-    LobbyStatus, LobbyVisibility, MAX_LOBBY_PLAYERS, PublicLobbyEventReceiver,
-    ReconnectLobbyPlayerRequest,
+    LobbyClientCapabilities, LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameLaunchStatus,
+    LobbyGameReadinessStatus, LobbyPlayerRole, LobbyPlayerStatus, LobbyRegistry, LobbyReturnReason,
+    LobbyServerCapabilities, LobbyStatus, LobbyVisibility, MAX_LOBBY_PLAYERS,
+    PublicLobbyEventReceiver, ReconnectLobbyPlayerRequest,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeToken, ResumeTokenGenerator,
@@ -625,6 +625,136 @@ async fn host_launch_requires_connected_players_ready() {
         .expect("duplicate return is idempotent");
 
     assert_eq!(duplicate.status, LobbyStatus::GameSelected);
+    assert!(events.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn gameplay_started_marks_ready_launch_playing_once() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_params(),
+            guest_connection,
+        )
+        .await
+        .expect("guest connected");
+    let selected = registry
+        .select_lobby_game(invite.clone(), host_connection, game_candidate())
+        .await
+        .expect("selected")
+        .selected_game
+        .expect("selected game");
+    for connection in [host_connection, guest_connection] {
+        registry
+            .set_lobby_game_readiness(
+                invite.clone(),
+                connection,
+                selected.proposal_id,
+                LobbyGameReadinessStatus::Ready,
+                None,
+            )
+            .await
+            .expect("ready");
+    }
+
+    let launch = registry
+        .request_lobby_game_launch(invite.clone(), host_connection, selected.proposal_id)
+        .await
+        .expect("launch requested");
+    let not_ready = registry
+        .mark_lobby_gameplay_started(
+            invite.clone(),
+            guest_connection,
+            launch.lobby_epoch,
+            selected.proposal_id,
+        )
+        .await
+        .expect_err("gameplay cannot start before room is published");
+    assert!(matches!(not_ready, LobbyError::GameLaunchNotReady));
+
+    let published = registry
+        .publish_lobby_game_room(
+            invite.clone(),
+            host_connection,
+            selected.proposal_id,
+            InviteCode::parse("AB23-CD").expect("room invite"),
+        )
+        .await
+        .expect("published");
+    let published_epoch = published.lobby_epoch;
+    let mut events = registry
+        .subscribe_lobby(invite.clone())
+        .await
+        .expect("events");
+
+    let started = registry
+        .mark_lobby_gameplay_started(
+            invite.clone(),
+            guest_connection,
+            published_epoch,
+            selected.proposal_id,
+        )
+        .await
+        .expect("started");
+    let event = recv_lobby_event(&mut events).await;
+
+    let pending = started.pending_launch.as_ref().expect("pending launch");
+    assert_eq!(pending.status, LobbyGameLaunchStatus::Playing);
+    assert!(pending.gameplay_started_at_ms.is_some());
+    match event {
+        LobbyEvent::LobbyStateChanged(lobby) => {
+            assert_eq!(
+                lobby
+                    .pending_launch
+                    .as_ref()
+                    .expect("pending launch")
+                    .status,
+                LobbyGameLaunchStatus::Playing
+            );
+        }
+        other => panic!("expected gameplay state change, got {other:?}"),
+    }
+    assert!(
+        registry
+            .lobby_events(invite.clone(), 10)
+            .await
+            .expect("debug events")
+            .iter()
+            .any(|event| event.kind == "lobbyGameplayStarted")
+    );
+
+    let duplicate = registry
+        .mark_lobby_gameplay_started(
+            invite,
+            host_connection,
+            published_epoch,
+            selected.proposal_id,
+        )
+        .await
+        .expect("duplicate started is idempotent");
+
+    assert_eq!(
+        duplicate.pending_launch.expect("pending launch").status,
+        LobbyGameLaunchStatus::Playing
+    );
     assert!(events.try_recv().is_err());
 }
 

@@ -401,6 +401,44 @@ impl Lobby {
         Ok(launch)
     }
 
+    /// Marks the active launch as playing after a runner reaches gameplay.
+    pub fn mark_gameplay_started(
+        &mut self,
+        connection_id: ConnectionId,
+        lobby_epoch: u64,
+        proposal_id: uuid::Uuid,
+        now_ms: u128,
+    ) -> Result<bool, LobbyError> {
+        self.player_index_for_connection(connection_id)?;
+        self.require_selected_proposal(proposal_id)?;
+        if lobby_epoch != self.lobby_epoch {
+            return self
+                .pending_launch
+                .as_ref()
+                .filter(|launch| {
+                    launch.proposal_id == proposal_id
+                        && launch.status == crate::lobbies::LobbyGameLaunchStatus::Playing
+                })
+                .map(|_| false)
+                .ok_or(LobbyError::StaleLobbyEpoch);
+        }
+        let launch = self
+            .pending_launch
+            .as_mut()
+            .ok_or(LobbyError::StaleGameProposal)?;
+        if launch.proposal_id != proposal_id {
+            return Err(LobbyError::StaleGameProposal);
+        }
+
+        let changed = launch.mark_playing(now_ms)?;
+        if changed {
+            self.status = LobbyStatus::InGame;
+            self.bump_with_activity(now_ms);
+        }
+
+        Ok(changed)
+    }
+
     /// Clears an active child game and returns players to lobby readiness.
     pub fn return_to_lobby(
         &mut self,

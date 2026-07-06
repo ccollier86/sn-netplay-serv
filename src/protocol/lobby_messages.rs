@@ -76,6 +76,13 @@ pub enum LobbyClientMessage {
         /// User-facing gameplay room invite code.
         room_invite_code: String,
     },
+    /// Client reports that deterministic gameplay has started.
+    GameplayStarted {
+        /// Lobby epoch observed by the client.
+        lobby_epoch: u64,
+        /// Selected game proposal that reached gameplay.
+        proposal_id: Uuid,
+    },
     /// Client reports that the launched child game has ended.
     ReturnToLobby {
         /// Lobby epoch observed by the client.
@@ -349,6 +356,25 @@ mod tests {
         assert_eq!(payload["returned"]["returnRequestedByPlayerIndex"], 1);
         assert_eq!(payload["returned"]["reason"], "playerRequestedReturn");
         assert!(payload.get("return_requested_by_player_index").is_none());
+    }
+
+    #[test]
+    fn lobby_gameplay_started_accepts_camel_case_wire_contract() {
+        let proposal_id = uuid::Uuid::new_v4();
+        let message = serde_json::from_value::<LobbyClientMessage>(json!({
+            "type": "gameplayStarted",
+            "lobbyEpoch": 8,
+            "proposalId": proposal_id
+        }))
+        .expect("gameplay started message");
+
+        assert!(matches!(
+            message,
+            LobbyClientMessage::GameplayStarted {
+                lobby_epoch: 8,
+                proposal_id: decoded_proposal_id,
+            } if decoded_proposal_id == proposal_id
+        ));
     }
 
     #[test]

@@ -21,6 +21,12 @@ pub struct LobbyClientCapabilities {
     /// Client can stay in one lobby while changing games.
     #[serde(default)]
     pub supports_multi_game_lobby: bool,
+    /// Client can receive the richer return-to-lobby event tag.
+    #[serde(default)]
+    pub supports_lobby_returned_event: bool,
+    /// Client can receive the `playing` launch sub-status after gameplay starts.
+    #[serde(default)]
+    pub supports_lobby_gameplay_started: bool,
 }
 
 impl LobbyClientCapabilities {
@@ -31,6 +37,8 @@ impl LobbyClientCapabilities {
             supports_temporary_session_rom_relay: false,
             supports_lobby_voice: true,
             supports_multi_game_lobby: true,
+            supports_lobby_returned_event: false,
+            supports_lobby_gameplay_started: false,
         }
     }
 }
@@ -47,6 +55,10 @@ pub struct LobbyServerCapabilities {
     pub supports_lobby_voice: bool,
     /// Relay can keep the lobby alive across multiple games.
     pub supports_multi_game_lobby: bool,
+    /// Relay can emit the richer return-to-lobby event tag to capable clients.
+    pub supports_lobby_returned_event: bool,
+    /// Relay can track active gameplay after the scheduled start barrier releases.
+    pub supports_lobby_gameplay_started: bool,
     /// Maximum players accepted by this lobby.
     pub max_players: u8,
 }
@@ -59,6 +71,8 @@ impl LobbyServerCapabilities {
             supports_temporary_session_rom_relay: temporary_session_rom_relay,
             supports_lobby_voice: lobby_voice,
             supports_multi_game_lobby: true,
+            supports_lobby_returned_event: true,
+            supports_lobby_gameplay_started: true,
             max_players,
         }
     }
