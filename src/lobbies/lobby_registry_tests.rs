@@ -494,18 +494,46 @@ async fn host_launch_requires_connected_players_ready() {
         .expect_err("guest not ready");
     assert!(matches!(not_ready, LobbyError::PlayersNotReady));
 
-    for connection in [host_connection, guest_connection] {
-        registry
-            .set_lobby_game_readiness(
-                invite.clone(),
-                connection,
-                selected.proposal_id,
-                LobbyGameReadinessStatus::Ready,
-                None,
-            )
-            .await
-            .expect("ready");
-    }
+    registry
+        .set_lobby_game_readiness(
+            invite.clone(),
+            host_connection,
+            selected.proposal_id,
+            LobbyGameReadinessStatus::Ready,
+            None,
+        )
+        .await
+        .expect("host ready");
+    let missing_state_view = registry
+        .set_lobby_game_readiness(
+            invite.clone(),
+            guest_connection,
+            selected.proposal_id,
+            LobbyGameReadinessStatus::MissingStartupState,
+            Some("selected state pending".to_owned()),
+        )
+        .await
+        .expect("guest missing selected state");
+    assert!(missing_state_view.game_readiness.iter().any(|readiness| {
+        readiness.player_index == 1
+            && readiness.status == LobbyGameReadinessStatus::MissingStartupState
+    }));
+    let missing_state = registry
+        .request_lobby_game_launch(invite.clone(), host_connection, selected.proposal_id)
+        .await
+        .expect_err("guest selected state not ready");
+    assert!(matches!(missing_state, LobbyError::PlayersNotReady));
+
+    registry
+        .set_lobby_game_readiness(
+            invite.clone(),
+            guest_connection,
+            selected.proposal_id,
+            LobbyGameReadinessStatus::Ready,
+            None,
+        )
+        .await
+        .expect("guest ready");
 
     let launched = registry
         .request_lobby_game_launch(invite.clone(), host_connection, selected.proposal_id)

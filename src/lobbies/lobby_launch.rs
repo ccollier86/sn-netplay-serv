@@ -20,6 +20,8 @@ pub enum LobbyGameReadinessStatus {
     NotReady,
     /// Client does not have a matching ROM yet.
     MissingRom,
+    /// Client does not have the selected startup save-state material yet.
+    MissingStartupState,
     /// Client cannot run the selected game/core.
     Unsupported,
 }
