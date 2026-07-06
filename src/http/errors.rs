@@ -206,6 +206,21 @@ impl IntoResponse for HttpError {
                 "lobbyRomRelayTooLarge",
                 "This game is too large for temporary session access.",
             ),
+            Self::Lobby(LobbyError::StartupStateRelayUnavailable) => (
+                StatusCode::CONFLICT,
+                "lobbyStartupStateRelayUnavailable",
+                "Startup state transfer is not available.",
+            ),
+            Self::Lobby(LobbyError::StartupStateRelayUnsupported) => (
+                StatusCode::CONFLICT,
+                "lobbyStartupStateRelayUnsupported",
+                "Startup state transfer is not supported by every player.",
+            ),
+            Self::Lobby(LobbyError::StartupStateRelayTooLarge) => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "lobbyStartupStateRelayTooLarge",
+                "This startup state is too large for temporary session access.",
+            ),
             Self::Lobby(LobbyError::VoiceUnavailable) => (
                 StatusCode::CONFLICT,
                 "lobbyVoiceUnavailable",

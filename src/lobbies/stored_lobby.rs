@@ -104,4 +104,26 @@ impl StoredLobby {
             grant: grants.download,
         });
     }
+
+    /// Sends private startup-state transfer grants to the two involved sockets.
+    pub(super) fn emit_startup_state_transfer_grants(
+        &self,
+        source: ConnectionId,
+        receiver: ConnectionId,
+        grants: LobbyFileRelayGrantPair,
+    ) {
+        let lobby_epoch = self.lobby.lobby_epoch();
+        let _ = self.events.send(LobbyEvent::StartupStateTransferUploadGranted {
+            source,
+            lobby_epoch,
+            grant: grants.upload,
+        });
+        let _ = self
+            .events
+            .send(LobbyEvent::StartupStateTransferDownloadReady {
+                receiver,
+                lobby_epoch,
+                grant: grants.download,
+            });
+    }
 }

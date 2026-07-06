@@ -4,7 +4,10 @@ use crate::lobbies::{
     LobbyRegistry, LobbyRomRelayLimits, LobbyServerCapabilities, LobbyVisibility,
     MAX_LOBBY_PLAYERS,
 };
-use crate::protocol::{LobbyFileRelayGrant, LobbyFileRelayGrantPair, LobbyFileRelayGrantRole};
+use crate::protocol::{
+    LobbyFileRelayGrant, LobbyFileRelayGrantPair, LobbyFileRelayGrantRole,
+    LobbyFileRelayMaterialKind,
+};
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, UuidInviteCodeGenerator, UuidResumeTokenGenerator,
 };
@@ -137,6 +140,7 @@ fn grant(
         relay_url: "https://relay.shadowboy.app".to_string(),
         token: token.to_string(),
         role,
+        material_kind: LobbyFileRelayMaterialKind::Game,
         proposal_id,
         sender_player_index: 0,
         receiver_player_index: 1,
@@ -145,6 +149,7 @@ fn grant(
         chunk_size_bytes: 16_384,
         chunk_count: 2,
         expires_at: "2026-05-25T00:00:00Z".to_string(),
+        startup_state: None,
     }
 }
 

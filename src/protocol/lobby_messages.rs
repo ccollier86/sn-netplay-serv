@@ -7,7 +7,7 @@ use crate::lobbies::{
     LobbyActivityKind, LobbyChatMessageView, LobbyGameCandidate, LobbyGameReadinessStatus,
     LobbyView,
 };
-use crate::protocol::LobbyFileRelayGrant;
+use crate::protocol::{LobbyFileRelayGrant, LobbyStartupStateTransferMetadata};
 use crate::rooms::PlayerVoiceJoinGrant;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -55,6 +55,17 @@ pub enum LobbyClientMessage {
         proposal_id: Uuid,
         /// Zero-based receiver player index.
         receiver_player_index: u8,
+    },
+    /// Host asks the relay to prepare a selected startup-state transfer.
+    RequestStartupStateTransfer {
+        /// Lobby epoch observed by the client.
+        lobby_epoch: u64,
+        /// Selected game proposal being prepared.
+        proposal_id: Uuid,
+        /// Zero-based receiver player index.
+        receiver_player_index: u8,
+        /// Sender-side startup-state material metadata.
+        state: LobbyStartupStateTransferMetadata,
     },
     /// Host publishes the direct gameplay room once it is ready.
     PublishGameRoom {
@@ -149,6 +160,20 @@ pub enum LobbyServerMessage {
     },
     /// Private download grant for the receiver.
     RomTransferDownloadReady {
+        /// Current lobby epoch.
+        lobby_epoch: u64,
+        /// Private file relay grant.
+        grant: LobbyFileRelayGrant,
+    },
+    /// Private startup-state upload grant for the host.
+    StartupStateTransferUploadGranted {
+        /// Current lobby epoch.
+        lobby_epoch: u64,
+        /// Private file relay grant.
+        grant: LobbyFileRelayGrant,
+    },
+    /// Private startup-state download grant for the receiver.
+    StartupStateTransferDownloadReady {
         /// Current lobby epoch.
         lobby_epoch: u64,
         /// Private file relay grant.

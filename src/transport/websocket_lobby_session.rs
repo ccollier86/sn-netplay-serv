@@ -13,6 +13,7 @@ use crate::transport::websocket_lobby_outbound::{
     send_lobby_upgrade_error,
 };
 use crate::transport::websocket_lobby_rom_relay_handler::handle_lobby_rom_relay_request;
+use crate::transport::websocket_lobby_startup_state_relay_handler::handle_lobby_startup_state_relay_request;
 use crate::transport::websocket_peer_close::{peer_close_detail, peer_error_detail};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
@@ -312,6 +313,40 @@ async fn handle_lobby_message(
             )
             .await
         }
+        LobbyClientMessage::RequestStartupStateTransfer {
+            lobby_epoch,
+            proposal_id,
+            receiver_player_index,
+            state,
+        } => {
+            apply_lobby_result(
+                sender,
+                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
+            )
+            .await?;
+            let Some(receiver) = PlayerIndex::new(receiver_player_index, MAX_LOBBY_PLAYERS) else {
+                return send_lobby_static_error(
+                    sender,
+                    "invalidLobbyPlayerIndex",
+                    "Lobby player slot is invalid.",
+                )
+                .await;
+            };
+
+            apply_lobby_result(
+                sender,
+                handle_lobby_startup_state_relay_request(
+                    services,
+                    invite_code,
+                    connection_id,
+                    proposal_id,
+                    receiver,
+                    state,
+                )
+                .await,
+            )
+            .await
+        }
         LobbyClientMessage::PublishGameRoom {
             lobby_epoch,
             proposal_id,
@@ -513,6 +548,26 @@ async fn handle_lobby_event(
                 return true;
             }
             LobbyServerMessage::RomTransferDownloadReady { lobby_epoch, grant }
+        }
+        Ok(LobbyEvent::StartupStateTransferUploadGranted {
+            source,
+            lobby_epoch,
+            grant,
+        }) => {
+            if source != connection_id {
+                return true;
+            }
+            LobbyServerMessage::StartupStateTransferUploadGranted { lobby_epoch, grant }
+        }
+        Ok(LobbyEvent::StartupStateTransferDownloadReady {
+            receiver,
+            lobby_epoch,
+            grant,
+        }) => {
+            if receiver != connection_id {
+                return true;
+            }
+            LobbyServerMessage::StartupStateTransferDownloadReady { lobby_epoch, grant }
         }
         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
             return send_lobby_static_error(sender, "eventLagged", "Lobby event stream lagged.")

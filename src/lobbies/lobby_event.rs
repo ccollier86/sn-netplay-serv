@@ -39,4 +39,22 @@ pub enum LobbyEvent {
         /// Private download grant.
         grant: LobbyFileRelayGrant,
     },
+    /// Private startup-state upload grant for one lobby socket.
+    StartupStateTransferUploadGranted {
+        /// Sender lobby socket.
+        source: ConnectionId,
+        /// Current lobby epoch.
+        lobby_epoch: u64,
+        /// Private upload grant.
+        grant: LobbyFileRelayGrant,
+    },
+    /// Private startup-state download grant for one lobby socket.
+    StartupStateTransferDownloadReady {
+        /// Receiver lobby socket.
+        receiver: ConnectionId,
+        /// Current lobby epoch.
+        lobby_epoch: u64,
+        /// Private download grant.
+        grant: LobbyFileRelayGrant,
+    },
 }

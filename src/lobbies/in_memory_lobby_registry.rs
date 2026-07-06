@@ -9,11 +9,11 @@ use crate::lobbies::{
     LobbyCreateRequest, LobbyDebugEvent, LobbyDebugEventLog, LobbyDebugEventSink, LobbyError,
     LobbyEventReceiver, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin,
     LobbyReconnectRequest, LobbyRegistry, LobbyRegistrySnapshot, LobbyRomRelayLimits,
-    LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyView, MAX_LOBBY_PLAYERS,
-    NoopLobbyDebugEventSink, PublicLobbyEventReceiver, PublicLobbySummary,
-    ReconnectLobbyPlayerRequest, StoredLobby,
+    LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyStartupStateRelayLimits,
+    LobbyStartupStateRelayTransferIntent, LobbyView, MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink,
+    PublicLobbyEventReceiver, PublicLobbySummary, ReconnectLobbyPlayerRequest, StoredLobby,
 };
-use crate::protocol::LobbyFileRelayGrantPair;
+use crate::protocol::{LobbyFileRelayGrantPair, LobbyStartupStateTransferMetadata};
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeTokenGenerator,
     UuidResumeTokenGenerator,
@@ -550,6 +550,79 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
                 intent.sender_player_index.display_number(),
                 intent.receiver_player_index.display_number(),
                 intent.size_bytes
+            ),
+        );
+
+        Ok(())
+    }
+
+    async fn prepare_lobby_startup_state_relay_transfer(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+        receiver_player_index: PlayerIndex,
+        state: LobbyStartupStateTransferMetadata,
+        limits: LobbyStartupStateRelayLimits,
+    ) -> Result<LobbyStartupStateRelayTransferIntent, LobbyError> {
+        let mut lobbies = self.lobbies.write().await;
+        let lobby = lobbies
+            .get_mut(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+
+        let intent = lobby.lobby.prepare_startup_state_relay_transfer(
+            connection_id,
+            proposal_id,
+            receiver_player_index,
+            state,
+            limits,
+        )?;
+        lobby.lobby.record_activity(
+            connection_id,
+            LobbyActivityKind::RomRelay,
+            crate::rooms::current_timestamp_ms(),
+        )?;
+        self.record_lobby_event(
+            lobby,
+            "lobbyStartupStateRelayRequested",
+            format!(
+                "startup state relay requested p{}->p{} bytes={}",
+                intent.sender_player_index.display_number(),
+                intent.receiver_player_index.display_number(),
+                intent.state.size_bytes
+            ),
+        );
+
+        Ok(intent)
+    }
+
+    async fn grant_lobby_startup_state_relay_transfer(
+        &self,
+        invite_code: InviteCode,
+        intent: LobbyStartupStateRelayTransferIntent,
+        grants: LobbyFileRelayGrantPair,
+    ) -> Result<(), LobbyError> {
+        let mut lobbies = self.lobbies.write().await;
+        let lobby = lobbies
+            .get_mut(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+
+        lobby
+            .lobby
+            .require_startup_state_relay_transfer_current(&intent)?;
+        lobby.emit_startup_state_transfer_grants(
+            intent.sender_connection_id,
+            intent.receiver_connection_id,
+            grants,
+        );
+        self.record_lobby_event(
+            lobby,
+            "lobbyStartupStateRelayGranted",
+            format!(
+                "startup state relay grants issued p{}->p{} bytes={}",
+                intent.sender_player_index.display_number(),
+                intent.receiver_player_index.display_number(),
+                intent.state.size_bytes
             ),
         );
 

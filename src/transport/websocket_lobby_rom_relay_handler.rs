@@ -9,8 +9,11 @@ use crate::file_relay::{
 };
 use crate::http::AppServices;
 use crate::lobbies::{LobbyError, LobbyRomRelayLimits, LobbyRomRelayTransferIntent};
-use crate::protocol::{LobbyFileRelayGrant, LobbyFileRelayGrantPair, LobbyFileRelayGrantRole};
+use crate::protocol::LobbyFileRelayMaterialKind;
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
+use crate::transport::websocket_lobby_file_relay_grants::{
+    LobbyFileRelayGrantPairRequest, lobby_file_relay_grants,
+};
 use tracing::warn;
 use uuid::Uuid;
 
@@ -95,7 +98,17 @@ pub async fn handle_lobby_rom_relay_request(
             return Err(LobbyError::RomRelayUnavailable);
         }
     };
-    let grants = rom_relay_grants(response, relay_url, &intent);
+    let grants = lobby_file_relay_grants(LobbyFileRelayGrantPairRequest {
+        response,
+        relay_url,
+        material_kind: LobbyFileRelayMaterialKind::Game,
+        proposal_id: intent.proposal_id,
+        sender_player_index: intent.sender_player_index,
+        receiver_player_index: intent.receiver_player_index,
+        sha256: intent.sha256.clone(),
+        size_bytes: intent.size_bytes,
+        startup_state: None,
+    });
 
     match services
         .lobbies
@@ -174,42 +187,5 @@ fn rom_relay_broker_failure_reason(error: &FileRelayBrokerError) -> String {
         FileRelayBrokerError::RequestTimedOut => "request-timeout".to_string(),
         FileRelayBrokerError::UnexpectedStatus(status) => format!("status-{status}"),
         FileRelayBrokerError::InvalidResponse => "invalid-response".to_string(),
-    }
-}
-
-fn rom_relay_grants(
-    response: crate::file_relay::CreateFileRelayTransferResponse,
-    relay_url: String,
-    intent: &LobbyRomRelayTransferIntent,
-) -> LobbyFileRelayGrantPair {
-    LobbyFileRelayGrantPair {
-        upload: LobbyFileRelayGrant {
-            transfer_id: response.transfer_id.clone(),
-            relay_url: relay_url.clone(),
-            token: response.upload_token,
-            role: LobbyFileRelayGrantRole::Upload,
-            proposal_id: intent.proposal_id,
-            sender_player_index: intent.sender_player_index.zero_based(),
-            receiver_player_index: intent.receiver_player_index.zero_based(),
-            sha256: intent.sha256.clone(),
-            size_bytes: intent.size_bytes,
-            chunk_size_bytes: response.chunk_size_bytes,
-            chunk_count: response.chunk_count,
-            expires_at: response.expires_at.clone(),
-        },
-        download: LobbyFileRelayGrant {
-            transfer_id: response.transfer_id,
-            relay_url,
-            token: response.download_token,
-            role: LobbyFileRelayGrantRole::Download,
-            proposal_id: intent.proposal_id,
-            sender_player_index: intent.sender_player_index.zero_based(),
-            receiver_player_index: intent.receiver_player_index.zero_based(),
-            sha256: intent.sha256.clone(),
-            size_bytes: intent.size_bytes,
-            chunk_size_bytes: response.chunk_size_bytes,
-            chunk_count: response.chunk_count,
-            expires_at: response.expires_at,
-        },
     }
 }

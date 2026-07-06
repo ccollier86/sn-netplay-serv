@@ -53,7 +53,11 @@ pub use input_frame::{InputFrame, InputFrameLimits};
 pub use link_cable_compatibility::LinkCableCompatibility;
 pub use link_cable_descriptor::{LinkCableDescriptor, LinkCableTransport};
 pub use link_cable_packet::{LinkCablePacket, LinkCablePacketError, LinkCablePacketLimits};
-pub use lobby_file_relay::{LobbyFileRelayGrant, LobbyFileRelayGrantPair, LobbyFileRelayGrantRole};
+pub use lobby_file_relay::{
+    LobbyFileRelayGrant, LobbyFileRelayGrantPair, LobbyFileRelayGrantRole,
+    LobbyFileRelayMaterialKind, LobbyStartupStateRestorePolicy,
+    LobbyStartupStateTransferMetadata,
+};
 pub use lobby_messages::{LobbyClientMessage, LobbyServerMessage};
 pub use netplay_protocol::{
     MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION, NETPLAY_PROTOCOL_VERSION, NetplayProtocolView,

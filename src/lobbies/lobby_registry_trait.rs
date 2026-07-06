@@ -7,10 +7,11 @@ use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, LobbyActivityKind, LobbyChatMessageView, LobbyDebugEvent,
     LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin,
-    LobbyRegistrySnapshot, LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyView,
+    LobbyRegistrySnapshot, LobbyRomRelayLimits, LobbyRomRelayTransferIntent,
+    LobbyStartupStateRelayLimits, LobbyStartupStateRelayTransferIntent, LobbyView,
     LobbyVoiceTokenRefresh, PublicLobbySummary, ReconnectLobbyPlayerRequest,
 };
-use crate::protocol::LobbyFileRelayGrantPair;
+use crate::protocol::{LobbyFileRelayGrantPair, LobbyStartupStateTransferMetadata};
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
 use tokio::sync::broadcast;
 
@@ -114,6 +115,25 @@ pub trait LobbyRegistry: Send + Sync {
         &self,
         invite_code: InviteCode,
         intent: LobbyRomRelayTransferIntent,
+        grants: LobbyFileRelayGrantPair,
+    ) -> Result<(), LobbyError>;
+
+    /// Validates a host-to-player selected startup-state transfer request.
+    async fn prepare_lobby_startup_state_relay_transfer(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        proposal_id: uuid::Uuid,
+        receiver_player_index: PlayerIndex,
+        state: LobbyStartupStateTransferMetadata,
+        limits: LobbyStartupStateRelayLimits,
+    ) -> Result<LobbyStartupStateRelayTransferIntent, LobbyError>;
+
+    /// Sends private startup-state transfer grants to the involved lobby sockets.
+    async fn grant_lobby_startup_state_relay_transfer(
+        &self,
+        invite_code: InviteCode,
+        intent: LobbyStartupStateRelayTransferIntent,
         grants: LobbyFileRelayGrantPair,
     ) -> Result<(), LobbyError>;
 

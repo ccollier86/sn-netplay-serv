@@ -47,6 +47,15 @@ pub enum LobbyError {
     /// Proposed ROM exceeds the relay limit.
     #[error("temporary rom relay payload is too large")]
     RomRelayTooLarge,
+    /// Selected startup-state relay is disabled or unavailable.
+    #[error("startup state relay is unavailable")]
+    StartupStateRelayUnavailable,
+    /// One of the lobby clients cannot use selected startup-state relay.
+    #[error("startup state relay is unsupported by a client")]
+    StartupStateRelayUnsupported,
+    /// Proposed startup state exceeds the relay limit.
+    #[error("startup state relay payload is too large")]
+    StartupStateRelayTooLarge,
     /// Lobby voice is disabled or unavailable.
     #[error("lobby voice is unavailable")]
     VoiceUnavailable,

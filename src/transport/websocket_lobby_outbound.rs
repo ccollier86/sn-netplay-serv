@@ -96,6 +96,18 @@ fn lobby_error_message(error: LobbyError) -> LobbyServerMessage {
             "lobbyRomRelayTooLarge",
             "This game is too large for temporary session access.",
         ),
+        LobbyError::StartupStateRelayUnavailable => lobby_static_error(
+            "lobbyStartupStateRelayUnavailable",
+            "Startup state transfer is not available.",
+        ),
+        LobbyError::StartupStateRelayUnsupported => lobby_static_error(
+            "lobbyStartupStateRelayUnsupported",
+            "Startup state transfer is not supported by every player.",
+        ),
+        LobbyError::StartupStateRelayTooLarge => lobby_static_error(
+            "lobbyStartupStateRelayTooLarge",
+            "This startup state is too large for temporary session access.",
+        ),
         LobbyError::VoiceUnavailable => {
             lobby_static_error("lobbyVoiceUnavailable", "Voice chat is unavailable.")
         }

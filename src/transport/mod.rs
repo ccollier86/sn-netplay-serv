@@ -5,8 +5,10 @@
 
 mod websocket_input_session;
 mod websocket_join;
+mod websocket_lobby_file_relay_grants;
 mod websocket_lobby_outbound;
 mod websocket_lobby_rom_relay_handler;
+mod websocket_lobby_startup_state_relay_handler;
 mod websocket_lobby_session;
 mod websocket_message_handler;
 mod websocket_outbound;

@@ -19,6 +19,7 @@ mod lobby_player;
 mod lobby_registry_trait;
 mod lobby_registry_voice_ops;
 mod lobby_rom_relay;
+mod lobby_start_state_relay;
 mod lobby_view;
 mod lobby_voice_ops;
 mod stored_lobby;
@@ -51,6 +52,9 @@ pub use lobby_player::{
 };
 pub use lobby_registry_trait::{LobbyEventReceiver, LobbyRegistry, PublicLobbyEventReceiver};
 pub use lobby_rom_relay::{LobbyRomRelayLimits, LobbyRomRelayTransferIntent};
+pub use lobby_start_state_relay::{
+    LobbyStartupStateRelayLimits, LobbyStartupStateRelayTransferIntent,
+};
 pub use lobby_view::{LobbyView, PublicLobbySummary};
 pub(crate) use stored_lobby::StoredLobby;
 
