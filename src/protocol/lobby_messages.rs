@@ -5,7 +5,7 @@
 
 use crate::lobbies::{
     LobbyActivityKind, LobbyChatMessageView, LobbyGameCandidate, LobbyGameReadinessStatus,
-    LobbyView,
+    LobbyReturnReason, LobbyReturnedView, LobbyView,
 };
 use crate::protocol::{LobbyFileRelayGrant, LobbyStartupStateTransferMetadata};
 use crate::rooms::PlayerVoiceJoinGrant;
@@ -82,6 +82,12 @@ pub enum LobbyClientMessage {
         lobby_epoch: u64,
         /// Selected game proposal that was active.
         proposal_id: Uuid,
+        /// Player index that caused the return, if known.
+        #[serde(default)]
+        return_requested_by_player_index: Option<u8>,
+        /// Runner/app reason for returning to the lobby, if known.
+        #[serde(default)]
+        reason: Option<LobbyReturnReason>,
     },
     /// Sends a lobby-scoped chat message.
     Chat {
@@ -144,6 +150,17 @@ pub enum LobbyServerMessage {
         /// Current lobby epoch.
         lobby_epoch: u64,
         /// Current lobby state.
+        lobby: LobbyView,
+    },
+    /// Active gameplay returned to lobby setup.
+    LobbyReturned {
+        /// Current lobby event sequence.
+        event_seq: u64,
+        /// Current lobby epoch.
+        lobby_epoch: u64,
+        /// Return attribution supplied by the runner/app.
+        returned: LobbyReturnedView,
+        /// Current lobby state after the return.
         lobby: LobbyView,
     },
     /// Lobby chat message.
@@ -211,7 +228,9 @@ pub enum LobbyServerMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lobbies::{LobbyServerCapabilities, LobbyStatus, LobbyVisibility};
+    use crate::lobbies::{
+        LobbyReturnReason, LobbyReturnedView, LobbyServerCapabilities, LobbyStatus, LobbyVisibility,
+    };
     use crate::protocol::{
         LobbyFileRelayGrantRole, LobbyFileRelayMaterialKind, LobbyStartupStateRestorePolicy,
     };
@@ -271,6 +290,65 @@ mod tests {
         assert!(payload.get("event_seq").is_none());
         assert!(payload.get("lobby_epoch").is_none());
         assert!(payload.get("your_player_index").is_none());
+    }
+
+    #[test]
+    fn lobby_return_messages_preserve_attribution_wire_contract() {
+        let proposal_id = uuid::Uuid::new_v4();
+        let message = serde_json::from_value::<LobbyClientMessage>(json!({
+            "type": "returnToLobby",
+            "lobbyEpoch": 3,
+            "proposalId": proposal_id,
+            "returnRequestedByPlayerIndex": 1,
+            "reason": "playerRequestedReturn"
+        }))
+        .expect("return message");
+
+        assert!(matches!(
+            message,
+            LobbyClientMessage::ReturnToLobby {
+                lobby_epoch: 3,
+                proposal_id: decoded_proposal_id,
+                return_requested_by_player_index: Some(1),
+                reason: Some(LobbyReturnReason::PlayerRequestedReturn)
+            } if decoded_proposal_id == proposal_id
+        ));
+
+        let lobby = LobbyView {
+            lobby_id: RoomId::new(),
+            event_seq: 5,
+            lobby_epoch: 4,
+            invite_code: "AB23-CD".to_string(),
+            created_at_ms: 1,
+            updated_at_ms: 2,
+            last_meaningful_activity_at_ms: 2,
+            status: LobbyStatus::GameSelected,
+            visibility: LobbyVisibility::Private,
+            capabilities: LobbyServerCapabilities::current(4, true, true),
+            players: Vec::new(),
+            selected_game: None,
+            game_readiness: Vec::new(),
+            pending_launch: None,
+            voice: None,
+        };
+        let payload = serde_json::to_value(LobbyServerMessage::LobbyReturned {
+            event_seq: 5,
+            lobby_epoch: 4,
+            returned: LobbyReturnedView {
+                proposal_id,
+                return_requested_by_player_index: Some(1),
+                reason: Some(LobbyReturnReason::PlayerRequestedReturn),
+                returned_at_ms: 123,
+            },
+            lobby,
+        })
+        .expect("server message");
+
+        assert_eq!(payload["type"], "lobbyReturned");
+        assert_eq!(payload["returned"]["proposalId"], proposal_id.to_string());
+        assert_eq!(payload["returned"]["returnRequestedByPlayerIndex"], 1);
+        assert_eq!(payload["returned"]["reason"], "playerRequestedReturn");
+        assert!(payload.get("return_requested_by_player_index").is_none());
     }
 
     #[test]

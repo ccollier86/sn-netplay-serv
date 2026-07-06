@@ -521,6 +521,51 @@ the relay moves the room to `recovering`, marks the slot `reconnecting`, bumps
 both epochs, and requires compatibility plus state sync again after reconnect.
 If recovery exceeds `SB_NETPLAY_RECONNECT_GRACE_SECONDS`, the room is removed.
 
+## Persistent Lobby Return Messages
+
+Desktop persistent lobbies use a separate lobby WebSocket above direct gameplay
+rooms. When a child gameplay room ends, clients send `returnToLobby` with the
+lobby epoch they observed when the game was active:
+
+```json
+{
+  "type": "returnToLobby",
+  "lobbyEpoch": 12,
+  "proposalId": "00000000-0000-0000-0000-000000000001",
+  "returnRequestedByPlayerIndex": 1,
+  "reason": "playerRequestedReturn"
+}
+```
+
+`returnRequestedByPlayerIndex` and `reason` are optional for backward
+compatibility. Supported reasons are `playerRequestedReturn`, `runnerClosed`,
+`remoteDisconnected`, `roomClosed`, `launchFailed`, `netplayError`,
+`emulatorError`, and `runnerCrashed`.
+
+The relay accepts the first valid return for the active pending launch, clears
+the pending launch and readiness, and broadcasts `lobbyReturned` before the
+generic `lobbyStateChanged`:
+
+```json
+{
+  "type": "lobbyReturned",
+  "eventSeq": 19,
+  "lobbyEpoch": 13,
+  "returned": {
+    "proposalId": "00000000-0000-0000-0000-000000000001",
+    "returnRequestedByPlayerIndex": 1,
+    "reason": "playerRequestedReturn",
+    "returnedAtMs": 1770000000000
+  },
+  "lobby": {}
+}
+```
+
+A second player may report the same completed return after the first report has
+already bumped the lobby epoch. The reducer treats that duplicate as idempotent
+only when it matches the stored last return. A stale report is still rejected if
+a new launch is active or if the selected proposal no longer matches.
+
 ## Internal Operator Endpoints
 
 All internal endpoints require `Authorization: Bearer <SB_NETPLAY_ADMIN_TOKEN>`.

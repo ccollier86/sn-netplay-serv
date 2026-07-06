@@ -3,7 +3,7 @@
 //! Events let WebSocket transports broadcast lobby changes without putting
 //! socket concepts into the lobby state machine.
 
-use crate::lobbies::{LobbyChatMessageView, LobbyView};
+use crate::lobbies::{LobbyChatMessageView, LobbyReturnedView, LobbyView};
 use crate::protocol::LobbyFileRelayGrant;
 use crate::rooms::ConnectionId;
 
@@ -12,6 +12,13 @@ use crate::rooms::ConnectionId;
 pub enum LobbyEvent {
     /// Serializable lobby state should be broadcast to subscribers.
     LobbyStateChanged(LobbyView),
+    /// Active gameplay returned to lobby setup with attribution metadata.
+    LobbyReturned {
+        /// Lobby state after the return was accepted.
+        lobby: LobbyView,
+        /// Return attribution supplied by the runner/app.
+        returned: LobbyReturnedView,
+    },
     /// Lobby chat message should be broadcast to subscribers.
     ChatMessage(LobbyChatMessageView),
     /// Lobby closed intentionally on the server side.

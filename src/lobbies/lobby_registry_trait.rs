@@ -7,7 +7,7 @@ use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, LobbyActivityKind, LobbyChatMessageView, LobbyDebugEvent,
     LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin,
-    LobbyRegistrySnapshot, LobbyRomRelayLimits, LobbyRomRelayTransferIntent,
+    LobbyRegistrySnapshot, LobbyReturnReason, LobbyRomRelayLimits, LobbyRomRelayTransferIntent,
     LobbyStartupStateRelayLimits, LobbyStartupStateRelayTransferIntent, LobbyView,
     LobbyVoiceTokenRefresh, PublicLobbySummary, ReconnectLobbyPlayerRequest,
 };
@@ -151,7 +151,10 @@ pub trait LobbyRegistry: Send + Sync {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        lobby_epoch: u64,
         proposal_id: uuid::Uuid,
+        return_requested_by_player_index: Option<PlayerIndex>,
+        reason: Option<LobbyReturnReason>,
     ) -> Result<LobbyView, LobbyError>;
 
     /// Sends a sanitized lobby chat message.

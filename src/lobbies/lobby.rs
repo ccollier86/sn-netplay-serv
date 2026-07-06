@@ -7,8 +7,8 @@ use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     LobbyActivityKind, LobbyClientCapabilities, LobbyError, LobbyGameCandidate,
     LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView, LobbyGameSelectionView,
-    LobbyPlayerOccupancy, LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerStatus,
-    LobbyServerCapabilities, LobbyView,
+    LobbyPlayerOccupancy, LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerStatus, LobbyReturnOutcome,
+    LobbyReturnRequest, LobbyReturnedView, LobbyServerCapabilities, LobbyView,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, ResumeTokenHash, RoomId, RoomVoiceState,
@@ -60,6 +60,7 @@ pub struct Lobby {
     selected_game: Option<LobbyGameSelectionView>,
     game_readiness: Vec<LobbyGameReadinessView>,
     pending_launch: Option<LobbyGameLaunchView>,
+    last_return: Option<LobbyReturnedView>,
     pub(crate) voice: Option<RoomVoiceState>,
 }
 
@@ -143,6 +144,7 @@ impl Lobby {
             selected_game,
             game_readiness: Vec::new(),
             pending_launch: None,
+            last_return: None,
             voice: None,
         }
     }
@@ -302,6 +304,7 @@ impl Lobby {
         self.selected_game = Some(proposal.clone());
         self.game_readiness.clear();
         self.pending_launch = None;
+        self.last_return = None;
         self.status = LobbyStatus::GameSelected;
         self.bump_with_activity(now_ms);
 
@@ -359,6 +362,7 @@ impl Lobby {
 
         let launch = LobbyGameLaunchView::new(proposal_id, player_index, now_ms);
         self.pending_launch = Some(launch.clone());
+        self.last_return = None;
         self.status = LobbyStatus::InGame;
         self.bump_with_activity(now_ms);
 
@@ -400,17 +404,30 @@ impl Lobby {
     /// Clears an active child game and returns players to lobby readiness.
     pub fn return_to_lobby(
         &mut self,
-        connection_id: ConnectionId,
-        proposal_id: uuid::Uuid,
-        now_ms: u128,
-    ) -> Result<(), LobbyError> {
-        self.player_index_for_connection(connection_id)?;
-        self.require_selected_proposal(proposal_id)?;
+        request: LobbyReturnRequest,
+    ) -> Result<LobbyReturnOutcome, LobbyError> {
+        self.player_index_for_connection(request.connection_id)?;
+        self.require_selected_proposal(request.proposal_id)?;
+        if request.lobby_epoch != self.lobby_epoch {
+            return self
+                .idempotent_return_outcome(request.proposal_id)
+                .ok_or(LobbyError::StaleLobbyEpoch);
+        }
         match self.pending_launch.as_ref() {
-            Some(launch) if launch.proposal_id == proposal_id => {}
-            _ => return Err(LobbyError::StaleGameProposal),
+            Some(launch) if launch.proposal_id == request.proposal_id => {}
+            _ => {
+                return self
+                    .idempotent_return_outcome(request.proposal_id)
+                    .ok_or(LobbyError::StaleGameProposal);
+            }
         }
 
+        let returned = LobbyReturnedView::new(
+            request.proposal_id,
+            request.return_requested_by_player_index,
+            request.reason,
+            request.now_ms,
+        );
         self.game_readiness.clear();
         self.pending_launch = None;
         self.status = if self.selected_game.is_some() {
@@ -418,9 +435,10 @@ impl Lobby {
         } else {
             LobbyStatus::Open
         };
-        self.bump_with_activity(now_ms);
+        self.last_return = Some(returned.clone());
+        self.bump_with_activity(request.now_ms);
 
-        Ok(())
+        Ok(LobbyReturnOutcome::applied(returned))
     }
 
     /// Returns the player index assigned to a lobby connection.
@@ -583,6 +601,12 @@ impl Lobby {
                         && readiness.status == LobbyGameReadinessStatus::Ready
                 })
             })
+    }
+
+    fn idempotent_return_outcome(&self, proposal_id: uuid::Uuid) -> Option<LobbyReturnOutcome> {
+        let returned = self.last_return.as_ref()?;
+        (returned.proposal_id == proposal_id)
+            .then(|| LobbyReturnOutcome::already_applied(returned.clone()))
     }
 }
 

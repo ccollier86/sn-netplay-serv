@@ -18,6 +18,7 @@ mod lobby_launch;
 mod lobby_player;
 mod lobby_registry_trait;
 mod lobby_registry_voice_ops;
+mod lobby_return;
 mod lobby_rom_relay;
 mod lobby_start_state_relay;
 mod lobby_view;
@@ -51,6 +52,9 @@ pub use lobby_player::{
     LobbyPlayerOccupancy, LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerSlotView, LobbyPlayerStatus,
 };
 pub use lobby_registry_trait::{LobbyEventReceiver, LobbyRegistry, PublicLobbyEventReceiver};
+pub use lobby_return::{
+    LobbyReturnOutcome, LobbyReturnReason, LobbyReturnRequest, LobbyReturnedView,
+};
 pub use lobby_rom_relay::{LobbyRomRelayLimits, LobbyRomRelayTransferIntent};
 pub use lobby_start_state_relay::{
     LobbyStartupStateRelayLimits, LobbyStartupStateRelayTransferIntent,

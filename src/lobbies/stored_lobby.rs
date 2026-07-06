@@ -6,7 +6,7 @@
 use crate::lobbies::lobby_debug_event::current_lobby_timestamp_ms;
 use crate::lobbies::{
     Lobby, LobbyChatMessageView, LobbyDebugEvent, LobbyDebugEventLog, LobbyEvent,
-    LobbyServerCapabilities, LobbyView,
+    LobbyReturnedView, LobbyServerCapabilities, LobbyView,
 };
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::ConnectionId;
@@ -70,6 +70,14 @@ impl StoredLobby {
     /// Broadcasts the current lobby view.
     pub(super) fn emit_state_changed(&self) {
         let _ = self.events.send(LobbyEvent::LobbyStateChanged(self.view()));
+    }
+
+    /// Broadcasts that an active game returned to lobby setup.
+    pub(super) fn emit_lobby_returned(&self, returned: LobbyReturnedView) {
+        let _ = self.events.send(LobbyEvent::LobbyReturned {
+            lobby: self.view(),
+            returned,
+        });
     }
 
     /// Broadcasts a chat message.

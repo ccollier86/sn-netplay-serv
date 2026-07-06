@@ -4,11 +4,12 @@ use crate::auth::{ClientKind, VerifiedLicense};
 use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyActivityKind,
     LobbyClientCapabilities, LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus,
-    LobbyPlayerRole, LobbyPlayerStatus, LobbyRegistry, LobbyServerCapabilities, LobbyStatus,
-    LobbyVisibility, MAX_LOBBY_PLAYERS, PublicLobbyEventReceiver, ReconnectLobbyPlayerRequest,
+    LobbyPlayerRole, LobbyPlayerStatus, LobbyRegistry, LobbyReturnReason, LobbyServerCapabilities,
+    LobbyStatus, LobbyVisibility, MAX_LOBBY_PLAYERS, PublicLobbyEventReceiver,
+    ReconnectLobbyPlayerRequest,
 };
 use crate::rooms::{
-    ConnectionId, InviteCode, InviteCodeGenerator, ResumeToken, ResumeTokenGenerator,
+    ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeToken, ResumeTokenGenerator,
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -564,7 +565,8 @@ async fn host_launch_requires_connected_players_ready() {
         .await
         .expect("published");
 
-    let pending_launch = published.pending_launch.expect("launch");
+    let published_epoch = published.lobby_epoch;
+    let pending_launch = published.pending_launch.clone().expect("launch");
 
     assert_eq!(
         pending_launch.status,
@@ -572,14 +574,58 @@ async fn host_launch_requires_connected_players_ready() {
     );
     assert_eq!(pending_launch.room_invite_code.as_deref(), Some("AB23-CD"));
 
+    let mut events = registry
+        .subscribe_lobby(invite.clone())
+        .await
+        .expect("events");
     let returned = registry
-        .return_lobby_from_game(invite, guest_connection, selected.proposal_id)
+        .return_lobby_from_game(
+            invite.clone(),
+            guest_connection,
+            published_epoch,
+            selected.proposal_id,
+            Some(PlayerIndex::TWO),
+            Some(LobbyReturnReason::PlayerRequestedReturn),
+        )
         .await
         .expect("returned");
+    let returned_event = recv_lobby_event(&mut events).await;
+    let state_event = recv_lobby_event(&mut events).await;
 
     assert_eq!(returned.status, LobbyStatus::GameSelected);
     assert!(returned.pending_launch.is_none());
     assert!(returned.game_readiness.is_empty());
+    match returned_event {
+        LobbyEvent::LobbyReturned {
+            lobby,
+            returned: returned_metadata,
+        } => {
+            assert_eq!(lobby.status, LobbyStatus::GameSelected);
+            assert_eq!(returned_metadata.proposal_id, selected.proposal_id);
+            assert_eq!(returned_metadata.return_requested_by_player_index, Some(1));
+            assert_eq!(
+                returned_metadata.reason,
+                Some(LobbyReturnReason::PlayerRequestedReturn)
+            );
+        }
+        other => panic!("expected lobby returned event, got {other:?}"),
+    }
+    assert!(matches!(state_event, LobbyEvent::LobbyStateChanged(_)));
+
+    let duplicate = registry
+        .return_lobby_from_game(
+            invite,
+            host_connection,
+            published_epoch,
+            selected.proposal_id,
+            Some(PlayerIndex::ONE),
+            Some(LobbyReturnReason::PlayerRequestedReturn),
+        )
+        .await
+        .expect("duplicate return is idempotent");
+
+    assert_eq!(duplicate.status, LobbyStatus::GameSelected);
+    assert!(events.try_recv().is_err());
 }
 
 #[tokio::test]
@@ -600,15 +646,22 @@ async fn return_to_lobby_requires_active_launch() {
         )
         .await
         .expect("host connected");
-    let selected = registry
+    let selected_view = registry
         .select_lobby_game(invite.clone(), host_connection, game_candidate())
         .await
-        .expect("selected")
-        .selected_game
-        .expect("selected game");
+        .expect("selected");
+    let selected_epoch = selected_view.lobby_epoch;
+    let selected = selected_view.selected_game.expect("selected game");
 
     let error = registry
-        .return_lobby_from_game(invite, host_connection, selected.proposal_id)
+        .return_lobby_from_game(
+            invite,
+            host_connection,
+            selected_epoch,
+            selected.proposal_id,
+            Some(PlayerIndex::ONE),
+            Some(LobbyReturnReason::PlayerRequestedReturn),
+        )
         .await
         .expect_err("cannot return before a child launch exists");
 

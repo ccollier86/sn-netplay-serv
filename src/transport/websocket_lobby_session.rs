@@ -387,17 +387,34 @@ async fn handle_lobby_message(
         LobbyClientMessage::ReturnToLobby {
             lobby_epoch,
             proposal_id,
+            return_requested_by_player_index,
+            reason,
         } => {
-            apply_lobby_result(
-                sender,
-                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
-            )
-            .await?;
+            let return_requested_by_player_index = match return_requested_by_player_index {
+                Some(player_index) => match PlayerIndex::new(player_index, MAX_LOBBY_PLAYERS) {
+                    Some(player_index) => Some(player_index),
+                    None => {
+                        return send_lobby_error(
+                            sender,
+                            crate::lobbies::LobbyError::InvalidPayload,
+                        )
+                        .await;
+                    }
+                },
+                None => None,
+            };
             apply_lobby_result(
                 sender,
                 services
                     .lobbies
-                    .return_lobby_from_game(invite_code.clone(), connection_id, proposal_id)
+                    .return_lobby_from_game(
+                        invite_code.clone(),
+                        connection_id,
+                        lobby_epoch,
+                        proposal_id,
+                        return_requested_by_player_index,
+                        reason,
+                    )
                     .await
                     .map(|_| ()),
             )
@@ -513,6 +530,12 @@ async fn handle_lobby_event(
         Ok(LobbyEvent::LobbyStateChanged(lobby)) => LobbyServerMessage::LobbyStateChanged {
             event_seq: lobby.event_seq,
             lobby_epoch: lobby.lobby_epoch,
+            lobby,
+        },
+        Ok(LobbyEvent::LobbyReturned { lobby, returned }) => LobbyServerMessage::LobbyReturned {
+            event_seq: lobby.event_seq,
+            lobby_epoch: lobby.lobby_epoch,
+            returned,
             lobby,
         },
         Ok(LobbyEvent::ChatMessage(message)) => LobbyServerMessage::ChatMessage { message },

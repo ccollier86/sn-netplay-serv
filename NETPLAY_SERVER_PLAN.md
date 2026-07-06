@@ -29,6 +29,11 @@ tests added as each system is built.
 11. Both clients start from the same server-assigned player slots.
 12. Server relays frame-numbered input messages or link-cable packets until the
    session ends.
+13. Persistent desktop lobbies return from a child game through `returnToLobby`.
+    The first accepted report clears pending launch/readiness and broadcasts
+    `lobbyReturned` with optional player/reason attribution; duplicate reports
+    from the same completed launch are idempotent, while stale reports against a
+    later launch remain rejected.
 
 ## Rust Stack
 

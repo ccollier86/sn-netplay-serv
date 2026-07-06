@@ -8,10 +8,11 @@ use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, Lobby, LobbyActivityKind, LobbyChatMessageView,
     LobbyCreateRequest, LobbyDebugEvent, LobbyDebugEventLog, LobbyDebugEventSink, LobbyError,
     LobbyEventReceiver, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin,
-    LobbyReconnectRequest, LobbyRegistry, LobbyRegistrySnapshot, LobbyRomRelayLimits,
-    LobbyRomRelayTransferIntent, LobbyServerCapabilities, LobbyStartupStateRelayLimits,
-    LobbyStartupStateRelayTransferIntent, LobbyView, MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink,
-    PublicLobbyEventReceiver, PublicLobbySummary, ReconnectLobbyPlayerRequest, StoredLobby,
+    LobbyReconnectRequest, LobbyRegistry, LobbyRegistrySnapshot, LobbyReturnReason,
+    LobbyReturnRequest, LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyServerCapabilities,
+    LobbyStartupStateRelayLimits, LobbyStartupStateRelayTransferIntent, LobbyView,
+    MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink, PublicLobbyEventReceiver, PublicLobbySummary,
+    ReconnectLobbyPlayerRequest, StoredLobby,
 };
 use crate::protocol::{LobbyFileRelayGrantPair, LobbyStartupStateTransferMetadata};
 use crate::rooms::{
@@ -661,24 +662,33 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        lobby_epoch: u64,
         proposal_id: uuid::Uuid,
+        return_requested_by_player_index: Option<PlayerIndex>,
+        reason: Option<LobbyReturnReason>,
     ) -> Result<LobbyView, LobbyError> {
         let mut lobbies = self.lobbies.write().await;
         let lobby = lobbies
             .get_mut(invite_code.normalized())
             .ok_or(LobbyError::NotFound)?;
-        lobby.lobby.return_to_lobby(
+        let outcome = lobby.lobby.return_to_lobby(LobbyReturnRequest {
             connection_id,
+            lobby_epoch,
             proposal_id,
-            crate::rooms::current_timestamp_ms(),
-        )?;
-        lobby.emit_state_changed();
-        self.record_lobby_event(
-            lobby,
-            "lobbyReturned",
-            "lobby returned from game".to_string(),
-        );
-        self.emit_public_lobbies_changed();
+            return_requested_by_player_index,
+            reason,
+            now_ms: crate::rooms::current_timestamp_ms(),
+        })?;
+        if outcome.state_changed {
+            lobby.emit_lobby_returned(outcome.returned);
+            lobby.emit_state_changed();
+            self.record_lobby_event(
+                lobby,
+                "lobbyReturned",
+                "lobby returned from game".to_string(),
+            );
+            self.emit_public_lobbies_changed();
+        }
 
         Ok(lobby.view())
     }
