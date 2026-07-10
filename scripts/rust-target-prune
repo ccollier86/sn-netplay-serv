@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=project-storage-env.sh
+# shellcheck disable=SC1091
+source "$ROOT/scripts/project-storage-env.sh"
+case "$CARGO_TARGET_DIR" in
+  "$PROJECT_BUILD_DIR"/*) ;;
+  *) echo "unsafe Rust target: $CARGO_TARGET_DIR" >&2; exit 1 ;;
+esac
+rust-target-care prune "$CARGO_TARGET_DIR" \
+  --older-than "${OLDER_THAN_DAYS:-2}" \
+  --keep-hashes "${KEEP_HASHES:-3}" \
+  --keep-dirs "${KEEP_DIRS:-2}" \
+  "$@"

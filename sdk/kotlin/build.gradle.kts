@@ -8,6 +8,10 @@ plugins {
 group = "app.shadowboy"
 version = "0.1.0"
 
+val projectBuildRoot = providers.environmentVariable("PROJECT_BUILD_DIR")
+    .orElse("/Volumes/code-bank/build/sb-netplay-serv")
+layout.buildDirectory.set(file("${projectBuildRoot.get()}/gradle/sdk-kotlin"))
+
 kotlin {
     jvmToolchain(21)
     compilerOptions {

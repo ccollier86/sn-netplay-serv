@@ -1,0 +1,52 @@
+schema_version = 2
+
+[project]
+name = "sb-netplay-serv"
+source_root = "/Volumes/code-bank/code/sb-desktop/sb-netplay-serv"
+storage_owner = "root"
+
+[paths]
+dev_drive = "/Volumes/code-bank"
+cache = "/Volumes/code-bank/caches/sb-netplay-serv"
+build = "/Volumes/code-bank/build/sb-netplay-serv"
+rust_target = "/Volumes/code-bank/build/sb-netplay-serv/rust-target"
+node_build = "/Volumes/code-bank/build/sb-netplay-serv/node"
+gradle_build = "/Volumes/code-bank/build/sb-netplay-serv/gradle"
+package_staging = "/Volumes/code-bank/build/sb-netplay-serv/package-staging"
+artifacts = "/Volumes/code-bank/artifacts/sb-netplay-serv"
+dev_artifacts = "/Volumes/code-bank/artifacts/sb-netplay-serv/dev"
+nightly_artifacts = "/Volumes/code-bank/artifacts/sb-netplay-serv/nightly"
+release = "/Volumes/code-bank/artifacts/sb-netplay-serv/release"
+diagnostics = "/Volumes/code-bank/artifacts/sb-netplay-serv/diagnostics"
+scratch = "/Volumes/code-bank/tmp/scratch/sb-netplay-serv"
+logs = "/Volumes/code-bank/logs/sb-netplay-serv"
+
+[nested]
+parent_owned = [
+  "sdk/typescript",
+  "sdk/kotlin",
+]
+
+[budgets]
+rust_target = "100G"
+project_cache = "100G"
+artifacts_dev = "20G"
+artifacts_release = "50G"
+logs = "2G"
+scratch = "5G"
+
+[retention]
+dev_artifacts_days = 14
+dev_artifacts_keep_latest = 10
+nightly_artifacts_days = 21
+nightly_artifacts_keep_latest = 10
+release_keep_latest = 5
+logs_days = 7
+diagnostics_days = 14
+scratch_days = 3
+
+[cleanup]
+soft_profile = "standard"
+code_only_execute = false
+protect_git_tracked = true
+protect_runtime_data = true

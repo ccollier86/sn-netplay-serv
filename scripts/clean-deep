@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+echo 'Executing code-only cleanup is disabled; review an archive and read-only scan instead.' >&2
+project-diet scan "$ROOT" --profile code-only

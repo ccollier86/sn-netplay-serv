@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=project-storage-env.sh
+# shellcheck disable=SC1091
+source "$ROOT/scripts/project-storage-env.sh"
+project-diet prune "$ROOT" --profile standard "$@"

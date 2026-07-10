@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# shellcheck source=project-storage-env.sh
+# shellcheck disable=SC1091
+source "$ROOT/scripts/project-storage-env.sh"
+
+du -xhd 2 "$ROOT" 2>/dev/null | sort -h
+for path in "$PROJECT_CACHE_DIR" "$PROJECT_BUILD_DIR" "$PROJECT_ARTIFACT_DIR" "$PROJECT_LOG_DIR" "$PROJECT_SCRATCH_DIR"; do
+  if [[ -e "$path" ]]; then
+    du -sh "$path" 2>/dev/null || true
+  fi
+done
+project-diet scan "$ROOT" --profile standard

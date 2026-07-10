@@ -218,9 +218,14 @@ returns `402 entitlementRequired`.
 
 ```bash
 cargo fmt
-cargo test
-cargo run
+scripts/with-project-env.sh cargo test
+scripts/with-project-env.sh cargo run
 ```
+
+The wrapper validates the physical external checkout and exports the canonical
+Cargo target, package caches, project artifacts, logs, and scratch paths. Copy
+`.envrc.example` to `.envrc` and approve it with direnv if you prefer those
+variables to be active for direct Cargo, Bun, or Gradle commands.
 
 ## Architecture Rules
 

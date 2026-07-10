@@ -1,0 +1,3 @@
+# Copy to .envrc only after reviewing this project's storage contract, then run
+# `direnv allow`. Keep secrets in the existing ignored .env files, not here.
+source ./scripts/project-storage-env.sh
