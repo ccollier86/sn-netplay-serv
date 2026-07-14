@@ -7,8 +7,8 @@ use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     LobbyActivityKind, LobbyClientCapabilities, LobbyError, LobbyGameCandidate,
     LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView, LobbyGameSelectionView,
-    LobbyPlayerOccupancy, LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerStatus, LobbyReturnOutcome,
-    LobbyReturnRequest, LobbyReturnedView, LobbyServerCapabilities, LobbyView,
+    LobbyPlayerOccupancy, LobbyPlayerRemoval, LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerStatus,
+    LobbyReturnOutcome, LobbyReturnRequest, LobbyReturnedView, LobbyServerCapabilities, LobbyView,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, ResumeTokenHash, RoomId, RoomVoiceState,
@@ -282,6 +282,63 @@ impl Lobby {
         self.bump_with_activity(now_ms);
 
         Ok(())
+    }
+
+    /// Permanently removes an occupied guest slot on behalf of the host.
+    pub(crate) fn remove_player(
+        &mut self,
+        requester_connection_id: ConnectionId,
+        lobby_epoch: u64,
+        target_player_index: PlayerIndex,
+        now_ms: u128,
+    ) -> Result<LobbyPlayerRemoval, LobbyError> {
+        if self.lobby_epoch != lobby_epoch {
+            return Err(LobbyError::StaleLobbyEpoch);
+        }
+        let requester_index = self.player_index_for_connection(requester_connection_id)?;
+        let requester = self
+            .slot(requester_index)
+            .ok_or(LobbyError::UnknownConnection)?;
+        if requester.role != LobbyPlayerRole::Host {
+            return Err(LobbyError::PlayerRemovalHostOnly);
+        }
+        if self.status == LobbyStatus::Closed
+            || self.status == LobbyStatus::InGame
+            || self.pending_launch.is_some()
+        {
+            return Err(LobbyError::LobbyPlayerRemovalUnavailable);
+        }
+
+        let target = self
+            .slot(target_player_index)
+            .ok_or(LobbyError::LobbyPlayerNotFound)?;
+        if target.role == LobbyPlayerRole::Host {
+            return Err(LobbyError::CannotRemoveLobbyHost);
+        }
+        if target.subject_key.is_none() {
+            return Err(LobbyError::LobbyPlayerNotFound);
+        }
+        let connection_id = target.connection_id;
+        let voice = self.voice_grant_for(target_player_index);
+
+        if let Some(slot) = self.slot_mut(target_player_index) {
+            *slot = LobbyPlayerSlot::empty(target_player_index);
+        }
+        self.game_readiness
+            .retain(|readiness| readiness.player_index != target_player_index.zero_based());
+        self.status = if self.selected_game.is_some() {
+            LobbyStatus::GameSelected
+        } else {
+            LobbyStatus::Open
+        };
+        self.bump_with_activity(now_ms);
+
+        Ok(LobbyPlayerRemoval {
+            player_index: target_player_index,
+            connection_id,
+            voice_room_id: voice.as_ref().map(|grant| grant.voice_room_id.clone()),
+            participant_identity: voice.map(|grant| grant.participant_identity),
+        })
     }
 
     /// Selects or replaces the game proposal for this lobby.

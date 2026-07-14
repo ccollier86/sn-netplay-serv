@@ -16,6 +16,7 @@ mod lobby_expiration_task;
 mod lobby_game;
 mod lobby_launch;
 mod lobby_player;
+mod lobby_player_removal;
 mod lobby_registry_trait;
 mod lobby_registry_voice_ops;
 mod lobby_return;
@@ -51,6 +52,8 @@ pub use lobby_launch::{
 pub use lobby_player::{
     LobbyPlayerOccupancy, LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerSlotView, LobbyPlayerStatus,
 };
+pub(crate) use lobby_player_removal::LobbyPlayerRemoval;
+pub use lobby_player_removal::LobbyPlayerRemovalReason;
 pub use lobby_registry_trait::{LobbyEventReceiver, LobbyRegistry, PublicLobbyEventReceiver};
 pub use lobby_return::{
     LobbyReturnOutcome, LobbyReturnReason, LobbyReturnRequest, LobbyReturnedView,

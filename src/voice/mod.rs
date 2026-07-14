@@ -11,5 +11,6 @@ pub use broker::{DisabledVoiceBroker, VoiceBroker, VoiceBrokerError};
 pub use http_broker::HttpVoiceBroker;
 pub use types::{
     CloseVoiceRoomRequest, CreateVoiceRoomBrokerRequest, CreateVoiceRoomBrokerResponse,
-    IssueVoiceTokenBrokerRequest, VoiceBrokerGrant, VoiceBrokerParticipant, VoiceBrokerRoomView,
+    IssueVoiceTokenBrokerRequest, RemoveVoiceParticipantRequest, VoiceBrokerGrant,
+    VoiceBrokerParticipant, VoiceBrokerRoomView,
 };

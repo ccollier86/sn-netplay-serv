@@ -3,7 +3,9 @@
 //! Events let WebSocket transports broadcast lobby changes without putting
 //! socket concepts into the lobby state machine.
 
-use crate::lobbies::{LobbyChatMessageView, LobbyReturnedView, LobbyView};
+use crate::lobbies::{
+    LobbyChatMessageView, LobbyPlayerRemovalReason, LobbyReturnedView, LobbyView,
+};
 use crate::protocol::LobbyFileRelayGrant;
 use crate::rooms::ConnectionId;
 
@@ -27,6 +29,17 @@ pub enum LobbyEvent {
         lobby: LobbyView,
         /// Safe close reason.
         reason: String,
+    },
+    /// One connected participant was removed and must terminate membership.
+    PlayerRemoved {
+        /// Socket whose membership was removed.
+        target: ConnectionId,
+        /// Removed zero-based player slot.
+        player_index: u8,
+        /// Stable terminal reason.
+        reason: LobbyPlayerRemovalReason,
+        /// Authoritative post-removal lobby state.
+        lobby: LobbyView,
     },
     /// Private ROM upload grant for one lobby socket.
     RomTransferUploadGranted {

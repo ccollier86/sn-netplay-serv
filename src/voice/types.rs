@@ -101,3 +101,11 @@ pub struct CloseVoiceRoomRequest {
     /// Cleanup reason for broker telemetry.
     pub reason: String,
 }
+
+/// Voice participant removal request sent to the broker.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveVoiceParticipantRequest {
+    /// Cleanup reason for broker telemetry.
+    pub reason: String,
+}

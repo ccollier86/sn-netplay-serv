@@ -8,11 +8,11 @@ use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, Lobby, LobbyActivityKind, LobbyChatMessageView,
     LobbyCreateRequest, LobbyDebugEvent, LobbyDebugEventLog, LobbyDebugEventSink, LobbyError,
     LobbyEventReceiver, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin,
-    LobbyReconnectRequest, LobbyRegistry, LobbyRegistrySnapshot, LobbyReturnReason,
-    LobbyReturnRequest, LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyServerCapabilities,
-    LobbyStartupStateRelayLimits, LobbyStartupStateRelayTransferIntent, LobbyView,
-    MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink, PublicLobbyEventReceiver, PublicLobbySummary,
-    ReconnectLobbyPlayerRequest, StoredLobby,
+    LobbyPlayerRemovalReason, LobbyReconnectRequest, LobbyRegistry, LobbyRegistrySnapshot,
+    LobbyReturnReason, LobbyReturnRequest, LobbyRomRelayLimits, LobbyRomRelayTransferIntent,
+    LobbyServerCapabilities, LobbyStartupStateRelayLimits, LobbyStartupStateRelayTransferIntent,
+    LobbyView, MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink, PublicLobbyEventReceiver,
+    PublicLobbySummary, ReconnectLobbyPlayerRequest, StoredLobby,
 };
 use crate::protocol::{LobbyFileRelayGrantPair, LobbyStartupStateTransferMetadata};
 use crate::rooms::{
@@ -399,6 +399,55 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         self.emit_public_lobbies_changed();
 
         Ok(lobby.view())
+    }
+
+    async fn remove_lobby_player(
+        &self,
+        invite_code: InviteCode,
+        requester_connection_id: ConnectionId,
+        lobby_epoch: u64,
+        target_player_index: PlayerIndex,
+    ) -> Result<LobbyView, LobbyError> {
+        if !self.capabilities.supports_lobby_player_removal {
+            return Err(LobbyError::LobbyPlayerRemovalUnavailable);
+        }
+
+        let (view, voice_cleanup) = {
+            let mut lobbies = self.lobbies.write().await;
+            let lobby = lobbies
+                .get_mut(invite_code.normalized())
+                .ok_or(LobbyError::NotFound)?;
+            let removal = lobby.lobby.remove_player(
+                requester_connection_id,
+                lobby_epoch,
+                target_player_index,
+                crate::rooms::current_timestamp_ms(),
+            )?;
+
+            if let Some(target) = removal.connection_id {
+                lobby.emit_player_removed(
+                    target,
+                    removal.player_index.zero_based(),
+                    LobbyPlayerRemovalReason::RemovedByHost,
+                );
+            }
+            lobby.emit_state_changed();
+            self.record_lobby_event(
+                lobby,
+                "lobbyPlayerRemoved",
+                player_detail("host removed player from lobby", removal.player_index),
+            );
+            self.emit_public_lobbies_changed();
+
+            (
+                lobby.view(),
+                removal.voice_room_id.zip(removal.participant_identity),
+            )
+        };
+
+        self.cleanup_lobby_voice_participant(voice_cleanup, "removedByHost");
+
+        Ok(view)
     }
 
     async fn subscribe_lobby(

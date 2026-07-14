@@ -77,6 +77,20 @@ fn lobby_error_message(error: LobbyError) -> LobbyServerMessage {
         LobbyError::HostOnly => {
             lobby_static_error("lobbyHostOnly", "Only Player 1 can perform this action.")
         }
+        LobbyError::PlayerRemovalHostOnly => {
+            lobby_static_error("hostOnly", "Only the lobby host can remove a player.")
+        }
+        LobbyError::LobbyPlayerNotFound => lobby_static_error(
+            "lobbyPlayerNotFound",
+            "The selected lobby player is no longer present.",
+        ),
+        LobbyError::CannotRemoveLobbyHost => {
+            lobby_static_error("cannotRemoveLobbyHost", "The lobby host cannot be removed.")
+        }
+        LobbyError::LobbyPlayerRemovalUnavailable => lobby_static_error(
+            "lobbyPlayerRemovalUnavailable",
+            "Players cannot be removed while a game launch is active.",
+        ),
         LobbyError::StaleGameProposal => lobby_static_error(
             "staleLobbyGameProposal",
             "Selected game changed; refresh and retry.",

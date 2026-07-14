@@ -32,6 +32,18 @@ pub enum LobbyError {
     /// Only Player 1 can perform this lobby operation.
     #[error("host only lobby operation")]
     HostOnly,
+    /// A non-host connection attempted to remove a lobby player.
+    #[error("only the lobby host can remove a player")]
+    PlayerRemovalHostOnly,
+    /// The requested lobby player slot is empty.
+    #[error("lobby player was not found")]
+    LobbyPlayerNotFound,
+    /// The host slot cannot be removed.
+    #[error("the lobby host cannot be removed")]
+    CannotRemoveLobbyHost,
+    /// Current lobby state does not permit player removal.
+    #[error("lobby player removal is unavailable")]
+    LobbyPlayerRemovalUnavailable,
     /// Selected game changed or no longer exists.
     #[error("lobby game proposal is stale")]
     StaleGameProposal,

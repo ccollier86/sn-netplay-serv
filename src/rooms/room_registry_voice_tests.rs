@@ -351,4 +351,13 @@ impl VoiceBroker for MockVoiceBroker {
             .push(voice_room_id.to_string());
         Ok(())
     }
+
+    async fn remove_participant(
+        &self,
+        _voice_room_id: &str,
+        _participant_identity: &str,
+        _reason: &str,
+    ) -> Result<(), VoiceBrokerError> {
+        Ok(())
+    }
 }

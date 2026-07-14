@@ -29,6 +29,14 @@ pub trait VoiceBroker: Send + Sync {
 
     /// Closes a provider-backed voice room.
     async fn close_room(&self, voice_room_id: &str, reason: &str) -> Result<(), VoiceBrokerError>;
+
+    /// Disconnects one participant's active provider session.
+    async fn remove_participant(
+        &self,
+        voice_room_id: &str,
+        participant_identity: &str,
+        reason: &str,
+    ) -> Result<(), VoiceBrokerError>;
 }
 
 /// Broker used when voice integration is not configured.
@@ -59,6 +67,15 @@ impl VoiceBroker for DisabledVoiceBroker {
     async fn close_room(
         &self,
         _voice_room_id: &str,
+        _reason: &str,
+    ) -> Result<(), VoiceBrokerError> {
+        Ok(())
+    }
+
+    async fn remove_participant(
+        &self,
+        _voice_room_id: &str,
+        _participant_identity: &str,
         _reason: &str,
     ) -> Result<(), VoiceBrokerError> {
         Ok(())

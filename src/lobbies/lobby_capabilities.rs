@@ -27,6 +27,9 @@ pub struct LobbyClientCapabilities {
     /// Client can receive the `playing` launch sub-status after gameplay starts.
     #[serde(default)]
     pub supports_lobby_gameplay_started: bool,
+    /// Client can receive the terminal `playerRemoved` event.
+    #[serde(default)]
+    pub supports_lobby_player_removed_event: bool,
 }
 
 impl LobbyClientCapabilities {
@@ -39,6 +42,7 @@ impl LobbyClientCapabilities {
             supports_multi_game_lobby: true,
             supports_lobby_returned_event: false,
             supports_lobby_gameplay_started: false,
+            supports_lobby_player_removed_event: false,
         }
     }
 }
@@ -59,6 +63,8 @@ pub struct LobbyServerCapabilities {
     pub supports_lobby_returned_event: bool,
     /// Relay can track active gameplay after the scheduled start barrier releases.
     pub supports_lobby_gameplay_started: bool,
+    /// Relay supports host-authorized removal of occupied guest slots.
+    pub supports_lobby_player_removal: bool,
     /// Maximum players accepted by this lobby.
     pub max_players: u8,
 }
@@ -73,6 +79,7 @@ impl LobbyServerCapabilities {
             supports_multi_game_lobby: true,
             supports_lobby_returned_event: true,
             supports_lobby_gameplay_started: true,
+            supports_lobby_player_removal: true,
             max_players,
         }
     }

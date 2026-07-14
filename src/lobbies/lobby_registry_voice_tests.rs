@@ -169,6 +169,71 @@ async fn lobby_voice_room_closes_when_host_closes_lobby() {
     );
 }
 
+#[tokio::test]
+async fn removing_lobby_player_disconnects_their_voice_session() {
+    let broker = MockVoiceBroker::available();
+    let removed_participants = broker.removed.clone();
+    let registry = registry_with_voice(broker);
+    let host_join = registry
+        .create_lobby(license("host"), create_params_with_voice())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    let guest_join = registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_params(),
+            ConnectionId::new(),
+        )
+        .await
+        .expect("guest connected");
+
+    registry
+        .remove_lobby_player(
+            invite,
+            host_connection,
+            guest_join.lobby.lobby_epoch,
+            guest_join.player_index,
+        )
+        .await
+        .expect("removed");
+
+    for _ in 0..10 {
+        if removed_participants
+            .lock()
+            .expect("removed participants")
+            .len()
+            == 1
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert_eq!(
+        removed_participants
+            .lock()
+            .expect("removed participants")
+            .as_slice(),
+        [(
+            "lobby-voice-room-1".to_string(),
+            "lobby-player-2".to_string(),
+            "removedByHost".to_string(),
+        )]
+    );
+}
+
 fn registry_with_voice(broker: MockVoiceBroker) -> InMemoryLobbyRegistry {
     InMemoryLobbyRegistry::with_generators_capabilities_and_voice(
         Arc::new(SequenceInviteCodeGenerator::default()),
@@ -243,6 +308,7 @@ impl ResumeTokenGenerator for SequenceResumeTokenGenerator {
 #[derive(Clone)]
 struct MockVoiceBroker {
     closed: Arc<Mutex<Vec<String>>>,
+    removed: Arc<Mutex<Vec<(String, String, String)>>>,
     max_supported_participants: u8,
     requests: Arc<Mutex<Vec<u8>>>,
 }
@@ -251,6 +317,7 @@ impl MockVoiceBroker {
     fn available() -> Self {
         Self {
             closed: Arc::new(Mutex::new(Vec::new())),
+            removed: Arc::new(Mutex::new(Vec::new())),
             max_supported_participants: MAX_LOBBY_PLAYERS,
             requests: Arc::new(Mutex::new(Vec::new())),
         }
@@ -259,6 +326,7 @@ impl MockVoiceBroker {
     fn limited_to(max_supported_participants: u8) -> Self {
         Self {
             closed: Arc::new(Mutex::new(Vec::new())),
+            removed: Arc::new(Mutex::new(Vec::new())),
             max_supported_participants,
             requests: Arc::new(Mutex::new(Vec::new())),
         }
@@ -324,6 +392,20 @@ impl VoiceBroker for MockVoiceBroker {
             .lock()
             .expect("closed rooms")
             .push(voice_room_id.to_string());
+        Ok(())
+    }
+
+    async fn remove_participant(
+        &self,
+        voice_room_id: &str,
+        participant_identity: &str,
+        reason: &str,
+    ) -> Result<(), VoiceBrokerError> {
+        self.removed.lock().expect("removed participants").push((
+            voice_room_id.to_string(),
+            participant_identity.to_string(),
+            reason.to_string(),
+        ));
         Ok(())
     }
 }

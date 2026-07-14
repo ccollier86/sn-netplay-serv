@@ -5,7 +5,7 @@
 
 use crate::lobbies::{
     LobbyActivityKind, LobbyChatMessageView, LobbyGameCandidate, LobbyGameReadinessStatus,
-    LobbyReturnReason, LobbyReturnedView, LobbyView,
+    LobbyPlayerRemovalReason, LobbyReturnReason, LobbyReturnedView, LobbyView,
 };
 use crate::protocol::{LobbyFileRelayGrant, LobbyStartupStateTransferMetadata};
 use crate::rooms::PlayerVoiceJoinGrant;
@@ -107,6 +107,13 @@ pub enum LobbyClientMessage {
     RefreshVoiceToken {
         /// Lobby epoch observed by the client.
         lobby_epoch: u64,
+    },
+    /// Host permanently removes one occupied guest slot.
+    RemovePlayer {
+        /// Lobby epoch observed by the host.
+        lobby_epoch: u64,
+        /// Zero-based guest player slot to remove.
+        player_index: u8,
     },
     /// Reports meaningful activity that should retain the lobby.
     ReportActivity {
@@ -212,6 +219,19 @@ pub enum LobbyServerMessage {
         /// Fresh private voice grant.
         voice: PlayerVoiceJoinGrant,
     },
+    /// This socket's lobby membership was removed by the host.
+    PlayerRemoved {
+        /// Current lobby event sequence.
+        event_seq: u64,
+        /// Current lobby epoch.
+        lobby_epoch: u64,
+        /// Removed zero-based player slot.
+        player_index: u8,
+        /// Stable terminal reason.
+        reason: LobbyPlayerRemovalReason,
+        /// Authoritative post-removal lobby state.
+        lobby: LobbyView,
+    },
     /// Lobby was closed by the server.
     LobbyClosed {
         /// Final lobby event sequence.
@@ -259,6 +279,21 @@ mod tests {
                 lobby_epoch: 3,
                 body
             } if body == "hello"
+        ));
+
+        let message = serde_json::from_value::<LobbyClientMessage>(json!({
+            "type": "removePlayer",
+            "lobbyEpoch": 7,
+            "playerIndex": 1
+        }))
+        .expect("remove player message");
+
+        assert!(matches!(
+            message,
+            LobbyClientMessage::RemovePlayer {
+                lobby_epoch: 7,
+                player_index: 1,
+            }
         ));
     }
 
@@ -338,6 +373,21 @@ mod tests {
             pending_launch: None,
             voice: None,
         };
+        let removal_payload = serde_json::to_value(LobbyServerMessage::PlayerRemoved {
+            event_seq: 5,
+            lobby_epoch: 4,
+            player_index: 1,
+            reason: LobbyPlayerRemovalReason::RemovedByHost,
+            lobby: lobby.clone(),
+        })
+        .expect("player removed message");
+
+        assert_eq!(removal_payload["type"], "playerRemoved");
+        assert_eq!(removal_payload["eventSeq"], 5);
+        assert_eq!(removal_payload["lobbyEpoch"], 4);
+        assert_eq!(removal_payload["playerIndex"], 1);
+        assert_eq!(removal_payload["reason"], "removedByHost");
+
         let payload = serde_json::to_value(LobbyServerMessage::LobbyReturned {
             event_seq: 5,
             lobby_epoch: 4,

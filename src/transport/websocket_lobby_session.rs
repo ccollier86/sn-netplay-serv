@@ -483,6 +483,33 @@ async fn handle_lobby_message(
                 Err(error) => send_lobby_error(sender, error).await,
             }
         }
+        LobbyClientMessage::RemovePlayer {
+            lobby_epoch,
+            player_index,
+        } => {
+            let Some(player_index) = PlayerIndex::new(player_index, MAX_LOBBY_PLAYERS) else {
+                return send_lobby_static_error(
+                    sender,
+                    "invalidLobbyPlayerIndex",
+                    "Lobby player slot is invalid.",
+                )
+                .await;
+            };
+            apply_lobby_result(
+                sender,
+                services
+                    .lobbies
+                    .remove_lobby_player(
+                        invite_code.clone(),
+                        connection_id,
+                        lobby_epoch,
+                        player_index,
+                    )
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
         LobbyClientMessage::ReportActivity { lobby_epoch, kind } => {
             apply_lobby_result(
                 sender,
@@ -592,6 +619,35 @@ async fn handle_lobby_event(
             let _ = send_lobby_server_message(sender, &message).await;
             return false;
         }
+        Ok(LobbyEvent::PlayerRemoved {
+            target,
+            player_index,
+            reason,
+            lobby,
+        }) => {
+            if target != connection_id {
+                return true;
+            }
+            if capabilities.supports_lobby_player_removed_event {
+                let lobby = lobby_view_for_client(lobby, capabilities);
+                let message = LobbyServerMessage::PlayerRemoved {
+                    event_seq: lobby.event_seq,
+                    lobby_epoch: lobby.lobby_epoch,
+                    player_index,
+                    reason,
+                    lobby,
+                };
+                let _ = send_lobby_server_message(sender, &message).await;
+            } else {
+                let _ = send_lobby_static_error(
+                    sender,
+                    "removedFromLobby",
+                    "The host removed you from the lobby.",
+                )
+                .await;
+            }
+            return false;
+        }
         Ok(LobbyEvent::RomTransferUploadGranted {
             source,
             lobby_epoch,
@@ -688,6 +744,7 @@ mod tests {
                 supports_multi_game_lobby: true,
                 supports_lobby_returned_event: true,
                 supports_lobby_gameplay_started: true,
+                supports_lobby_player_removed_event: true,
             },
         );
         let modern_launch = modern.pending_launch.expect("modern launch");

@@ -170,6 +170,35 @@ impl InMemoryLobbyRegistry {
             }
         });
     }
+
+    /// Disconnects one removed lobby member from voice without blocking removal.
+    pub(super) fn cleanup_lobby_voice_participant(
+        &self,
+        participant: Option<(String, String)>,
+        reason: &'static str,
+    ) {
+        let Some((voice_room_id, participant_identity)) = participant else {
+            return;
+        };
+        if !self.voice_broker.is_enabled() {
+            return;
+        }
+
+        let broker = self.voice_broker.clone();
+        tokio::spawn(async move {
+            if let Err(error) = broker
+                .remove_participant(&voice_room_id, &participant_identity, reason)
+                .await
+            {
+                warn!(
+                    voice_room_id = %voice_room_id,
+                    participant_identity = %participant_identity,
+                    error = %error,
+                    "voice broker lobby participant cleanup failed"
+                );
+            }
+        });
+    }
 }
 
 fn create_lobby_voice_request(

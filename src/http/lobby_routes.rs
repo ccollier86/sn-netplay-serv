@@ -333,6 +333,8 @@ pub struct WebSocketLobbyQuery {
     #[serde(default)]
     supports_lobby_gameplay_started: Option<bool>,
     #[serde(default)]
+    supports_lobby_player_removed_event: Option<bool>,
+    #[serde(default)]
     player_index: Option<u8>,
     #[serde(default)]
     lobby_epoch: Option<u64>,
@@ -393,5 +395,8 @@ fn lobby_capabilities(
             .unwrap_or(defaults_to_rich_desktop),
         supports_lobby_returned_event: query.supports_lobby_returned_event.unwrap_or(false),
         supports_lobby_gameplay_started: query.supports_lobby_gameplay_started.unwrap_or(false),
+        supports_lobby_player_removed_event: query
+            .supports_lobby_player_removed_event
+            .unwrap_or(false),
     }
 }

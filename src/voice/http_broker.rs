@@ -5,7 +5,8 @@
 
 use crate::voice::{
     CloseVoiceRoomRequest, CreateVoiceRoomBrokerRequest, CreateVoiceRoomBrokerResponse,
-    IssueVoiceTokenBrokerRequest, VoiceBroker, VoiceBrokerError, VoiceBrokerGrant,
+    IssueVoiceTokenBrokerRequest, RemoveVoiceParticipantRequest, VoiceBroker, VoiceBrokerError,
+    VoiceBrokerGrant,
 };
 use reqwest::Url;
 use std::time::Duration;
@@ -44,6 +45,23 @@ impl HttpVoiceBroker {
         self.base_url
             .join(path)
             .map_err(|_| VoiceBrokerError::InvalidUrl)
+    }
+
+    fn participant_endpoint(
+        &self,
+        voice_room_id: &str,
+        participant_identity: &str,
+    ) -> Result<Url, VoiceBrokerError> {
+        let mut endpoint = self.endpoint("v1/voice/rooms/")?;
+        endpoint
+            .path_segments_mut()
+            .map_err(|_| VoiceBrokerError::InvalidUrl)?
+            .pop_if_empty()
+            .push(voice_room_id)
+            .push("participants")
+            .push(participant_identity);
+
+        Ok(endpoint)
     }
 }
 
@@ -126,6 +144,32 @@ impl VoiceBroker for HttpVoiceBroker {
             ))
         }
     }
+
+    async fn remove_participant(
+        &self,
+        voice_room_id: &str,
+        participant_identity: &str,
+        reason: &str,
+    ) -> Result<(), VoiceBrokerError> {
+        let response = self
+            .client
+            .delete(self.participant_endpoint(voice_room_id, participant_identity)?)
+            .bearer_auth(&self.bearer_token)
+            .json(&RemoveVoiceParticipantRequest {
+                reason: reason.to_string(),
+            })
+            .send()
+            .await
+            .map_err(|_| VoiceBrokerError::RequestFailed)?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(VoiceBrokerError::UnexpectedStatus(
+                response.status().as_u16(),
+            ))
+        }
+    }
 }
 
 fn parse_base_url(value: &str) -> Result<Url, VoiceBrokerError> {
@@ -160,6 +204,13 @@ mod tests {
                 .expect("endpoint")
                 .as_str(),
             "https://voice.shadowboy.app/v1/voice/rooms"
+        );
+        assert_eq!(
+            broker
+                .participant_endpoint("room-id", "lobby/player-2")
+                .expect("participant endpoint")
+                .as_str(),
+            "https://voice.shadowboy.app/v1/voice/rooms/room-id/participants/lobby%2Fplayer-2"
         );
     }
 }

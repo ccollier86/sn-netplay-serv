@@ -6,7 +6,7 @@
 use crate::lobbies::lobby_debug_event::current_lobby_timestamp_ms;
 use crate::lobbies::{
     Lobby, LobbyChatMessageView, LobbyDebugEvent, LobbyDebugEventLog, LobbyEvent,
-    LobbyReturnedView, LobbyServerCapabilities, LobbyView,
+    LobbyPlayerRemovalReason, LobbyReturnedView, LobbyServerCapabilities, LobbyView,
 };
 use crate::protocol::LobbyFileRelayGrantPair;
 use crate::rooms::ConnectionId;
@@ -90,6 +90,21 @@ impl StoredLobby {
         let _ = self.events.send(LobbyEvent::LobbyClosed {
             lobby: self.view(),
             reason,
+        });
+    }
+
+    /// Sends a terminal removal event only to the targeted lobby socket.
+    pub(super) fn emit_player_removed(
+        &self,
+        target: ConnectionId,
+        player_index: u8,
+        reason: LobbyPlayerRemovalReason,
+    ) {
+        let _ = self.events.send(LobbyEvent::PlayerRemoved {
+            target,
+            player_index,
+            reason,
+            lobby: self.view(),
         });
     }
 

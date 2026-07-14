@@ -181,6 +181,26 @@ impl IntoResponse for HttpError {
                 "lobbyHostOnly",
                 "Only Player 1 can perform this action.",
             ),
+            Self::Lobby(LobbyError::PlayerRemovalHostOnly) => (
+                StatusCode::FORBIDDEN,
+                "hostOnly",
+                "Only the lobby host can remove a player.",
+            ),
+            Self::Lobby(LobbyError::LobbyPlayerNotFound) => (
+                StatusCode::CONFLICT,
+                "lobbyPlayerNotFound",
+                "The selected lobby player is no longer present.",
+            ),
+            Self::Lobby(LobbyError::CannotRemoveLobbyHost) => (
+                StatusCode::CONFLICT,
+                "cannotRemoveLobbyHost",
+                "The lobby host cannot be removed.",
+            ),
+            Self::Lobby(LobbyError::LobbyPlayerRemovalUnavailable) => (
+                StatusCode::CONFLICT,
+                "lobbyPlayerRemovalUnavailable",
+                "Players cannot be removed while a game launch is active.",
+            ),
             Self::Lobby(LobbyError::StaleGameProposal) => (
                 StatusCode::CONFLICT,
                 "staleLobbyGameProposal",

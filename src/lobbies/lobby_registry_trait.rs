@@ -68,6 +68,15 @@ pub trait LobbyRegistry: Send + Sync {
         connection_id: ConnectionId,
     ) -> Result<LobbyView, LobbyError>;
 
+    /// Permanently removes one occupied guest slot on behalf of the host.
+    async fn remove_lobby_player(
+        &self,
+        invite_code: InviteCode,
+        requester_connection_id: ConnectionId,
+        lobby_epoch: u64,
+        target_player_index: PlayerIndex,
+    ) -> Result<LobbyView, LobbyError>;
+
     /// Subscribes to domain events for one active lobby.
     async fn subscribe_lobby(
         &self,

@@ -4,9 +4,9 @@ use crate::auth::{ClientKind, VerifiedLicense};
 use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyActivityKind,
     LobbyClientCapabilities, LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameLaunchStatus,
-    LobbyGameReadinessStatus, LobbyPlayerRole, LobbyPlayerStatus, LobbyRegistry, LobbyReturnReason,
-    LobbyServerCapabilities, LobbyStatus, LobbyVisibility, MAX_LOBBY_PLAYERS,
-    PublicLobbyEventReceiver, ReconnectLobbyPlayerRequest,
+    LobbyGameReadinessStatus, LobbyPlayerRemovalReason, LobbyPlayerRole, LobbyPlayerStatus,
+    LobbyRegistry, LobbyReturnReason, LobbyServerCapabilities, LobbyStatus, LobbyVisibility,
+    MAX_LOBBY_PLAYERS, PublicLobbyEventReceiver, ReconnectLobbyPlayerRequest,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeToken, ResumeTokenGenerator,
@@ -298,6 +298,255 @@ async fn intentional_guest_leave_frees_the_lobby_slot() {
 }
 
 #[tokio::test]
+async fn host_removal_erases_guest_membership_before_broadcasting_roster() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    let guest_connection = ConnectionId::new();
+    let guest_join = registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_params(),
+            guest_connection,
+        )
+        .await
+        .expect("guest connected");
+    let selected = registry
+        .select_lobby_game(invite.clone(), host_connection, game_candidate())
+        .await
+        .expect("selected");
+    let proposal_id = selected.selected_game.as_ref().expect("game").proposal_id;
+    let ready = registry
+        .set_lobby_game_readiness(
+            invite.clone(),
+            guest_connection,
+            proposal_id,
+            LobbyGameReadinessStatus::Ready,
+            None,
+        )
+        .await
+        .expect("guest ready");
+    let observed_epoch = ready.lobby_epoch;
+    let old_resume_token = guest_join.resume_token;
+    let mut events = registry
+        .subscribe_lobby(invite.clone())
+        .await
+        .expect("events");
+
+    let removed = registry
+        .remove_lobby_player(
+            invite.clone(),
+            host_connection,
+            observed_epoch,
+            guest_join.player_index,
+        )
+        .await
+        .expect("removed");
+
+    assert_eq!(removed.status, LobbyStatus::GameSelected);
+    assert!(removed.selected_game.is_some());
+    assert!(!removed.players[1].occupied);
+    assert_eq!(removed.players[1].status, LobbyPlayerStatus::Empty);
+    assert!(
+        removed
+            .game_readiness
+            .iter()
+            .all(|readiness| readiness.player_index != 1)
+    );
+
+    match recv_lobby_event(&mut events).await {
+        LobbyEvent::PlayerRemoved {
+            target,
+            player_index,
+            reason,
+            lobby,
+        } => {
+            assert_eq!(target, guest_connection);
+            assert_eq!(player_index, 1);
+            assert_eq!(reason, LobbyPlayerRemovalReason::RemovedByHost);
+            assert_eq!(lobby.event_seq, removed.event_seq);
+            assert_eq!(lobby.lobby_epoch, removed.lobby_epoch);
+            assert!(!lobby.players[1].occupied);
+        }
+        other => panic!("unexpected first removal event: {other:?}"),
+    }
+    match recv_lobby_event(&mut events).await {
+        LobbyEvent::LobbyStateChanged(lobby) => {
+            assert_eq!(lobby.event_seq, removed.event_seq);
+            assert_eq!(lobby.lobby_epoch, removed.lobby_epoch);
+        }
+        other => panic!("unexpected roster event: {other:?}"),
+    }
+
+    let reconnect_error = registry
+        .reconnect_lobby_player(ReconnectLobbyPlayerRequest {
+            invite_code: invite.clone(),
+            player: license("guest"),
+            params: join_params(),
+            player_index: guest_join.player_index,
+            lobby_epoch: observed_epoch,
+            resume_token: old_resume_token.clone(),
+            connection_id: ConnectionId::new(),
+        })
+        .await
+        .expect_err("removed resume token must not reclaim the slot");
+    assert!(matches!(reconnect_error, LobbyError::PlayerSlotUnavailable));
+
+    let rejoined = registry
+        .connect_lobby(invite, license("guest"), join_params(), ConnectionId::new())
+        .await
+        .expect("removed player may join again as a new membership");
+    assert_eq!(rejoined.player_index, PlayerIndex::TWO);
+    assert_ne!(rejoined.resume_token, old_resume_token);
+}
+
+#[tokio::test]
+async fn player_removal_rejects_non_host_stale_host_and_empty_targets() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    let guest_connection = ConnectionId::new();
+    let joined = registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_params(),
+            guest_connection,
+        )
+        .await
+        .expect("guest connected");
+    let epoch = joined.lobby.lobby_epoch;
+
+    let error = registry
+        .remove_lobby_player(invite.clone(), guest_connection, epoch, PlayerIndex::TWO)
+        .await
+        .expect_err("guest cannot remove a player");
+    assert!(matches!(error, LobbyError::PlayerRemovalHostOnly));
+
+    let error = registry
+        .remove_lobby_player(invite.clone(), host_connection, epoch, PlayerIndex::ONE)
+        .await
+        .expect_err("host cannot remove itself");
+    assert!(matches!(error, LobbyError::CannotRemoveLobbyHost));
+
+    let player_three = PlayerIndex::new(2, MAX_LOBBY_PLAYERS).expect("player three");
+    let error = registry
+        .remove_lobby_player(invite.clone(), host_connection, epoch, player_three)
+        .await
+        .expect_err("empty target cannot be removed");
+    assert!(matches!(error, LobbyError::LobbyPlayerNotFound));
+
+    let error = registry
+        .remove_lobby_player(
+            invite,
+            host_connection,
+            epoch.saturating_sub(1),
+            PlayerIndex::TWO,
+        )
+        .await
+        .expect_err("stale removal must fail");
+    assert!(matches!(error, LobbyError::StaleLobbyEpoch));
+}
+
+#[tokio::test]
+async fn player_removal_is_unavailable_after_launch_begins() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    let guest_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_params(),
+            guest_connection,
+        )
+        .await
+        .expect("guest connected");
+    let selected = registry
+        .select_lobby_game(invite.clone(), host_connection, game_candidate())
+        .await
+        .expect("selected");
+    let proposal_id = selected.selected_game.expect("game").proposal_id;
+    registry
+        .set_lobby_game_readiness(
+            invite.clone(),
+            host_connection,
+            proposal_id,
+            LobbyGameReadinessStatus::Ready,
+            None,
+        )
+        .await
+        .expect("host ready");
+    registry
+        .set_lobby_game_readiness(
+            invite.clone(),
+            guest_connection,
+            proposal_id,
+            LobbyGameReadinessStatus::Ready,
+            None,
+        )
+        .await
+        .expect("guest ready");
+    let launched = registry
+        .request_lobby_game_launch(invite.clone(), host_connection, proposal_id)
+        .await
+        .expect("launched");
+
+    let error = registry
+        .remove_lobby_player(
+            invite,
+            host_connection,
+            launched.lobby_epoch,
+            PlayerIndex::TWO,
+        )
+        .await
+        .expect_err("active launch blocks removal");
+
+    assert!(matches!(error, LobbyError::LobbyPlayerRemovalUnavailable));
+}
+
+#[tokio::test]
 async fn intentional_host_leave_closes_the_lobby() {
     let registry = registry();
     let host_join = registry
@@ -341,6 +590,7 @@ async fn lobby_view_reports_server_capabilities() {
 
     assert!(join.lobby.capabilities.supports_temporary_session_rom_relay);
     assert!(join.lobby.capabilities.supports_lobby_voice);
+    assert!(join.lobby.capabilities.supports_lobby_player_removal);
     assert_eq!(join.lobby.capabilities.max_players, 4);
 }
 
