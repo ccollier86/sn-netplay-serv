@@ -1,6 +1,6 @@
 # Lobby Player Removal Contract
 
-Status: proposed implementation contract
+Status: implemented server contract; desktop adoption pending
 
 Owner: `sn-netplay-serv`
 
@@ -17,21 +17,27 @@ This contract deliberately calls the operation `removePlayer`. UI may use the
 friendlier label `Remove from lobby`. `Kick` may remain an internal UI action
 name, but it is not the wire name.
 
-## Verified Starting Point
+## Shipped Implementation
 
-As of relay commit `bfe81a4`:
+The server and Android portions of this contract are implemented at these
+immutable revisions:
 
-- The relay has no host player-removal operation or wire message.
-- Android has no player-removal SDK command.
-- Desktop v1 has no connected lobby-removal command.
-- Desktop v2 already has a `Remove from lobby` presentation item and computes
-  `can_kick`, but no runtime command reaches the relay.
-- Normal guest leave already contains most of the required state cleanup:
-  clearing the slot and resume token, removing readiness, cancelling the
-  pending lobby launch, and returning the lobby to setup state.
+| Component | Revision | Deployment artifact | Published index digest |
+| --- | --- | --- | --- |
+| `sn-netplay-serv` | `b085007` | `ghcr.io/ccollier86/sb-netplay-serv:4db189f` | `sha256:487a87959fddd9f12e50df83a0a349ec7bb1645753a735df023f9dba1a41b602` |
+| `sb-webrtc` | `39e5320` | `ghcr.io/ccollier86/sb-webrtc:dfc3767` | `sha256:f539ae00bdac678079a182f346ea49eb41d392821d804bd71ab5d90be069d157` |
+| ShadowBoy Android | `9f3f476a` | version code 232 / `1.11.23-dev` | n/a |
 
-The desktop v2 presentation must remain capability-gated until this contract
-is implemented. A visible action that cannot reach the relay is a bug.
+The later server image revisions only pin and configure reproducible AMD64
+container builds; the feature revisions above contain the protocol behavior.
+Each immutable tag and its matching `latest` tag resolve to the digest shown
+above. Each index has one runnable `linux/amd64` manifest. Its additional
+`unknown/unknown` manifest is OCI attestation metadata, not an ARM image.
+
+Desktop v1 and v2 must adopt the wire contract and runtime behavior below.
+Desktop v2 already has a `Remove from lobby` presentation item and computes a
+`can_kick` value, but it must remain capability-gated until its action reaches
+the relay. A visible action that cannot reach the relay is a bug.
 
 ## User Contract
 
@@ -128,7 +134,7 @@ Only the removed socket receives this terminal event:
 {
   "type": "playerRemoved",
   "eventSeq": 18,
-  "lobbyEpoch": 7,
+  "lobbyEpoch": 8,
   "playerIndex": 1,
   "reason": "removedByHost",
   "lobby": {}
@@ -156,10 +162,12 @@ The initial reason enum contains one value:
 removedByHost
 ```
 
-The server sends the targeted terminal event before the normal
-`lobbyStateChanged` broadcast for the same post-removal state. The removed
-session sends the terminal event and exits its WebSocket loop. Other sessions
-ignore the targeted domain event and then consume the roster update.
+The returned `lobbyEpoch` is the post-mutation epoch, so it is newer than the
+epoch in the accepted request. The server sends the targeted terminal event
+before the normal `lobbyStateChanged` broadcast for the same post-removal
+state. The removed session sends the terminal event and exits its WebSocket
+loop. Other sessions ignore the targeted domain event and then consume the
+roster update.
 
 No separate success response is required for the host. The authoritative
 `lobbyStateChanged` message is the command acknowledgement.
@@ -275,9 +283,9 @@ older bundled SDK directory has not yet adopted persistent lobbies.
 
 ### `sb-webrtc`
 
-- Add trusted participant-removal request routing and API documentation.
-- Extend `VoiceProvider` and `LiveKitVoiceProvider` with participant removal.
-- Add service validation, telemetry, metrics, and provider tests.
+- Trusted participant-removal request routing and API documentation.
+- `VoiceProvider` and `LiveKitVoiceProvider` participant removal.
+- Service validation, telemetry, metrics, and provider tests.
 
 ### Android / Kotlin SDK
 
@@ -289,6 +297,11 @@ older bundled SDK directory has not yet adopted persistent lobbies.
 - v2 lobby mapper: expose removal only for host, guest target, server support,
   and idle launch state.
 - player menu: destructive confirmation followed by the real command.
+
+These items are implemented in Android revision `9f3f476a`. The installed dev
+build advertises `supportsLobbyPlayerRemovedEvent`, only exposes the action to
+the host for occupied guest slots, sends the current lobby epoch, and treats
+local removal as terminal so the client cannot reconnect with stale state.
 
 ### Desktop v1 / TypeScript SDK
 
@@ -311,9 +324,49 @@ older bundled SDK directory has not yet adopted persistent lobbies.
 - Handle terminal local removal in the runtime event projection and frontend
   store.
 
-## Required Tests
+## Desktop Adoption Checklist
 
-Relay tests:
+Apply this checklist to both desktop SDK/runtime generations. The UI layer must
+not implement roster mutation itself.
+
+1. Add both capability fields with a decode default of false. Advertise
+   `supportsLobbyPlayerRemovedEvent: true` only after terminal cleanup is
+   implemented.
+2. Encode `removePlayer` with the target's zero-based `playerIndex` and the
+   `lobbyEpoch` from the currently rendered authoritative lobby view.
+3. Decode `playerRemoved`, including its post-mutation lobby view and
+   `removedByHost` reason. Preserve unknown future reasons without crashing the
+   lobby event loop.
+4. Expose the command only when the server advertises
+   `supportsLobbyPlayerRemoval`, the local player is host, the target is an
+   occupied non-host slot, and no launch or gameplay is active.
+5. Name the target in a destructive confirmation. On confirmation, send one
+   request and disable duplicate submission until an error or a newer lobby
+   view arrives. Do not optimistically remove the roster row.
+6. Let the host observe success through the authoritative
+   `lobbyStateChanged` event. Close a player menu or confirmation if its target
+   disappears from that view.
+7. On a local `playerRemoved` event, atomically mark the membership terminal,
+   disable reconnect, erase the resume token, cancel game preparation and file
+   transfer, disconnect voice, clear lobby chat, and return to multiplayer
+   home with `The host removed you from the lobby.`
+8. Treat legacy `error.code == "removedFromLobby"` followed by socket close as
+   the same terminal outcome. Do not route it through ordinary retry handling.
+9. Keep connection loss and host removal distinct. An unexpected disconnect
+   may resume; `removedByHost` never resumes the old membership.
+10. Add exact JSON codec tests, capability-gating tests, command deduplication
+    tests, terminal cleanup tests, and a regression test proving the old resume
+    token cannot trigger a reconnect attempt.
+
+For desktop v1, the TypeScript SDK owns wire codecs and terminal state, while
+the desktop coordinator owns service cleanup and navigation. For desktop v2,
+project `MultiplayerCommand::RemoveLobbyPlayer` through the Rust app-owned
+lobby service; the Svelte `LobbyPlayerContextMenu` remains presentation-only
+and dispatches the command after confirmation.
+
+## Verification
+
+Implemented relay coverage:
 
 - host removes a connected guest;
 - host removes a reconnecting guest;
@@ -329,9 +382,9 @@ Relay tests:
 - removed subject may join again as a new membership;
 - voice participant cleanup is attempted and failure is non-fatal.
 
-SDK/client tests:
+Implemented Android/Kotlin coverage:
 
-- exact JSON codecs in Rust, Kotlin, and TypeScript;
+- exact JSON codecs in Rust and Kotlin;
 - missing capability fields default false;
 - host menu capability and state gating;
 - confirmation cancel sends nothing;
@@ -339,6 +392,11 @@ SDK/client tests:
 - local terminal event stops reconnect and voice;
 - remote roster update removes the row without closing the host;
 - legacy target fallback receives `removedFromLobby` before socket close.
+
+The relay passes 234 unit tests and 5 smoke tests with clean Clippy output. The
+voice service passes 26 tests with clean Clippy output. Android passes all 483
+unit tests plus `lintDebug`. TypeScript codec and desktop runtime tests remain
+part of desktop adoption.
 
 Cross-platform acceptance matrix:
 
@@ -351,8 +409,10 @@ Cross-platform acceptance matrix:
 
 ## Deployment Order
 
-1. Deploy the backward-compatible `sb-webrtc` participant-removal endpoint.
-2. Deploy the relay with the new protocol and server capability enabled.
+1. Deploy `ghcr.io/ccollier86/sb-webrtc:dfc3767` (or the matching `latest`)
+   with the backward-compatible participant-removal endpoint.
+2. Deploy `ghcr.io/ccollier86/sb-netplay-serv:4db189f` (or the matching
+   `latest`) with the new protocol and server capability enabled.
 3. Release Android and desktop clients with capability-gated UI.
 4. Run the cross-platform acceptance matrix against production-like relay and
    voice services.
