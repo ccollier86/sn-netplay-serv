@@ -9,6 +9,8 @@ RUN cargo build --release --locked
 
 FROM debian:bookworm-slim AS runtime
 
+LABEL org.opencontainers.image.source="https://github.com/ccollier86/sn-netplay-serv"
+
 RUN useradd --create-home --shell /usr/sbin/nologin shadowboy \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
