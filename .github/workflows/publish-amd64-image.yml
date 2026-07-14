@@ -1,0 +1,43 @@
+name: Publish AMD64 image
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Git revision to build
+        required: true
+        default: main
+      image_tag:
+        description: Immutable GHCR image tag
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-amd64-image
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      SB_NETPLAY_IMAGE_PLATFORM: linux/amd64
+      SB_NETPLAY_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/sb-netplay-serv
+    steps:
+      - name: Check out source revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref }}
+
+      - name: Sign in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Build AMD64 image
+        run: ./scripts/build-ghcr-image.sh "${{ inputs.image_tag }}"
+
+      - name: Push immutable and latest tags
+        run: ./scripts/push-ghcr-image.sh "${{ inputs.image_tag }}"
