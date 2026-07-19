@@ -8,6 +8,7 @@ pub struct SessionReport {
     pub room_id: String,
     pub invite_code: String,
     pub session_epoch: u64,
+    pub protocol_version: Option<u16>,
     pub duration_ms: u64,
     pub event_count: u64,
     pub sample_count: u64,
@@ -25,11 +26,22 @@ pub struct SessionReport {
     pub total_catch_up_frames: u64,
     pub total_late_input_frames: u64,
     pub total_audio_underruns: u64,
+    pub total_input_resend_frames: u64,
+    pub total_input_nacks: u64,
+    pub total_replayed_frames: u64,
+    pub total_suppressed_audio_frames: u64,
+    pub total_suppressed_video_frames: u64,
+    pub max_audio_queue_depth_frames: Option<u32>,
+    pub total_audio_catch_up_events: u64,
+    pub total_audio_trimmed_frames: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FleetReport {
     pub session_count: usize,
+    pub protocol_v4_sessions: usize,
+    pub protocol_v5_sessions: usize,
+    pub unknown_protocol_sessions: usize,
     pub avg_session_duration_ms: f64,
     pub sessions_with_resync: usize,
     pub sessions_with_reconnect: usize,
@@ -45,6 +57,14 @@ pub struct FleetReport {
     pub total_catch_up_frames: u64,
     pub total_late_input_frames: u64,
     pub total_audio_underruns: u64,
+    pub total_input_resend_frames: u64,
+    pub total_input_nacks: u64,
+    pub total_replayed_frames: u64,
+    pub total_suppressed_audio_frames: u64,
+    pub total_suppressed_video_frames: u64,
+    pub max_audio_queue_depth_frames: Option<u32>,
+    pub total_audio_catch_up_events: u64,
+    pub total_audio_trimmed_frames: u64,
 }
 
 pub fn build_session_reports(
@@ -76,11 +96,12 @@ pub fn build_session_reports(
         };
 
         report.event_count += 1;
+        report.protocol_version = report.protocol_version.or(event.protocol_version);
         match event.kind.as_str() {
             "stateHashMatched" => report.state_hash_matches += 1,
             "stateHashFrameSkewDiagnostic" => report.frame_skew_events += 1,
             "stateHashMismatchDiagnostic" => report.mismatch_diagnostics += 1,
-            "stateHashResyncRequired" => report.resyncs += 1,
+            "stateHashResyncRequired" | "stateRecoveryCommitted" => report.resyncs += 1,
             "playerExited" => report.player_exits += 1,
             "recoveryStarted" | "playerReconnected" | "recoveryResyncRequired" => {
                 report.reconnect_events += 1;
@@ -101,12 +122,29 @@ pub fn build_session_reports(
         let accumulator = accumulators.entry(key).or_default();
 
         report.sample_count += 1;
+        report.protocol_version = report.protocol_version.or(sample.protocol_version);
         accumulator.rtt.add_optional(sample.round_trip_ms);
         accumulator.jitter.add_optional(sample.jitter_ms);
         report.total_stalls += u64::from(sample.stall_count.unwrap_or_default());
         report.total_catch_up_frames += u64::from(sample.catch_up_frames.unwrap_or_default());
         report.total_late_input_frames += u64::from(sample.late_input_frames.unwrap_or_default());
         report.total_audio_underruns += u64::from(sample.audio_underruns.unwrap_or_default());
+        report.total_input_resend_frames +=
+            u64::from(sample.input_resend_frames.unwrap_or_default());
+        report.total_input_nacks += u64::from(sample.input_nacks.unwrap_or_default());
+        report.total_replayed_frames += u64::from(sample.replayed_frames.unwrap_or_default());
+        report.total_suppressed_audio_frames +=
+            u64::from(sample.suppressed_audio_frames.unwrap_or_default());
+        report.total_suppressed_video_frames +=
+            u64::from(sample.suppressed_video_frames.unwrap_or_default());
+        if let Some(depth) = sample.audio_queue_depth_frames {
+            report.max_audio_queue_depth_frames =
+                Some(report.max_audio_queue_depth_frames.unwrap_or(0).max(depth));
+        }
+        report.total_audio_catch_up_events +=
+            u64::from(sample.audio_catch_up_events.unwrap_or_default());
+        report.total_audio_trimmed_frames +=
+            u64::from(sample.audio_trimmed_frames.unwrap_or_default());
 
         if let Some(frame_delta) = sample.frame_delta {
             let abs = frame_delta.unsigned_abs();
@@ -143,6 +181,18 @@ pub fn build_fleet_report(sessions: &[SessionReport]) -> FleetReport {
 
     FleetReport {
         session_count: sessions.len(),
+        protocol_v4_sessions: sessions
+            .iter()
+            .filter(|session| session.protocol_version == Some(4))
+            .count(),
+        protocol_v5_sessions: sessions
+            .iter()
+            .filter(|session| session.protocol_version == Some(5))
+            .count(),
+        unknown_protocol_sessions: sessions
+            .iter()
+            .filter(|session| session.protocol_version.is_none())
+            .count(),
         avg_session_duration_ms: average(
             sessions
                 .iter()
@@ -191,12 +241,48 @@ pub fn build_fleet_report(sessions: &[SessionReport]) -> FleetReport {
             .iter()
             .map(|session| session.total_audio_underruns)
             .sum(),
+        total_input_resend_frames: sessions
+            .iter()
+            .map(|session| session.total_input_resend_frames)
+            .sum(),
+        total_input_nacks: sessions
+            .iter()
+            .map(|session| session.total_input_nacks)
+            .sum(),
+        total_replayed_frames: sessions
+            .iter()
+            .map(|session| session.total_replayed_frames)
+            .sum(),
+        total_suppressed_audio_frames: sessions
+            .iter()
+            .map(|session| session.total_suppressed_audio_frames)
+            .sum(),
+        total_suppressed_video_frames: sessions
+            .iter()
+            .map(|session| session.total_suppressed_video_frames)
+            .sum(),
+        max_audio_queue_depth_frames: sessions
+            .iter()
+            .filter_map(|session| session.max_audio_queue_depth_frames)
+            .max(),
+        total_audio_catch_up_events: sessions
+            .iter()
+            .map(|session| session.total_audio_catch_up_events)
+            .sum(),
+        total_audio_trimmed_frames: sessions
+            .iter()
+            .map(|session| session.total_audio_trimmed_frames)
+            .sum(),
     }
 }
 
 pub fn print_report(fleet: &FleetReport, sessions: &[SessionReport]) {
     println!("Netplay analytics report");
     println!("sessions: {}", fleet.session_count);
+    println!(
+        "protocols: {} v4 | {} v5 | {} unknown",
+        fleet.protocol_v4_sessions, fleet.protocol_v5_sessions, fleet.unknown_protocol_sessions
+    );
     println!(
         "avg session duration: {:.1}s",
         fleet.avg_session_duration_ms / 1000.0
@@ -229,11 +315,27 @@ pub fn print_report(fleet: &FleetReport, sessions: &[SessionReport]) {
         fleet.total_late_input_frames,
         fleet.total_audio_underruns
     );
+    println!(
+        "v5 input: {} resent frames | {} NACKs | {} replayed frames",
+        fleet.total_input_resend_frames, fleet.total_input_nacks, fleet.total_replayed_frames
+    );
+    println!(
+        "replay/audio: {} audio suppressed | {} video suppressed | max queue {} frames | {} catch-ups | {} trimmed",
+        fleet.total_suppressed_audio_frames,
+        fleet.total_suppressed_video_frames,
+        fleet
+            .max_audio_queue_depth_frames
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "n/a".to_string()),
+        fleet.total_audio_catch_up_events,
+        fleet.total_audio_trimmed_frames
+    );
     println!();
     println!(
-        "{:<36} {:<6} {:<8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8}",
+        "{:<36} {:<6} {:<5} {:<8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8}",
         "room_id",
         "epoch",
+        "proto",
         "invite",
         "rtt",
         "jitter",
@@ -247,9 +349,13 @@ pub fn print_report(fleet: &FleetReport, sessions: &[SessionReport]) {
 
     for session in sessions {
         println!(
-            "{:<36} {:<6} {:<8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8}",
+            "{:<36} {:<6} {:<5} {:<8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8}",
             session.room_id,
             session.session_epoch,
+            session
+                .protocol_version
+                .map(|version| format!("v{version}"))
+                .unwrap_or_else(|| "?".to_string()),
             session.invite_code,
             fmt_optional_ms(session.avg_rtt_ms),
             fmt_optional_ms(session.avg_jitter_ms),

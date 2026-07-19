@@ -45,6 +45,7 @@ mod room_state_hash_ops;
 mod room_status;
 mod room_strict_input_ops;
 mod room_v5_pause_ops;
+mod room_v5_recovery_ops;
 mod room_view;
 mod room_voice;
 mod room_voice_ops;
@@ -52,6 +53,7 @@ mod room_voice_token_refresh;
 mod session_pause_state;
 mod snapshot_file_relay;
 mod snapshot_transfer;
+mod state_recovery_transaction;
 mod stored_room;
 
 #[cfg(test)]
@@ -62,6 +64,8 @@ mod room_v5_host_frame_tests;
 mod room_v5_input_tests;
 #[cfg(test)]
 mod room_v5_pause_tests;
+#[cfg(test)]
+mod room_v5_recovery_tests;
 #[cfg(test)]
 mod room_v5_test_support;
 
@@ -94,7 +98,7 @@ pub use room_event::{RoomEvent, RoomInputEvent};
 pub use room_expiration_task::spawn_room_expiration_task;
 pub use room_frame_clock_task::spawn_room_frame_clock_task;
 pub(crate) use room_host_frame_ops::HostFrameOpenOutcome;
-pub use room_host_frame_ops::HostFrameRelayOutcome;
+pub use room_host_frame_ops::{HostFrameRelayOutcome, ScheduledHostFrameReleaseOutcome};
 pub use room_join::RoomJoin;
 pub use room_performance_sample::RoomPerformanceSample;
 pub use room_registry::InMemoryRoomRegistry;
@@ -103,6 +107,8 @@ pub use room_registry_trait::{RoomEventReceiver, RoomInputEventReceiver, RoomReg
 pub(crate) use room_start_sync::{ClockSyncSampleRequestState, StartSyncOutcome};
 pub(crate) use room_state_hash_ops::StateHashEvaluation;
 pub use room_status::RoomStatus;
+pub use room_strict_input_ops::StrictInputRelayOutcome;
+pub(crate) use room_v5_recovery_ops::StateRecoveryStartOutcome;
 pub use room_view::{PlayerFrameCursorView, PlayerSlotView, RoomFrameClockView, RoomView};
 pub(crate) use room_voice::RoomVoiceState;
 pub(crate) use room_voice::RoomVoiceTokenRefreshRequest;
@@ -112,3 +118,4 @@ pub(crate) use session_pause_state::SessionPauseStateTracker;
 pub use snapshot_file_relay::SnapshotFileRelayTransferIntent;
 pub(crate) use snapshot_file_relay::SnapshotFileRelayTransferState;
 pub(crate) use snapshot_transfer::SnapshotTransferState;
+pub(crate) use state_recovery_transaction::StateRecoveryTransaction;

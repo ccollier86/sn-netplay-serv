@@ -22,6 +22,7 @@ impl NetplayRoom {
     ) -> Result<(), RoomError> {
         self.validate_host_snapshot_sender(connection_id)?;
         self.validate_snapshot_repair_frame(chunk.repair_frame)?;
+        self.validate_v5_recovery_snapshot_chunk(chunk)?;
         if self.host_snapshot_completed {
             return Err(RoomError::SnapshotInvalid);
         }
@@ -39,6 +40,7 @@ impl NetplayRoom {
     ) -> Result<(), RoomError> {
         self.validate_host_snapshot_sender(connection_id)?;
         self.validate_snapshot_repair_frame(manifest.repair_frame)?;
+        self.validate_v5_recovery_snapshot(manifest)?;
         let transfer = self
             .snapshot_transfer
             .as_ref()
@@ -59,6 +61,7 @@ impl NetplayRoom {
     ) -> Result<SnapshotFileRelayTransferIntent, RoomError> {
         self.validate_host_snapshot_sender(connection_id)?;
         self.validate_snapshot_repair_frame(manifest.repair_frame)?;
+        self.validate_v5_recovery_snapshot(manifest)?;
         manifest
             .validate(limits)
             .map_err(|_| RoomError::SnapshotInvalid)?;
@@ -130,6 +133,7 @@ impl NetplayRoom {
     ) -> Result<(ConnectionId, SnapshotFileRelayGrant), RoomError> {
         self.validate_host_snapshot_sender(connection_id)?;
         self.validate_snapshot_repair_frame(manifest.repair_frame)?;
+        self.validate_v5_recovery_snapshot(manifest)?;
         manifest
             .validate(limits)
             .map_err(|_| RoomError::SnapshotInvalid)?;

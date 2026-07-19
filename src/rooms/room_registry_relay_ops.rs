@@ -6,7 +6,8 @@
 use super::InMemoryRoomRegistry;
 use crate::protocol::{
     ClientNetworkQualityReport, ClientRuntimeState, FastInputBatch, InputFrame, InputFrameBatch,
-    InputFrameLimits, LinkCablePacket, LinkCablePacketLimits, SessionPauseReason, StateHashReport,
+    InputFrameLimits, LinkCablePacket, LinkCablePacketLimits, SessionPauseReason, SnapshotLimits,
+    StateHashReport, StateRecoveryPin,
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, InputFrameCursor, InviteCode, RoomError, RoomView,
@@ -188,8 +189,42 @@ impl InMemoryRoomRegistry {
                 stored_room.emit_state_hash_mismatch(now, mismatch);
                 self.record_recent_events(stored_room.debug_events(1));
             }
+            StateHashEvaluation::RecoveryPrepare(recovery) => {
+                stored_room.emit_state_recovery_prepare(now, recovery);
+                self.record_recent_events(stored_room.debug_events(1));
+            }
+            StateHashEvaluation::RecoveryAttemptLimitExceeded(recovery) => {
+                stored_room.emit_state_recovery_failed(
+                    now,
+                    recovery,
+                    "recoveryAttemptLimitExceeded",
+                );
+                self.record_recent_events(stored_room.debug_events(1));
+            }
         }
 
+        Ok(())
+    }
+
+    /// Commits a protocol v5 recovery after the host pins exact state.
+    pub(super) async fn pin_state_recovery_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        pin: StateRecoveryPin,
+    ) -> Result<(), RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        let now = self.clock.now();
+        let recovery = stored_room.room.accept_v5_state_recovery_pin(
+            connection_id,
+            pin,
+            SnapshotLimits::default(),
+        )?;
+        stored_room.emit_state_recovery_committed(now, recovery);
+        self.record_recent_events(stored_room.debug_events(1));
         Ok(())
     }
 

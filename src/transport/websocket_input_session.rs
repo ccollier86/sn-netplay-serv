@@ -10,6 +10,7 @@ use crate::protocol::{
 };
 use crate::rooms::{ConnectionId, RoomError, RoomInputEvent};
 use crate::transport::WebSocketInputJoinRequest;
+use crate::transport::input_message_rate_limiter::InputMessageRateLimiter;
 use crate::transport::websocket_input_v5::handle_v5_binary_message;
 use crate::transport::websocket_outbound::{
     SocketSender, send_binary_bytes, send_binary_message, send_room_error, send_static_error,
@@ -19,6 +20,7 @@ use crate::transport::websocket_peer_close::{peer_close_detail, peer_error_detai
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
 use futures_util::stream::SplitStream;
+use std::time::Instant;
 
 /// Handles one upgraded binary input WebSocket until disconnect.
 pub async fn handle_websocket_input_session(
@@ -85,6 +87,7 @@ async fn input_session_loop(
     connection_id: ConnectionId,
     protocol_version: u16,
 ) {
+    let mut v5_rate_limiter = InputMessageRateLimiter::new(Instant::now());
     loop {
         tokio::select! {
             incoming = receiver.next() => {
@@ -94,13 +97,20 @@ async fn input_session_loop(
                     invite_code,
                     connection_id,
                     protocol_version,
+                    &mut v5_rate_limiter,
                     incoming,
                 ).await {
                     break;
                 }
             }
             event = events.recv() => {
-                if !handle_room_event(sender, connection_id, protocol_version, event).await {
+                if !handle_room_event(
+                    sender,
+                    connection_id,
+                    protocol_version,
+                    services,
+                    event,
+                ).await {
                     break;
                 }
             }
@@ -114,11 +124,29 @@ async fn handle_incoming(
     invite_code: &crate::rooms::InviteCode,
     connection_id: ConnectionId,
     protocol_version: u16,
+    v5_rate_limiter: &mut InputMessageRateLimiter,
     incoming: Option<Result<Message, axum::Error>>,
 ) -> bool {
     match incoming {
         Some(Ok(Message::Binary(payload))) => {
             if protocol_version >= 5 {
+                if !v5_rate_limiter.allow(Instant::now()) {
+                    services.metrics.record_v5_input_rate_limited();
+                    record_transport_close(
+                        services,
+                        invite_code,
+                        connection_id,
+                        "relay rate-limited protocol v5 input socket".to_string(),
+                    )
+                    .await;
+                    let _ = send_static_error(
+                        sender,
+                        "inputRateLimited",
+                        "Input socket message rate exceeded.",
+                    )
+                    .await;
+                    return false;
+                }
                 handle_v5_binary_message(sender, services, invite_code, connection_id, &payload)
                     .await
             } else if payload.starts_with(b"SBI2") {
@@ -299,6 +327,7 @@ async fn handle_room_event(
     sender: &mut SocketSender,
     connection_id: ConnectionId,
     protocol_version: u16,
+    services: &AppServices,
     event: Result<RoomInputEvent, tokio::sync::broadcast::error::RecvError>,
 ) -> bool {
     match event {
@@ -354,7 +383,10 @@ async fn handle_room_event(
             };
             send_binary_message(sender, payload).await.is_ok()
         }
-        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => false,
+        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+            services.metrics.record_input_event_lagged();
+            false
+        }
         Err(tokio::sync::broadcast::error::RecvError::Closed) => false,
     }
 }

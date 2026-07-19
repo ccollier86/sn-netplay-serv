@@ -18,6 +18,8 @@ pub struct RoomPerformanceSample {
     pub room_epoch: u64,
     /// Current session epoch.
     pub session_epoch: u64,
+    /// Exact room protocol that produced this sample.
+    pub protocol_version: u16,
     /// Zero-based player index.
     pub player_index: u8,
     /// Client-reported runtime state.

@@ -9,7 +9,7 @@ use crate::protocol::{
     RomRelayCompletion as RomRelayCompletionPayload, RomRelayFailure as RomRelayFailurePayload,
     RomRelayGrant, RomRelayProgress as RomRelayProgressPayload, ScheduledSessionStart,
     SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant, SnapshotManifest,
-    StateHashMismatchView,
+    StateHashMismatchView, StateRecoveryView,
 };
 use crate::rooms::{PlayerVoiceJoinGrant, RoomView};
 use serde::Serialize;
@@ -331,6 +331,47 @@ pub enum ServerMessage {
         /// Mismatch details.
         mismatch: StateHashMismatchView,
         /// Current room state.
+        room: RoomView,
+    },
+    /// Protocol v5 clients must freeze the old epoch while the host pins state.
+    StateRecoveryPrepare {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Old room epoch that is being frozen.
+        room_epoch: u64,
+        /// Old session epoch that is being frozen.
+        session_epoch: u64,
+        /// Recovery transaction and exact repair frame.
+        recovery: StateRecoveryView,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Protocol v5 recovery was atomically committed to a fresh session epoch.
+    StateRecoveryCommitted {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Fresh session epoch clients must attach to.
+        session_epoch: u64,
+        /// Committed transaction and exact pinned snapshot manifest.
+        recovery: StateRecoveryView,
+        /// Current room state.
+        room: RoomView,
+    },
+    /// Protocol v5 recovery failed and this gameplay room was closed.
+    StateRecoveryFailed {
+        /// Monotonic event sequence included with the room view.
+        event_seq: u64,
+        /// Current room epoch.
+        room_epoch: u64,
+        /// Current session epoch.
+        session_epoch: u64,
+        /// Last known transaction state.
+        recovery: StateRecoveryView,
+        /// Stable machine-readable failure reason.
+        reason: String,
+        /// Closed room state.
         room: RoomView,
     },
     /// Relay scheduled an adaptive controller input-delay change.

@@ -91,6 +91,7 @@ fn room_status_label(status: RoomStatus) -> &'static str {
         RoomStatus::StartScheduled => "startScheduled",
         RoomStatus::Playing => "playing",
         RoomStatus::Paused => "paused",
+        RoomStatus::RepairingState => "repairingState",
         RoomStatus::Recovering => "recovering",
         RoomStatus::Closed => "closed",
     }

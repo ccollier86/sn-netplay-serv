@@ -9,7 +9,7 @@ use crate::protocol::{
     LinkCablePacket, RomRelayCancelled as RomRelayCancelledPayload,
     RomRelayCompletion as RomRelayCompletionPayload, RomRelayFailure as RomRelayFailurePayload,
     RomRelayProgress as RomRelayProgressPayload, SessionPauseReason, SnapshotChunk,
-    SnapshotManifest, StateHashReport,
+    SnapshotManifest, StateHashReport, StateRecoveryPin,
 };
 use serde::Deserialize;
 
@@ -44,7 +44,7 @@ pub enum ClientMessage {
         /// Current session epoch observed by the client.
         session_epoch: u64,
         /// Netplay-relevant compatibility details.
-        fingerprint: CompatibilityFingerprint,
+        fingerprint: Box<CompatibilityFingerprint>,
     },
     /// Client link-cable compatibility for the selected runtime.
     SetLinkCableCompatibility {
@@ -259,5 +259,14 @@ pub enum ClientMessage {
         session_epoch: u64,
         /// Hash report for one emulator frame.
         report: StateHashReport,
+    },
+    /// Protocol v5 host confirms that the exact repair snapshot is pinned.
+    StateRecoveryPinned {
+        /// Old room epoch supplied by the recovery prepare event.
+        room_epoch: u64,
+        /// Old session epoch supplied by the recovery prepare event.
+        session_epoch: u64,
+        /// Pinned snapshot identity and recovery transaction id.
+        pin: StateRecoveryPin,
     },
 }

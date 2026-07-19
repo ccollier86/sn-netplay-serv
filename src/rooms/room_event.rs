@@ -7,7 +7,8 @@ use crate::protocol::{
     FastInputFrame, InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket,
     RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayGrant, RomRelayProgress,
     ScheduledSessionStart, ServerFrame, ServerFrameReleaseV5, SessionPauseView, SnapshotChunk,
-    SnapshotFileRelayGrant, SnapshotManifest, StateHashMismatchView, StrictInputBatch,
+    SnapshotFileRelayGrant, SnapshotManifest, StateHashMismatchView, StateRecoveryView,
+    StrictInputBatch,
 };
 use crate::rooms::{ConnectionId, RoomView};
 
@@ -197,6 +198,29 @@ pub enum RoomEvent {
         /// Mismatch details.
         mismatch: StateHashMismatchView,
         /// Current room state.
+        room: RoomView,
+    },
+    /// Protocol v5 froze the old epoch while the host pins exact repair state.
+    StateRecoveryPrepare {
+        /// Preparing recovery transaction.
+        recovery: StateRecoveryView,
+        /// Current old-epoch room state.
+        room: RoomView,
+    },
+    /// Protocol v5 committed a pinned repair snapshot to a fresh epoch.
+    StateRecoveryCommitted {
+        /// Committed recovery transaction.
+        recovery: StateRecoveryView,
+        /// Current fresh-epoch room state.
+        room: RoomView,
+    },
+    /// Protocol v5 recovery could not pin state within its bounded window.
+    StateRecoveryFailed {
+        /// Last known recovery transaction.
+        recovery: StateRecoveryView,
+        /// Stable failure reason.
+        reason: String,
+        /// Closed room state.
         room: RoomView,
     },
     /// Relay scheduled an adaptive input-delay change.

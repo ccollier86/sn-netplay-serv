@@ -217,6 +217,7 @@ impl NetplayRoom {
             RoomStatus::StartScheduled
                 | RoomStatus::Playing
                 | RoomStatus::Paused
+                | RoomStatus::RepairingState
                 | RoomStatus::Recovering
         );
         let reconnect_room_epoch = slot.reconnect_room_epoch.unwrap_or(if already_recovering {
@@ -272,9 +273,7 @@ impl NetplayRoom {
         }
 
         let runner_handoff = slot.runner_handoff_deadline.is_some();
-        if (slot.connection_id.is_some() && !runner_handoff)
-            || (slot.reconnect_deadline.is_none() && !runner_handoff)
-        {
+        if !runner_handoff && (slot.connection_id.is_some() || slot.reconnect_deadline.is_none()) {
             return Err(RoomError::ResumeTokenInvalid);
         }
 
@@ -365,7 +364,10 @@ impl NetplayRoom {
     ) -> bool {
         if !matches!(
             self.status,
-            RoomStatus::StartScheduled | RoomStatus::Playing | RoomStatus::Paused
+            RoomStatus::StartScheduled
+                | RoomStatus::Playing
+                | RoomStatus::Paused
+                | RoomStatus::RepairingState
         ) {
             return false;
         }
@@ -421,7 +423,10 @@ impl NetplayRoom {
     ) -> bool {
         if !matches!(
             self.status,
-            RoomStatus::StartScheduled | RoomStatus::Playing | RoomStatus::Paused
+            RoomStatus::StartScheduled
+                | RoomStatus::Playing
+                | RoomStatus::Paused
+                | RoomStatus::RepairingState
         ) {
             return false;
         }

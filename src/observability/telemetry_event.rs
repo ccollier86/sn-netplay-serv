@@ -33,6 +33,8 @@ pub struct NetplayTelemetryEvent {
     pub room_epoch: u64,
     /// Current session epoch.
     pub session_epoch: u64,
+    /// Exact room protocol that produced this event.
+    pub protocol_version: u16,
     /// Stable event kind.
     pub kind: String,
     /// Sanitized detail string.
@@ -48,6 +50,7 @@ impl From<RoomDebugEvent> for NetplayTelemetryEvent {
             event_seq: event.event_seq,
             room_epoch: event.room_epoch,
             session_epoch: event.session_epoch,
+            protocol_version: event.protocol_version,
             kind: event.kind,
             detail: event.detail,
         }
@@ -96,6 +99,7 @@ pub struct NetplayPerformanceSample {
     pub event_seq: u64,
     pub room_epoch: u64,
     pub session_epoch: u64,
+    pub protocol_version: u16,
     pub player_index: u8,
     pub runtime_state: String,
     pub local_frame: Option<u64>,
@@ -111,6 +115,14 @@ pub struct NetplayPerformanceSample {
     pub catch_up_frames: Option<u32>,
     pub late_input_frames: Option<u32>,
     pub audio_underruns: Option<u32>,
+    pub input_resend_frames: Option<u32>,
+    pub input_nacks: Option<u32>,
+    pub replayed_frames: Option<u32>,
+    pub suppressed_audio_frames: Option<u32>,
+    pub suppressed_video_frames: Option<u32>,
+    pub audio_queue_depth_frames: Option<u32>,
+    pub audio_catch_up_events: Option<u32>,
+    pub audio_trimmed_frames: Option<u32>,
 }
 
 impl From<RoomPerformanceSample> for NetplayPerformanceSample {
@@ -124,6 +136,7 @@ impl From<RoomPerformanceSample> for NetplayPerformanceSample {
             event_seq: sample.event_seq,
             room_epoch: sample.room_epoch,
             session_epoch: sample.session_epoch,
+            protocol_version: sample.protocol_version,
             player_index: sample.player_index,
             runtime_state: serde_json::to_value(sample.runtime_state)
                 .ok()
@@ -142,6 +155,14 @@ impl From<RoomPerformanceSample> for NetplayPerformanceSample {
             catch_up_frames: network.catch_up_frames,
             late_input_frames: network.late_input_frames,
             audio_underruns: network.audio_underruns,
+            input_resend_frames: network.input_resend_frames,
+            input_nacks: network.input_nacks,
+            replayed_frames: network.replayed_frames,
+            suppressed_audio_frames: network.suppressed_audio_frames,
+            suppressed_video_frames: network.suppressed_video_frames,
+            audio_queue_depth_frames: network.audio_queue_depth_frames,
+            audio_catch_up_events: network.audio_catch_up_events,
+            audio_trimmed_frames: network.audio_trimmed_frames,
         }
     }
 }

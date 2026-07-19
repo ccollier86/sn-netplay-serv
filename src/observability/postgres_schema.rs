@@ -33,6 +33,7 @@ pub fn create_table_queries(tables: &PostgresTableNames) -> Vec<String> {
         add_column_query(&tables.events, "event_seq", "BIGINT"),
         add_column_query(&tables.events, "room_epoch", "BIGINT"),
         add_column_query(&tables.events, "session_epoch", "BIGINT"),
+        add_column_query(&tables.events, "protocol_version", "SMALLINT"),
         add_column_query(&tables.events, "kind", "TEXT"),
         add_column_query(&tables.events, "detail", "TEXT"),
         add_column_query(&tables.lobby_events, "timestamp_ms", "BIGINT"),
@@ -48,6 +49,7 @@ pub fn create_table_queries(tables: &PostgresTableNames) -> Vec<String> {
         add_column_query(&tables.performance_samples, "event_seq", "BIGINT"),
         add_column_query(&tables.performance_samples, "room_epoch", "BIGINT"),
         add_column_query(&tables.performance_samples, "session_epoch", "BIGINT"),
+        add_column_query(&tables.performance_samples, "protocol_version", "SMALLINT"),
         add_column_query(&tables.performance_samples, "player_index", "SMALLINT"),
         add_column_query(&tables.performance_samples, "runtime_state", "TEXT"),
         add_column_query(&tables.performance_samples, "local_frame", "BIGINT"),
@@ -67,6 +69,38 @@ pub fn create_table_queries(tables: &PostgresTableNames) -> Vec<String> {
         add_column_query(&tables.performance_samples, "catch_up_frames", "INTEGER"),
         add_column_query(&tables.performance_samples, "late_input_frames", "INTEGER"),
         add_column_query(&tables.performance_samples, "audio_underruns", "INTEGER"),
+        add_column_query(
+            &tables.performance_samples,
+            "input_resend_frames",
+            "INTEGER",
+        ),
+        add_column_query(&tables.performance_samples, "input_nacks", "INTEGER"),
+        add_column_query(&tables.performance_samples, "replayed_frames", "INTEGER"),
+        add_column_query(
+            &tables.performance_samples,
+            "suppressed_audio_frames",
+            "INTEGER",
+        ),
+        add_column_query(
+            &tables.performance_samples,
+            "suppressed_video_frames",
+            "INTEGER",
+        ),
+        add_column_query(
+            &tables.performance_samples,
+            "audio_queue_depth_frames",
+            "INTEGER",
+        ),
+        add_column_query(
+            &tables.performance_samples,
+            "audio_catch_up_events",
+            "INTEGER",
+        ),
+        add_column_query(
+            &tables.performance_samples,
+            "audio_trimmed_frames",
+            "INTEGER",
+        ),
         create_events_session_index_query(&tables.events),
         create_lobby_events_index_query(&tables.lobby_events),
         create_samples_session_index_query(&tables.performance_samples),
@@ -114,6 +148,7 @@ fn create_events_table_query(table: &str) -> String {
          event_seq BIGINT NOT NULL, \
          room_epoch BIGINT NOT NULL, \
          session_epoch BIGINT NOT NULL, \
+         protocol_version SMALLINT NOT NULL, \
          kind TEXT NOT NULL, \
          detail TEXT NOT NULL\
          )",
@@ -130,6 +165,7 @@ fn create_performance_samples_table_query(table: &str) -> String {
          event_seq BIGINT NOT NULL, \
          room_epoch BIGINT NOT NULL, \
          session_epoch BIGINT NOT NULL, \
+         protocol_version SMALLINT NOT NULL, \
          player_index SMALLINT NOT NULL, \
          runtime_state TEXT NOT NULL, \
          local_frame BIGINT, \
@@ -144,7 +180,15 @@ fn create_performance_samples_table_query(table: &str) -> String {
          stall_count INTEGER, \
          catch_up_frames INTEGER, \
          late_input_frames INTEGER, \
-         audio_underruns INTEGER\
+         audio_underruns INTEGER, \
+         input_resend_frames INTEGER, \
+         input_nacks INTEGER, \
+         replayed_frames INTEGER, \
+         suppressed_audio_frames INTEGER, \
+         suppressed_video_frames INTEGER, \
+         audio_queue_depth_frames INTEGER, \
+         audio_catch_up_events INTEGER, \
+         audio_trimmed_frames INTEGER\
          )",
         quote_identifier(table)
     )
@@ -217,6 +261,7 @@ mod tests {
                 event_seq: 2,
                 room_epoch: 3,
                 session_epoch: 4,
+                protocol_version: 5,
                 kind: "sessionStarted".to_string(),
                 detail: "session started".to_string(),
             }),
@@ -236,6 +281,7 @@ mod tests {
                 event_seq: 2,
                 room_epoch: 3,
                 session_epoch: 4,
+                protocol_version: 5,
                 player_index: 0,
                 runtime_state: "playing".to_string(),
                 local_frame: Some(20),
@@ -251,6 +297,14 @@ mod tests {
                 catch_up_frames: Some(1),
                 late_input_frames: Some(0),
                 audio_underruns: Some(0),
+                input_resend_frames: Some(1),
+                input_nacks: Some(1),
+                replayed_frames: Some(2),
+                suppressed_audio_frames: Some(2),
+                suppressed_video_frames: Some(2),
+                audio_queue_depth_frames: Some(3),
+                audio_catch_up_events: Some(1),
+                audio_trimmed_frames: Some(1),
             }),
         ];
 

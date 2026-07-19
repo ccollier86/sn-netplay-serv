@@ -26,6 +26,7 @@ pub struct EventRow {
     pub event_seq: u64,
     pub room_epoch: u64,
     pub session_epoch: u64,
+    pub protocol_version: Option<u16>,
     pub kind: String,
     pub detail: String,
 }
@@ -51,6 +52,7 @@ pub struct SampleRow {
     pub event_seq: u64,
     pub room_epoch: u64,
     pub session_epoch: u64,
+    pub protocol_version: Option<u16>,
     pub player_index: u8,
     pub runtime_state: String,
     pub local_frame: Option<u64>,
@@ -66,6 +68,14 @@ pub struct SampleRow {
     pub catch_up_frames: Option<u32>,
     pub late_input_frames: Option<u32>,
     pub audio_underruns: Option<u32>,
+    pub input_resend_frames: Option<u32>,
+    pub input_nacks: Option<u32>,
+    pub replayed_frames: Option<u32>,
+    pub suppressed_audio_frames: Option<u32>,
+    pub suppressed_video_frames: Option<u32>,
+    pub audio_queue_depth_frames: Option<u32>,
+    pub audio_catch_up_events: Option<u32>,
+    pub audio_trimmed_frames: Option<u32>,
 }
 
 /// Analytics database facade used by CLI commands.
@@ -143,7 +153,8 @@ impl AnalyticsDb {
 
         let query = format!(
             "SELECT timestamp_ms::text, room_id::text, invite_code, \
-             event_seq::text, room_epoch::text, session_epoch::text, kind, detail \
+             event_seq::text, room_epoch::text, session_epoch::text, \
+             COALESCE(protocol_version::text, ''), kind, detail \
              FROM {} WHERE {} ORDER BY timestamp_ms ASC, event_seq ASC",
             quote_identifier(&self.tables.events),
             session_filter(sessions),
@@ -167,7 +178,8 @@ impl AnalyticsDb {
         let query = format!(
             "SELECT timestamp_ms::text, room_id::text, invite_code, \
              event_seq::text, room_epoch::text, session_epoch::text, \
-             player_index::text, runtime_state, COALESCE(local_frame::text, ''), \
+             COALESCE(protocol_version::text, ''), player_index::text, runtime_state, \
+             COALESCE(local_frame::text, ''), \
              canonical_frame::text, COALESCE(released_frame::text, ''), \
              COALESCE(next_release_frame::text, ''), \
              COALESCE(accepted_input_frame::text, ''), \
@@ -175,7 +187,13 @@ impl AnalyticsDb {
              COALESCE(round_trip_ms::text, ''), COALESCE(jitter_ms::text, ''), \
              COALESCE(prediction_frames::text, ''), COALESCE(stall_count::text, ''), \
              COALESCE(catch_up_frames::text, ''), COALESCE(late_input_frames::text, ''), \
-             COALESCE(audio_underruns::text, '') \
+             COALESCE(audio_underruns::text, ''), COALESCE(input_resend_frames::text, ''), \
+             COALESCE(input_nacks::text, ''), COALESCE(replayed_frames::text, ''), \
+             COALESCE(suppressed_audio_frames::text, ''), \
+             COALESCE(suppressed_video_frames::text, ''), \
+             COALESCE(audio_queue_depth_frames::text, ''), \
+             COALESCE(audio_catch_up_events::text, ''), \
+             COALESCE(audio_trimmed_frames::text, '') \
              FROM {} WHERE {} ORDER BY timestamp_ms ASC, player_index ASC",
             quote_identifier(&self.tables.performance_samples),
             session_filter(sessions),
@@ -276,8 +294,12 @@ fn event_row(row: tokio_postgres::SimpleQueryRow) -> Result<EventRow, AnalyticsD
         event_seq: parse_u64(required_cell(&row, 3, "event_seq")?, "event_seq")?,
         room_epoch: parse_u64(required_cell(&row, 4, "room_epoch")?, "room_epoch")?,
         session_epoch: parse_u64(required_cell(&row, 5, "session_epoch")?, "session_epoch")?,
-        kind: required_cell(&row, 6, "kind")?.to_string(),
-        detail: required_cell(&row, 7, "detail")?.to_string(),
+        protocol_version: parse_optional_u16(
+            required_cell(&row, 6, "protocol_version")?,
+            "protocol_version",
+        )?,
+        kind: required_cell(&row, 7, "kind")?.to_string(),
+        detail: required_cell(&row, 8, "detail")?.to_string(),
     })
 }
 
@@ -301,47 +323,80 @@ fn sample_row(row: tokio_postgres::SimpleQueryRow) -> Result<SampleRow, Analytic
         event_seq: parse_u64(required_cell(&row, 3, "event_seq")?, "event_seq")?,
         room_epoch: parse_u64(required_cell(&row, 4, "room_epoch")?, "room_epoch")?,
         session_epoch: parse_u64(required_cell(&row, 5, "session_epoch")?, "session_epoch")?,
-        player_index: parse_u8(required_cell(&row, 6, "player_index")?, "player_index")?,
-        runtime_state: required_cell(&row, 7, "runtime_state")?.to_string(),
-        local_frame: parse_optional_u64(required_cell(&row, 8, "local_frame")?, "local_frame")?,
+        protocol_version: parse_optional_u16(
+            required_cell(&row, 6, "protocol_version")?,
+            "protocol_version",
+        )?,
+        player_index: parse_u8(required_cell(&row, 7, "player_index")?, "player_index")?,
+        runtime_state: required_cell(&row, 8, "runtime_state")?.to_string(),
+        local_frame: parse_optional_u64(required_cell(&row, 9, "local_frame")?, "local_frame")?,
         canonical_frame: parse_u64(
-            required_cell(&row, 9, "canonical_frame")?,
+            required_cell(&row, 10, "canonical_frame")?,
             "canonical_frame",
         )?,
         released_frame: parse_optional_u64(
-            required_cell(&row, 10, "released_frame")?,
+            required_cell(&row, 11, "released_frame")?,
             "released_frame",
         )?,
         next_release_frame: parse_optional_u64(
-            required_cell(&row, 11, "next_release_frame")?,
+            required_cell(&row, 12, "next_release_frame")?,
             "next_release_frame",
         )?,
         accepted_input_frame: parse_optional_u64(
-            required_cell(&row, 12, "accepted_input_frame")?,
+            required_cell(&row, 13, "accepted_input_frame")?,
             "accepted_input_frame",
         )?,
-        frame_delta: parse_optional_i64(required_cell(&row, 13, "frame_delta")?, "frame_delta")?,
+        frame_delta: parse_optional_i64(required_cell(&row, 14, "frame_delta")?, "frame_delta")?,
         round_trip_ms: parse_optional_u32(
-            required_cell(&row, 14, "round_trip_ms")?,
+            required_cell(&row, 15, "round_trip_ms")?,
             "round_trip_ms",
         )?,
-        jitter_ms: parse_optional_u32(required_cell(&row, 15, "jitter_ms")?, "jitter_ms")?,
+        jitter_ms: parse_optional_u32(required_cell(&row, 16, "jitter_ms")?, "jitter_ms")?,
         prediction_frames: parse_optional_u32(
-            required_cell(&row, 16, "prediction_frames")?,
+            required_cell(&row, 17, "prediction_frames")?,
             "prediction_frames",
         )?,
-        stall_count: parse_optional_u32(required_cell(&row, 17, "stall_count")?, "stall_count")?,
+        stall_count: parse_optional_u32(required_cell(&row, 18, "stall_count")?, "stall_count")?,
         catch_up_frames: parse_optional_u32(
-            required_cell(&row, 18, "catch_up_frames")?,
+            required_cell(&row, 19, "catch_up_frames")?,
             "catch_up_frames",
         )?,
         late_input_frames: parse_optional_u32(
-            required_cell(&row, 19, "late_input_frames")?,
+            required_cell(&row, 20, "late_input_frames")?,
             "late_input_frames",
         )?,
         audio_underruns: parse_optional_u32(
-            required_cell(&row, 20, "audio_underruns")?,
+            required_cell(&row, 21, "audio_underruns")?,
             "audio_underruns",
+        )?,
+        input_resend_frames: parse_optional_u32(
+            required_cell(&row, 22, "input_resend_frames")?,
+            "input_resend_frames",
+        )?,
+        input_nacks: parse_optional_u32(required_cell(&row, 23, "input_nacks")?, "input_nacks")?,
+        replayed_frames: parse_optional_u32(
+            required_cell(&row, 24, "replayed_frames")?,
+            "replayed_frames",
+        )?,
+        suppressed_audio_frames: parse_optional_u32(
+            required_cell(&row, 25, "suppressed_audio_frames")?,
+            "suppressed_audio_frames",
+        )?,
+        suppressed_video_frames: parse_optional_u32(
+            required_cell(&row, 26, "suppressed_video_frames")?,
+            "suppressed_video_frames",
+        )?,
+        audio_queue_depth_frames: parse_optional_u32(
+            required_cell(&row, 27, "audio_queue_depth_frames")?,
+            "audio_queue_depth_frames",
+        )?,
+        audio_catch_up_events: parse_optional_u32(
+            required_cell(&row, 28, "audio_catch_up_events")?,
+            "audio_catch_up_events",
+        )?,
+        audio_trimmed_frames: parse_optional_u32(
+            required_cell(&row, 29, "audio_trimmed_frames")?,
+            "audio_trimmed_frames",
         )?,
     })
 }
@@ -402,6 +457,10 @@ fn parse_optional_u64(value: &str, field: &'static str) -> Result<Option<u64>, A
 }
 
 fn parse_optional_u32(value: &str, field: &'static str) -> Result<Option<u32>, AnalyticsDbError> {
+    parse_optional(value, field)
+}
+
+fn parse_optional_u16(value: &str, field: &'static str) -> Result<Option<u16>, AnalyticsDbError> {
     parse_optional(value, field)
 }
 

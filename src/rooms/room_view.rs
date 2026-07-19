@@ -5,7 +5,7 @@
 
 use crate::protocol::{
     InputDelayChange, NetplayProtocolView, NetplaySessionDescriptor, RomRelayCapability,
-    SessionPauseView,
+    SessionPauseView, StateRecoveryView,
 };
 use crate::rooms::{PlayerRole, PlayerStatus, RoomId, RoomStatus, RoomVoiceView};
 use serde::Serialize;
@@ -36,6 +36,9 @@ pub struct RoomView {
     pub max_players: u8,
     /// Active coordinated pause details, if any.
     pub pause: Option<SessionPauseView>,
+    /// Active protocol v5 deterministic repair transaction, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_recovery: Option<StateRecoveryView>,
     /// Controller-netplay frame cursors used for diagnostics and recovery.
     pub frame_clock: RoomFrameClockView,
     /// Current room lifecycle status.

@@ -6,7 +6,10 @@
 use super::SmokeClient;
 use futures_util::{SinkExt, StreamExt};
 use sb_netplay_serv::protocol::{
-    InputFrame, InputFrameBatch, decode_input_frame_batch, encode_input_frame_batch,
+    HostFrameOpen, InputCursorAck, InputCursorNack, InputFrame, InputFrameBatch,
+    ServerFrameReleaseV5, StrictInputBatch, decode_input_cursor_ack, decode_input_cursor_nack,
+    decode_input_frame_batch, decode_server_frame_release_v5, decode_strict_input_batch,
+    encode_host_frame_open, encode_input_frame_batch, encode_strict_input_batch,
 };
 use sb_netplay_serv::rooms::PlayerIndex;
 use serde_json::{Value, json};
@@ -64,6 +67,88 @@ impl SmokeClient {
             .send(Message::Binary(encoded.into()))
             .await
             .expect("send input batch");
+    }
+
+    pub async fn send_strict_input(&mut self, start_frame: u64, fills: &[u8]) {
+        let player_index = PlayerIndex::new(
+            self.player_index.expect("connected player index"),
+            sb_netplay_serv::limits::MVP_ROOM_CAPACITY,
+        )
+        .expect("valid player index");
+        let encoded = encode_strict_input_batch(&StrictInputBatch {
+            room_epoch: self.room_epoch,
+            session_epoch: self.session_epoch,
+            player_index,
+            start_frame,
+            payloads: fills.iter().map(|fill| [*fill; 10]).collect(),
+        })
+        .expect("encoded strict input");
+        self.send_input_binary(encoded).await;
+    }
+
+    pub async fn send_host_frame_open(&mut self, frame: u64) {
+        self.send_input_binary(encode_host_frame_open(&HostFrameOpen {
+            room_epoch: self.room_epoch,
+            session_epoch: self.session_epoch,
+            frame,
+        }))
+        .await;
+    }
+
+    pub async fn send_raw_input(&mut self, payload: Vec<u8>) {
+        self.send_input_binary(payload).await;
+    }
+
+    pub async fn expect_input_socket_closed(&mut self) {
+        let input_socket = self.input_socket.as_mut().expect("input socket connected");
+        loop {
+            let next = timeout(READ_TIMEOUT, input_socket.next())
+                .await
+                .expect("input websocket close timed out");
+            match next {
+                None | Some(Ok(Message::Close(_))) | Some(Err(_)) => return,
+                Some(Ok(_)) => continue,
+            }
+        }
+    }
+
+    pub async fn expect_input_ack(&mut self) -> InputCursorAck {
+        loop {
+            let payload = self.next_input_binary().await;
+            if let Ok(ack) = decode_input_cursor_ack(&payload) {
+                return ack;
+            }
+        }
+    }
+
+    pub async fn expect_input_nack(&mut self) -> InputCursorNack {
+        loop {
+            let payload = self.next_input_binary().await;
+            if let Ok(nack) = decode_input_cursor_nack(&payload) {
+                return nack;
+            }
+        }
+    }
+
+    pub async fn expect_strict_input_from(&mut self, player_index: u8) -> StrictInputBatch {
+        loop {
+            let payload = self.next_input_binary().await;
+            let Ok(batch) = decode_strict_input_batch(&payload) else {
+                continue;
+            };
+            if batch.player_index.zero_based() == player_index {
+                return batch;
+            }
+        }
+    }
+
+    pub async fn expect_v5_release(&mut self) -> ServerFrameReleaseV5 {
+        loop {
+            let payload = self.next_input_binary().await;
+            if let Ok(release) = decode_server_frame_release_v5(&payload) {
+                return release;
+            }
+        }
     }
 
     pub async fn expect_type(&mut self, message_type: &str) -> Value {
@@ -162,6 +247,29 @@ impl SmokeClient {
         object
             .entry("sessionEpoch")
             .or_insert_with(|| json!(self.session_epoch));
+    }
+
+    async fn send_input_binary(&mut self, encoded: Vec<u8>) {
+        self.input_socket
+            .as_mut()
+            .expect("input socket connected")
+            .send(Message::Binary(encoded.into()))
+            .await
+            .expect("send v5 input message");
+    }
+
+    async fn next_input_binary(&mut self) -> Vec<u8> {
+        let input_socket = self.input_socket.as_mut().expect("input socket connected");
+        loop {
+            let message = timeout(READ_TIMEOUT, input_socket.next())
+                .await
+                .expect("input websocket message timed out")
+                .expect("input websocket message")
+                .expect("input websocket result");
+            if let Message::Binary(payload) = message {
+                return payload.to_vec();
+            }
+        }
     }
 
     fn update_epochs(&mut self, message: &Value) {

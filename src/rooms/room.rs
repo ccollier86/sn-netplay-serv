@@ -15,9 +15,9 @@ use crate::rooms::{
     LinkCableRoomState, PlayerIndex, PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus,
     ResumeTokenHash, RomRelayTransferState, RoomError, RoomId, RoomStatus, RoomView,
     RoomVoiceState, SessionPauseStateTracker, SnapshotFileRelayTransferState,
-    SnapshotTransferState,
+    SnapshotTransferState, StateRecoveryTransaction,
 };
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
 /// Active netplay room.
@@ -56,6 +56,9 @@ pub struct NetplayRoom {
     pub(super) input_delay_policy: AdaptiveInputDelayPolicy,
     pub(super) state_hashes: BTreeMap<u64, HashMap<PlayerIndex, String>>,
     pub(super) state_hash_true_mismatch_streak: u8,
+    pub(super) next_state_recovery_id: u64,
+    pub(super) state_recovery: Option<StateRecoveryTransaction>,
+    pub(super) state_recovery_started_at: VecDeque<Instant>,
     pub(super) scheduled_start: Option<ScheduledSessionStart>,
     pub(super) pending_host_frame_open: Option<u64>,
     pub(super) voice: Option<RoomVoiceState>,
@@ -163,6 +166,9 @@ impl NetplayRoom {
             input_delay_policy: AdaptiveInputDelayPolicy::new(now),
             state_hashes: BTreeMap::new(),
             state_hash_true_mismatch_streak: 0,
+            next_state_recovery_id: 1,
+            state_recovery: None,
+            state_recovery_started_at: VecDeque::new(),
             scheduled_start: None,
             pending_host_frame_open: None,
             voice: None,
@@ -318,6 +324,7 @@ impl NetplayRoom {
 
         self.apply_initial_adaptive_input_delay(now);
         self.status = RoomStatus::Playing;
+        self.finish_v5_state_recovery();
         self.players
             .iter_mut()
             .filter(|slot| slot.connection_id.is_some())
@@ -356,6 +363,10 @@ impl NetplayRoom {
                 .pause_state
                 .as_ref()
                 .map(|pause_state| pause_state.view(self.current_pause_state())),
+            state_recovery: self
+                .state_recovery
+                .as_ref()
+                .map(StateRecoveryTransaction::view),
             frame_clock: self.frame_clock_view(),
             status: self.status,
             players: self
@@ -489,6 +500,7 @@ impl NetplayRoom {
         self.pending_input_delay_change = None;
         self.state_hashes.clear();
         self.state_hash_true_mismatch_streak = 0;
+        self.state_recovery = None;
         self.pending_host_frame_open = None;
         self.reset_start_sync_state();
     }

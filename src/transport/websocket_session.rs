@@ -323,6 +323,36 @@ async fn handle_room_event(
             mismatch,
             room,
         },
+        Ok(RoomEvent::StateRecoveryPrepare { recovery, room }) => {
+            ServerMessage::StateRecoveryPrepare {
+                event_seq: room.event_seq,
+                room_epoch: room.room_epoch,
+                session_epoch: room.session_epoch,
+                recovery,
+                room,
+            }
+        }
+        Ok(RoomEvent::StateRecoveryCommitted { recovery, room }) => {
+            ServerMessage::StateRecoveryCommitted {
+                event_seq: room.event_seq,
+                room_epoch: room.room_epoch,
+                session_epoch: room.session_epoch,
+                recovery,
+                room,
+            }
+        }
+        Ok(RoomEvent::StateRecoveryFailed {
+            recovery,
+            reason,
+            room,
+        }) => ServerMessage::StateRecoveryFailed {
+            event_seq: room.event_seq,
+            room_epoch: room.room_epoch,
+            session_epoch: room.session_epoch,
+            recovery,
+            reason,
+            room,
+        },
         Ok(RoomEvent::InputDelayChanged { change, room }) => ServerMessage::InputDelayChanged {
             event_seq: room.event_seq,
             room_epoch: room.room_epoch,

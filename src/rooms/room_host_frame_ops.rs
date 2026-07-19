@@ -32,6 +32,16 @@ pub enum HostFrameRelayOutcome {
     },
 }
 
+/// Result of one transport-owned scheduled first-frame wake.
+pub enum ScheduledHostFrameReleaseOutcome {
+    /// The exact pending frame was released and broadcast.
+    Released,
+    /// The room, epoch, or pending frame no longer owns this wake.
+    Superseded,
+    /// Clock rounding left a small bounded delay before the exact deadline.
+    RetryAfter(u64),
+}
+
 impl NetplayRoom {
     /// Applies an exact host frame open or returns its idempotent prior release.
     pub(crate) fn accept_host_frame_open(
@@ -130,6 +140,7 @@ impl NetplayRoom {
 
     fn enter_v5_playing(&mut self) {
         self.status = RoomStatus::Playing;
+        self.finish_v5_state_recovery();
         self.players
             .iter_mut()
             .filter(|slot| slot.connection_id.is_some())

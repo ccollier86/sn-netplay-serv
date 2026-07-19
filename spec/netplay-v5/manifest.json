@@ -7,7 +7,7 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "a92ccd659a98525d85d96d774adbeb6f8c2f7cd5091a49d6ec9f3affd63b3717"
+      "sha256": "ace10dff83e6c8b146608441b8ab62b54f9fb23289438d4c3c7b45b8080d685f"
     },
     {
       "path": "fixtures/host-frame-open.hex",
@@ -24,6 +24,18 @@
     {
       "path": "fixtures/predictor-vectors.json",
       "sha256": "e0fcd2d1de58df5982213756e8d2738f6eab482603cadac2d0bc35bd290edc6c"
+    },
+    {
+      "path": "fixtures/state-recovery-committed.json",
+      "sha256": "cf5cbc89dd39e9bddd713d018fce77cbe7c23ff9e932fa98a020e818417119d5"
+    },
+    {
+      "path": "fixtures/state-recovery-pinned.json",
+      "sha256": "56e0e8d57240a81426d8a9c67c2021ccbae3ca90f09ab31f79efdfef75b351e7"
+    },
+    {
+      "path": "fixtures/state-recovery-prepare.json",
+      "sha256": "8dbabc6da91e7524ec2e27db7cac4b4fbd331a162a403340417b3e5877a844de"
     },
     {
       "path": "fixtures/server-frame-release.hex",

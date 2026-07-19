@@ -9,7 +9,7 @@ use crate::protocol::{
     InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket, RomRelayCancelled,
     RomRelayCompletion, RomRelayFailure, RomRelayGrant, RomRelayProgress, ScheduledSessionStart,
     ServerFrame, ServerFrameReleaseV5, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant,
-    SnapshotManifest, StateHashMismatchView, StrictInputBatch,
+    SnapshotManifest, StateHashMismatchView, StateRecoveryView, StrictInputBatch,
 };
 use crate::rooms::{
     ConnectionId, FastInputRelayBuffer, InputFrameRelayBuffer, NetplayRoom, RoomDebugEvent,
@@ -67,6 +67,18 @@ impl StoredRoom {
     /// Returns whether the room's reconnect grace has expired.
     pub(super) fn is_expired_recovery(&self, now: Instant) -> bool {
         self.room.is_recovery_expired(now)
+    }
+
+    /// Closes and reports a v5 recovery whose host never pinned exact state.
+    pub(super) fn expire_state_recovery(&mut self, now: Instant) -> bool {
+        let Some(recovery) = self.room.state_recovery_view() else {
+            return false;
+        };
+        if !self.room.close_expired_state_recovery(now) {
+            return false;
+        }
+        self.emit_state_recovery_failed(now, recovery, "snapshotPinTimedOut");
+        true
     }
 
     /// Returns whether every occupied slot has been disconnected long enough.
@@ -142,6 +154,7 @@ impl StoredRoom {
             event_seq: self.event_seq,
             room_epoch: self.room.room_epoch,
             session_epoch: self.room.session_epoch,
+            protocol_version: self.room.protocol_version(),
             player_index: player_index.zero_based(),
             runtime_state,
             local_frame,
@@ -289,6 +302,55 @@ impl StoredRoom {
         let _ = self
             .events
             .send(RoomEvent::StateHashMismatch { mismatch, room });
+    }
+
+    /// Emits the old-epoch protocol v5 repair freeze.
+    pub(super) fn emit_state_recovery_prepare(
+        &mut self,
+        now: Instant,
+        recovery: StateRecoveryView,
+    ) {
+        let detail = format!(
+            "state recovery {} preparing at frame {}",
+            recovery.recovery_id, recovery.repair_frame
+        );
+        let room = self.record_event(now, "stateRecoveryPrepare", &detail);
+        let _ = self
+            .events
+            .send(RoomEvent::StateRecoveryPrepare { recovery, room });
+    }
+
+    /// Emits the fresh-epoch protocol v5 repair commit.
+    pub(super) fn emit_state_recovery_committed(
+        &mut self,
+        now: Instant,
+        recovery: StateRecoveryView,
+    ) {
+        self.synchronize_input_runtime_epoch();
+        let detail = format!(
+            "state recovery {} committed at frame {}",
+            recovery.recovery_id, recovery.repair_frame
+        );
+        let room = self.record_event(now, "stateRecoveryCommitted", &detail);
+        let _ = self
+            .events
+            .send(RoomEvent::StateRecoveryCommitted { recovery, room });
+    }
+
+    /// Emits a bounded state-recovery failure before the room is removed.
+    pub(super) fn emit_state_recovery_failed(
+        &mut self,
+        now: Instant,
+        recovery: StateRecoveryView,
+        reason: &str,
+    ) {
+        let detail = format!("state recovery {} failed: {}", recovery.recovery_id, reason);
+        let room = self.record_event(now, "stateRecoveryFailed", &detail);
+        let _ = self.events.send(RoomEvent::StateRecoveryFailed {
+            recovery,
+            reason: reason.to_string(),
+            room,
+        });
     }
 
     /// Emits a scheduled adaptive input-delay update.
@@ -627,6 +689,7 @@ impl StoredRoom {
             event_seq: room.event_seq,
             room_epoch: room.room_epoch,
             session_epoch: room.session_epoch,
+            protocol_version: self.room.protocol_version(),
             kind: kind.to_string(),
             detail: detail.to_string(),
         });

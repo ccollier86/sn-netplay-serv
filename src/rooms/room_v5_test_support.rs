@@ -109,6 +109,29 @@ pub(super) fn fingerprint(
     }
 }
 
+pub(super) fn compatible_v5_room(
+    digest_mode: StateDigestMode,
+    status: RoomStatus,
+) -> V5RoomFixture {
+    let mut fixture = v5_room(RoomStatus::CheckingCompatibility);
+    fixture
+        .room
+        .set_compatibility_for_connection(
+            fixture.host_control,
+            fingerprint(digest_mode, "android-a"),
+        )
+        .expect("host profile");
+    fixture
+        .room
+        .set_compatibility_for_connection(
+            fixture.guest_control,
+            fingerprint(digest_mode, "android-b"),
+        )
+        .expect("guest profile");
+    fixture.room.status = status;
+    fixture
+}
+
 fn empty_sha256() -> String {
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string()
 }

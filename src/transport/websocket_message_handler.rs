@@ -75,7 +75,7 @@ async fn handle_client_message(
                 sender,
                 services
                     .rooms
-                    .set_compatibility(invite_code.clone(), connection_id, fingerprint)
+                    .set_compatibility(invite_code.clone(), connection_id, *fingerprint)
                     .await
                     .map(|_| ()),
             )
@@ -585,6 +585,25 @@ async fn handle_client_message(
                 services
                     .rooms
                     .record_state_hash(invite_code.clone(), connection_id, report)
+                    .await,
+            )
+            .await
+        }
+        ClientMessage::StateRecoveryPinned {
+            room_epoch,
+            session_epoch,
+            pin,
+        } => {
+            apply_room_result(
+                sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            apply_room_result(
+                sender,
+                services
+                    .rooms
+                    .pin_state_recovery(invite_code.clone(), connection_id, pin)
                     .await,
             )
             .await

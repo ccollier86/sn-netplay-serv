@@ -1,5 +1,5 @@
 use crate::protocol::{StateDigestMode, StateHashReport, V5_INPUT_CODEC_ID};
-use crate::rooms::room_v5_test_support::{fingerprint, v5_room};
+use crate::rooms::room_v5_test_support::{compatible_v5_room, fingerprint, v5_room};
 use crate::rooms::{RoomError, RoomStatus, StateHashEvaluation};
 
 #[test]
@@ -57,7 +57,7 @@ fn incompatible_codec_is_rejected_before_state_sync() {
 
 #[test]
 fn diagnostic_digest_mismatch_never_resets_the_session() {
-    let mut fixture = compatible_playing_room(StateDigestMode::Diagnostic);
+    let mut fixture = compatible_v5_room(StateDigestMode::Diagnostic, RoomStatus::Playing);
     let session_epoch = fixture.room.session_epoch;
     assert_eq!(
         fixture
@@ -84,7 +84,7 @@ fn diagnostic_digest_mismatch_never_resets_the_session() {
 
 #[test]
 fn authoritative_digest_mismatch_enters_recovery() {
-    let mut fixture = compatible_playing_room(StateDigestMode::Authoritative);
+    let mut fixture = compatible_v5_room(StateDigestMode::Authoritative, RoomStatus::Playing);
     let session_epoch = fixture.room.session_epoch;
     fixture
         .room
@@ -100,15 +100,15 @@ fn authoritative_digest_mismatch_enters_recovery() {
             state_hash(60, 'b'),
             std::time::Instant::now()
         ),
-        Ok(StateHashEvaluation::ResyncRequired(_))
+        Ok(StateHashEvaluation::RecoveryPrepare(_))
     ));
-    assert_eq!(fixture.room.session_epoch, session_epoch + 1);
-    assert_eq!(fixture.room.status(), RoomStatus::CheckingCompatibility);
+    assert_eq!(fixture.room.session_epoch, session_epoch);
+    assert_eq!(fixture.room.status(), RoomStatus::RepairingState);
 }
 
 #[test]
 fn disabled_digest_reports_are_ignored() {
-    let mut fixture = compatible_playing_room(StateDigestMode::Disabled);
+    let mut fixture = compatible_v5_room(StateDigestMode::Disabled, RoomStatus::Playing);
     assert_eq!(
         fixture
             .room
@@ -120,28 +120,6 @@ fn disabled_digest_reports_are_ignored() {
             .expect("disabled digest"),
         StateHashEvaluation::Disabled
     );
-}
-
-fn compatible_playing_room(
-    digest_mode: StateDigestMode,
-) -> super::room_v5_test_support::V5RoomFixture {
-    let mut fixture = v5_room(RoomStatus::CheckingCompatibility);
-    fixture
-        .room
-        .set_compatibility_for_connection(
-            fixture.host_control,
-            fingerprint(digest_mode, "android-a"),
-        )
-        .expect("host profile");
-    fixture
-        .room
-        .set_compatibility_for_connection(
-            fixture.guest_control,
-            fingerprint(digest_mode, "android-b"),
-        )
-        .expect("guest profile");
-    fixture.room.status = RoomStatus::Playing;
-    fixture
 }
 
 fn state_hash(frame: u64, fill: char) -> StateHashReport {

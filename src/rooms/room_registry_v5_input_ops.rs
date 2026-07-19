@@ -1,9 +1,10 @@
 //! Protocol-v5 strict input and host-driven frame relay operations.
 
 use super::InMemoryRoomRegistry;
-use crate::protocol::{HostFrameOpen, InputCursorResponse, StrictInputBatch};
+use crate::protocol::{HostFrameOpen, StrictInputBatch};
 use crate::rooms::{
     ConnectionId, HostFrameOpenOutcome, HostFrameRelayOutcome, InviteCode, RoomError,
+    ScheduledHostFrameReleaseOutcome, StrictInputRelayOutcome,
 };
 
 impl InMemoryRoomRegistry {
@@ -12,7 +13,7 @@ impl InMemoryRoomRegistry {
         invite_code: InviteCode,
         connection_id: ConnectionId,
         batch: StrictInputBatch,
-    ) -> Result<InputCursorResponse, RoomError> {
+    ) -> Result<StrictInputRelayOutcome, RoomError> {
         let mut rooms = self.invite_codes.write().await;
         let stored_room = rooms
             .get_mut(invite_code.normalized())
@@ -20,10 +21,18 @@ impl InMemoryRoomRegistry {
         let outcome = stored_room
             .room
             .accept_strict_input_batch(connection_id, batch)?;
+        let accepted_frame_count = outcome
+            .accepted_batch
+            .as_ref()
+            .map_or(0, |batch| batch.payloads.len());
         if let Some(batch) = outcome.accepted_batch {
             stored_room.emit_strict_input_batch(connection_id, batch);
         }
-        Ok(outcome.response)
+        Ok(StrictInputRelayOutcome {
+            response: outcome.response,
+            accepted_frame_count,
+            duplicate_frame_count: outcome.duplicate_frame_count,
+        })
     }
 
     pub(super) async fn relay_host_frame_open_impl(
@@ -66,7 +75,7 @@ impl InMemoryRoomRegistry {
         room_epoch: u64,
         session_epoch: u64,
         frame: u64,
-    ) -> Result<(), RoomError> {
+    ) -> Result<ScheduledHostFrameReleaseOutcome, RoomError> {
         let mut rooms = self.invite_codes.write().await;
         let stored_room = rooms
             .get_mut(invite_code.normalized())
@@ -75,13 +84,23 @@ impl InMemoryRoomRegistry {
             || stored_room.room.session_epoch != session_epoch
             || stored_room.room.pending_host_frame_open != Some(frame)
         {
-            return Ok(());
+            return Ok(ScheduledHostFrameReleaseOutcome::Superseded);
         }
 
         let server_time_ms = self.server_time_ms_at(self.clock.now());
+        let scheduled_time_ms = stored_room
+            .room
+            .scheduled_start()
+            .map(|start| start.server_time_ms)
+            .ok_or(RoomError::RoomNotReady)?;
+        if server_time_ms < scheduled_time_ms {
+            return Ok(ScheduledHostFrameReleaseOutcome::RetryAfter(
+                scheduled_time_ms - server_time_ms,
+            ));
+        }
         if !stored_room.emit_due_v5_server_frame(server_time_ms) {
             return Err(RoomError::RoomNotReady);
         }
-        Ok(())
+        Ok(ScheduledHostFrameReleaseOutcome::Released)
     }
 }

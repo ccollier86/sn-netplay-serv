@@ -27,6 +27,8 @@ pub struct RoomDebugEvent {
     pub room_epoch: u64,
     /// Current session epoch.
     pub session_epoch: u64,
+    /// Exact room protocol that produced this event.
+    pub protocol_version: u16,
     /// Stable event kind.
     pub kind: String,
     /// Short human-safe summary.

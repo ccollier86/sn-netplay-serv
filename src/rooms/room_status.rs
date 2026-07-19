@@ -24,6 +24,8 @@ pub enum RoomStatus {
     Playing,
     /// Gameplay is paused by the coordinated netplay pause contract.
     Paused,
+    /// Protocol v5 gameplay is frozen while the host pins exact repair state.
+    RepairingState,
     /// Gameplay is interrupted while one or more players may reconnect.
     Recovering,
     /// Room is no longer accepting traffic.

@@ -30,6 +30,30 @@ pub struct ClientNetworkQualityReport {
     /// Audio underruns observed since the previous health report.
     #[serde(default)]
     pub audio_underruns: Option<u32>,
+    /// Input frames resent since the previous health report.
+    #[serde(default)]
+    pub input_resend_frames: Option<u32>,
+    /// Input NACKs received since the previous health report.
+    #[serde(default)]
+    pub input_nacks: Option<u32>,
+    /// Emulator frames replayed since the previous health report.
+    #[serde(default)]
+    pub replayed_frames: Option<u32>,
+    /// Replay audio frames intentionally suppressed since the previous report.
+    #[serde(default)]
+    pub suppressed_audio_frames: Option<u32>,
+    /// Replay video frames intentionally suppressed since the previous report.
+    #[serde(default)]
+    pub suppressed_video_frames: Option<u32>,
+    /// Current queued audio depth in emulated frames.
+    #[serde(default)]
+    pub audio_queue_depth_frames: Option<u32>,
+    /// Audio catch-up operations since the previous health report.
+    #[serde(default)]
+    pub audio_catch_up_events: Option<u32>,
+    /// Audio frames trimmed since the previous health report.
+    #[serde(default)]
+    pub audio_trimmed_frames: Option<u32>,
     /// Latest clock-sync uncertainty estimate in milliseconds.
     #[serde(default)]
     pub clock_uncertainty_ms: Option<u32>,

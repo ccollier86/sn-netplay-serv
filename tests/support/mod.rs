@@ -12,8 +12,8 @@ use sb_netplay_serv::http::{
     AdminAuthorizer, AppServiceDependencies, AppServices, FileRelayPolicy, build_router,
 };
 use sb_netplay_serv::lobbies::InMemoryLobbyRegistry;
-use sb_netplay_serv::observability::InMemoryMetrics;
-use sb_netplay_serv::protocol::LEGACY_NETPLAY_PROTOCOL_VERSION;
+use sb_netplay_serv::observability::{InMemoryMetrics, MetricsRecorder, MetricsSnapshot};
+use sb_netplay_serv::protocol::{LEGACY_NETPLAY_PROTOCOL_VERSION, NETPLAY_PROTOCOL_VERSION};
 use sb_netplay_serv::rate_limit::{InMemoryRateLimiter, RateLimitPolicy};
 use sb_netplay_serv::rooms::{
     InMemoryRoomRegistry, InviteCode, InviteCodeGenerator, spawn_room_frame_clock_task,
@@ -32,6 +32,7 @@ const INVITE_CODE: &str = "AB23-CD";
 
 pub struct SmokeServer {
     auth_calls: Arc<AtomicUsize>,
+    metrics: Arc<InMemoryMetrics>,
     pub http_base: String,
     pub ws_base: String,
     frame_clock_task: JoinHandle<()>,
@@ -48,8 +49,9 @@ impl SmokeServer {
             StaticInviteCodeGenerator,
         )));
         let auth_calls = Arc::new(AtomicUsize::new(0));
+        let metrics = Arc::new(InMemoryMetrics::new());
         let frame_clock_task = spawn_room_frame_clock_task(rooms.clone());
-        let app = build_router(test_services(rooms, auth_calls.clone()));
+        let app = build_router(test_services(rooms, auth_calls.clone(), metrics.clone()));
         let task = tokio::spawn(async move {
             axum::serve(
                 listener,
@@ -61,6 +63,7 @@ impl SmokeServer {
 
         Self {
             auth_calls,
+            metrics,
             frame_clock_task,
             http_base: format!("http://{address}"),
             ws_base: format!("ws://{address}"),
@@ -76,8 +79,16 @@ impl SmokeServer {
         self.create_room_from_body(create_link_room_body()).await
     }
 
+    pub async fn create_v5_room(&self) -> String {
+        self.create_room_from_body(create_v5_room_body()).await
+    }
+
     pub fn auth_call_count(&self) -> usize {
         self.auth_calls.load(Ordering::SeqCst)
+    }
+
+    pub fn metrics(&self) -> MetricsSnapshot {
+        self.metrics.snapshot()
     }
 
     pub async fn room_status(&self) -> Value {
@@ -125,11 +136,37 @@ pub struct SmokeClient {
     player_index: Option<u8>,
     room_epoch: u64,
     session_epoch: u64,
+    protocol_version: u16,
 }
 
 impl SmokeClient {
     pub async fn connect(server: &SmokeServer, role: &str, token: &str, install_id: &str) -> Self {
-        Self::connect_initial(server, role, token, install_id, false).await
+        Self::connect_initial(
+            server,
+            role,
+            token,
+            install_id,
+            LEGACY_NETPLAY_PROTOCOL_VERSION,
+            false,
+        )
+        .await
+    }
+
+    pub async fn connect_v5(
+        server: &SmokeServer,
+        role: &str,
+        token: &str,
+        install_id: &str,
+    ) -> Self {
+        Self::connect_initial(
+            server,
+            role,
+            token,
+            install_id,
+            NETPLAY_PROTOCOL_VERSION,
+            false,
+        )
+        .await
     }
 
     pub async fn connect_runner_handoff(
@@ -138,7 +175,15 @@ impl SmokeClient {
         token: &str,
         install_id: &str,
     ) -> Self {
-        Self::connect_initial(server, role, token, install_id, true).await
+        Self::connect_initial(
+            server,
+            role,
+            token,
+            install_id,
+            LEGACY_NETPLAY_PROTOCOL_VERSION,
+            true,
+        )
+        .await
     }
 
     async fn connect_initial(
@@ -146,6 +191,7 @@ impl SmokeClient {
         role: &str,
         token: &str,
         install_id: &str,
+        protocol_version: u16,
         runner_handoff: bool,
     ) -> Self {
         let runner_handoff_query = if runner_handoff {
@@ -153,9 +199,14 @@ impl SmokeClient {
         } else {
             ""
         };
+        let capability_query = if protocol_version >= NETPLAY_PROTOCOL_VERSION {
+            "&supportsScheduledStart=true&supportsClockSync=true&supportsFastInputRelay=true"
+        } else {
+            ""
+        };
         let mut request = format!(
-            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion={}{}",
-            server.ws_base, INVITE_CODE, LEGACY_NETPLAY_PROTOCOL_VERSION, runner_handoff_query
+            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion={}{}{}",
+            server.ws_base, INVITE_CODE, protocol_version, runner_handoff_query, capability_query
         )
         .into_client_request()
         .expect("websocket request");
@@ -178,6 +229,7 @@ impl SmokeClient {
             player_index: None,
             room_epoch: 1,
             session_epoch: 1,
+            protocol_version,
         }
     }
 
@@ -207,6 +259,7 @@ impl SmokeClient {
             player_index: Some(player_index),
             room_epoch,
             session_epoch,
+            protocol_version: LEGACY_NETPLAY_PROTOCOL_VERSION,
         }
     }
 
@@ -246,13 +299,17 @@ impl SmokeClient {
             "{}/v1/ws/input?inviteCode={}&protocolVersion={}&playerIndex={player_index}&roomEpoch={}&sessionEpoch={}&inputSocketToken={}",
             server.ws_base,
             INVITE_CODE,
-            LEGACY_NETPLAY_PROTOCOL_VERSION,
+            self.protocol_version,
             self.room_epoch,
             self.session_epoch,
             input_socket_token
         )
         .into_client_request()
         .expect("input websocket request");
+        request.headers_mut().insert(
+            "sec-websocket-extensions",
+            HeaderValue::from_static("permessage-deflate"),
+        );
         if let Some((token, install_id)) = auth {
             let headers = request.headers_mut();
             headers.insert(
@@ -269,8 +326,13 @@ impl SmokeClient {
             .await
             .expect("input websocket connect");
         assert_eq!(response.status().as_u16(), 101);
+        assert!(response.headers().get("sec-websocket-extensions").is_none());
         self.input_socket = Some(socket);
         self.player_index = Some(player_index);
+    }
+
+    pub fn epochs(&self) -> (u64, u64) {
+        (self.room_epoch, self.session_epoch)
     }
 }
 
@@ -289,6 +351,44 @@ pub fn compatibility_fingerprint() -> Value {
     })
 }
 
+pub fn v5_compatibility_fingerprint(digest_mode: &str) -> Value {
+    json!({
+        "desktopVersion": "2.1.0-test",
+        "protocolVersion": NETPLAY_PROTOCOL_VERSION,
+        "systemId": "snes",
+        "coreId": "snes9x",
+        "coreBuild": "android-test-artifact",
+        "stateFormat": "snes9x:snes:libretro-serialize-v1",
+        "contentHash": "a".repeat(64),
+        "settingsHash": empty_sha256(),
+        "cheatsHash": empty_sha256(),
+        "systemDataHash": null,
+        "saveDataMode": "netplay",
+        "determinismV5": {
+            "netplayCoreCompatibilityId": "snes9x-2025-compat-v1",
+            "localArtifactId": "android-test-artifact",
+            "platformClass": "libretro-arm64-le-v1",
+            "coreOptionsDigest": empty_sha256(),
+            "controllerProfileIds": ["retropad-port-1-v1"],
+            "inputCodecId": "shadowboy-retropad-v1-le",
+            "inputPayloadSize": 10,
+            "predictorId": "shadowboy-retropad-predictor-v1",
+            "nominalFrameRateNumerator": 150247,
+            "nominalFrameRateDenominator": 2500,
+            "romSizeBytes": 1024,
+            "contentTransformationDigest": null,
+            "startupStatePolicyId": "load-start-frame-state-v1",
+            "replayOutputSuppressed": true,
+            "digestMode": digest_mode,
+            "digestAlgorithmId": if digest_mode == "disabled" {
+                Value::Null
+            } else {
+                json!("sha256-libretro-serialize-start-frame-v1")
+            }
+        }
+    })
+}
+
 pub async fn connect_ready_pair(server: &SmokeServer) -> (SmokeClient, SmokeClient) {
     let mut host = SmokeClient::connect(server, "host", "host-token", "host-install").await;
     let mut guest = SmokeClient::connect(server, "guest", "guest-token", "guest-install").await;
@@ -297,6 +397,24 @@ pub async fn connect_ready_pair(server: &SmokeServer) -> (SmokeClient, SmokeClie
     let guest_join = guest.expect_type("roomJoined").await;
     assert_eq!(host_join["yourPlayerIndex"], 0);
     assert_eq!(guest_join["yourPlayerIndex"], 1);
+    host.expect_type("compatibilityRequested").await;
+    host.connect_input(server, "host-token", "host-install", &host_join)
+        .await;
+    guest
+        .connect_input(server, "guest-token", "guest-install", &guest_join)
+        .await;
+
+    (host, guest)
+}
+
+pub async fn connect_v5_pair(server: &SmokeServer) -> (SmokeClient, SmokeClient) {
+    let mut host = SmokeClient::connect_v5(server, "host", "host-token", "host-install").await;
+    let mut guest = SmokeClient::connect_v5(server, "guest", "guest-token", "guest-install").await;
+
+    let host_join = host.expect_type("roomJoined").await;
+    let guest_join = guest.expect_type("roomJoined").await;
+    assert_eq!(host_join["room"]["protocol"]["roomProtocolVersion"], 5);
+    assert_eq!(guest_join["room"]["protocol"]["roomProtocolVersion"], 5);
     host.expect_type("compatibilityRequested").await;
     host.connect_input(server, "host-token", "host-install", &host_join)
         .await;
@@ -324,6 +442,28 @@ pub async fn move_pair_to_syncing(host: &mut SmokeClient, guest: &mut SmokeClien
     let guest_state = guest.expect_room_status("syncingState").await;
     assert_eq!(host_state["room"]["status"], "syncingState");
     assert_eq!(guest_state["room"]["status"], "syncingState");
+}
+
+pub async fn move_v5_pair_to_syncing(
+    host: &mut SmokeClient,
+    guest: &mut SmokeClient,
+    digest_mode: &str,
+) {
+    let fingerprint = v5_compatibility_fingerprint(digest_mode);
+    host.send(json!({
+        "type": "setCompatibilityFingerprint",
+        "fingerprint": fingerprint.clone()
+    }))
+    .await;
+    guest
+        .send(json!({
+            "type": "setCompatibilityFingerprint",
+            "fingerprint": fingerprint
+        }))
+        .await;
+
+    host.expect_room_status("syncingState").await;
+    guest.expect_room_status("syncingState").await;
 }
 
 pub fn link_cable_compatibility() -> Value {
@@ -392,7 +532,11 @@ impl SmokeClient {
     }
 }
 
-fn test_services(rooms: Arc<InMemoryRoomRegistry>, auth_calls: Arc<AtomicUsize>) -> AppServices {
+fn test_services(
+    rooms: Arc<InMemoryRoomRegistry>,
+    auth_calls: Arc<AtomicUsize>,
+    metrics: Arc<InMemoryMetrics>,
+) -> AppServices {
     AppServices::new(AppServiceDependencies {
         license_authority: Arc::new(FakeLicenseAuthority { auth_calls }),
         rooms,
@@ -412,7 +556,7 @@ fn test_services(rooms: Arc<InMemoryRoomRegistry>, auth_calls: Arc<AtomicUsize>)
             websocket_join_per_minute: 100,
             room_status_per_minute: 100,
         })),
-        metrics: Arc::new(InMemoryMetrics::new()),
+        metrics,
         protocol_rollout: sb_netplay_serv::protocol::NetplayProtocolRolloutPolicy::default(),
         admin_authorizer: AdminAuthorizer::new(None),
         trust_proxy_headers: false,
@@ -441,6 +585,39 @@ fn create_room_body() -> Value {
             }
         }
     })
+}
+
+fn create_v5_room_body() -> Value {
+    json!({
+        "desktopProtocolVersion": NETPLAY_PROTOCOL_VERSION,
+        "minimumProtocolVersion": NETPLAY_PROTOCOL_VERSION,
+        "session": {
+            "hostAppVersion": "2.1.0-test",
+            "game": {
+                "systemId": "snes",
+                "title": "V5 Integration Fixture",
+                "romSha256": "a".repeat(64),
+                "contentKey": "snes-v5-integration"
+            },
+            "core": {
+                "coreId": "snes9x",
+                "coreOptionsSha256": empty_sha256(),
+                "stateFormat": "snes9x:snes:libretro-serialize-v1"
+            },
+            "controller": { "inputDelayFrames": 3 },
+            "romIdentity": {
+                "system": "snes",
+                "coreId": "snes9x",
+                "contentHash": "a".repeat(64),
+                "sizeBytes": 1024,
+                "displayName": "V5 Integration Fixture"
+            }
+        }
+    })
+}
+
+fn empty_sha256() -> String {
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string()
 }
 
 fn create_link_room_body() -> Value {

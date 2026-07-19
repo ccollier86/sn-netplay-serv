@@ -33,8 +33,12 @@ mod session_pause;
 mod snapshot;
 mod snapshot_file_relay;
 mod state_hash;
+mod state_recovery;
 mod strict_input;
 mod voice_descriptor;
+
+#[cfg(test)]
+mod netplay_v5_spec_tests;
 
 pub use client_kind::NetplayClientKind;
 pub use client_message::ClientMessage;
@@ -97,6 +101,7 @@ pub use snapshot_file_relay::{
 pub use state_hash::{
     NearbyStateHashMatchView, PlayerStateHashView, StateHashMismatchView, StateHashReport,
 };
+pub use state_recovery::{StateRecoveryPhase, StateRecoveryPin, StateRecoveryView};
 pub use strict_input::{
     AcceptedInputCursor, HostFrameOpen, InputCursorAck, InputCursorNack, InputCursorNackReason,
     InputCursorResponse, RetropadInputPayload, ServerFrameReleaseV5, StrictInputBatch,

@@ -396,8 +396,15 @@ impl InMemoryRoomRegistry {
         let mut rooms = self.invite_codes.write().await;
         let mut lifecycle_events = Vec::new();
         let mut handoff_closed_keys = Vec::new();
+        let mut state_recovery_closed_keys = Vec::new();
 
         for (key, stored_room) in rooms.iter_mut() {
+            if stored_room.expire_state_recovery(now) {
+                lifecycle_events.extend(stored_room.debug_events(1));
+                state_recovery_closed_keys.push(key.clone());
+                continue;
+            }
+
             if let Some(room_closed) = stored_room.room.expire_runner_handoffs(now) {
                 stored_room.emit_state(
                     now,
@@ -439,6 +446,7 @@ impl InMemoryRoomRegistry {
             })
             .collect::<Vec<_>>();
         expired_keys.extend(handoff_closed_keys);
+        expired_keys.extend(state_recovery_closed_keys);
         expired_keys.sort();
         expired_keys.dedup();
         let mut voice_cleanup = Vec::new();

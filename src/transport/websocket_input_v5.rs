@@ -5,7 +5,9 @@ use crate::protocol::{
     InputCursorResponse, decode_host_frame_open, decode_strict_input_batch,
     encode_input_cursor_ack, encode_input_cursor_nack, encode_server_frame_release_v5,
 };
-use crate::rooms::{ConnectionId, HostFrameRelayOutcome, InviteCode};
+use crate::rooms::{
+    ConnectionId, HostFrameRelayOutcome, InviteCode, ScheduledHostFrameReleaseOutcome,
+};
 use crate::transport::websocket_outbound::{SocketSender, send_binary_message};
 
 /// Applies one protocol v5 binary message without emitting JSON on the hot lane.
@@ -53,12 +55,13 @@ async fn handle_strict_input(
             return false;
         }
     };
-    let response = match services
+    let frame_count = batch.payloads.len() as u64;
+    let outcome = match services
         .rooms
         .relay_strict_input_batch(invite_code.clone(), connection_id, batch)
         .await
     {
-        Ok(response) => response,
+        Ok(outcome) => outcome,
         Err(error) => {
             reject_v5_message(
                 services,
@@ -70,7 +73,14 @@ async fn handle_strict_input(
             return false;
         }
     };
-    let encoded = match response {
+    let nacked = matches!(outcome.response, InputCursorResponse::Nack(_));
+    services.metrics.record_v5_input_batch(
+        frame_count,
+        outcome.accepted_frame_count as u64,
+        outcome.duplicate_frame_count as u64,
+        nacked,
+    );
+    let encoded = match outcome.response {
         InputCursorResponse::Ack(ack) => encode_input_cursor_ack(&ack),
         InputCursorResponse::Nack(nack) => encode_input_cursor_nack(&nack),
     };
@@ -103,19 +113,25 @@ async fn handle_host_open(
         .await
     {
         Ok(HostFrameRelayOutcome::Duplicate(duplicate_release)) => {
+            services.metrics.record_v5_host_frame_open(true);
             let encoded = match encode_server_frame_release_v5(&duplicate_release) {
                 Ok(encoded) => encoded,
                 Err(_) => return false,
             };
             send_binary_message(sender, encoded).await.is_ok()
         }
-        Ok(HostFrameRelayOutcome::Broadcast) => true,
+        Ok(HostFrameRelayOutcome::Broadcast) => {
+            services.metrics.record_v5_host_frame_open(false);
+            services.metrics.record_v5_frame_released();
+            true
+        }
         Ok(HostFrameRelayOutcome::Pending {
             delay_ms,
             room_epoch,
             session_epoch,
             frame,
         }) => {
+            services.metrics.record_v5_host_frame_open(false);
             schedule_first_frame_release(
                 services,
                 invite_code.clone(),
@@ -148,11 +164,31 @@ fn schedule_first_frame_release(
     frame: u64,
 ) {
     let rooms = services.rooms.clone();
+    let metrics = services.metrics.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-        let _ = rooms
-            .release_scheduled_v5_host_frame(invite_code, room_epoch, session_epoch, frame)
-            .await;
+        let mut remaining_ms = delay_ms.max(1);
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(remaining_ms)).await;
+            match rooms
+                .release_scheduled_v5_host_frame(
+                    invite_code.clone(),
+                    room_epoch,
+                    session_epoch,
+                    frame,
+                )
+                .await
+            {
+                Ok(ScheduledHostFrameReleaseOutcome::RetryAfter(next_remaining_ms)) => {
+                    metrics.record_v5_scheduled_wake_retry();
+                    remaining_ms = next_remaining_ms.max(1);
+                }
+                Ok(ScheduledHostFrameReleaseOutcome::Released) => {
+                    metrics.record_v5_frame_released();
+                    break;
+                }
+                Ok(ScheduledHostFrameReleaseOutcome::Superseded) | Err(_) => break,
+            }
+        }
     });
 }
 

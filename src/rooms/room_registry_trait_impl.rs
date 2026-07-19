@@ -3,16 +3,17 @@
 use super::InMemoryRoomRegistry;
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    ClientRuntimeState, CompatibilityFingerprint, FastInputBatch, HostFrameOpen,
-    InputCursorResponse, InputFrame, InputFrameBatch, LinkCableCompatibility, LinkCablePacket,
-    NetplaySessionDescriptor, RomRelayBlockReason, RomRelayCancelled, RomRelayCompletion,
-    RomRelayFailure, RomRelayProgress, SessionPauseReason, SnapshotChunk,
-    SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport, StrictInputBatch,
+    ClientRuntimeState, CompatibilityFingerprint, FastInputBatch, HostFrameOpen, InputFrame,
+    InputFrameBatch, LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor,
+    RomRelayBlockReason, RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayProgress,
+    SessionPauseReason, SnapshotChunk, SnapshotFileRelayGrantPair, SnapshotManifest,
+    StateHashReport, StateRecoveryPin, StrictInputBatch,
 };
 use crate::rooms::{
     ClientTransportCapabilities, ConnectionId, HostFrameRelayOutcome, InviteCode, PlayerIndex,
     RomRelayGrantPair, RomRelayTransferIntent, RoomDebugEvent, RoomError, RoomEventReceiver,
-    RoomJoin, RoomRegistry, RoomRegistrySnapshot, RoomView, SnapshotFileRelayTransferIntent,
+    RoomJoin, RoomRegistry, RoomRegistrySnapshot, RoomView, ScheduledHostFrameReleaseOutcome,
+    SnapshotFileRelayTransferIntent, StrictInputRelayOutcome,
 };
 
 #[async_trait::async_trait]
@@ -407,7 +408,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
         invite_code: InviteCode,
         connection_id: ConnectionId,
         batch: StrictInputBatch,
-    ) -> Result<InputCursorResponse, RoomError> {
+    ) -> Result<StrictInputRelayOutcome, RoomError> {
         self.relay_strict_input_batch_impl(invite_code, connection_id, batch)
             .await
     }
@@ -428,7 +429,7 @@ impl RoomRegistry for InMemoryRoomRegistry {
         room_epoch: u64,
         session_epoch: u64,
         frame: u64,
-    ) -> Result<(), RoomError> {
+    ) -> Result<ScheduledHostFrameReleaseOutcome, RoomError> {
         self.release_scheduled_v5_host_frame_impl(invite_code, room_epoch, session_epoch, frame)
             .await
     }
@@ -450,6 +451,16 @@ impl RoomRegistry for InMemoryRoomRegistry {
         report: StateHashReport,
     ) -> Result<(), RoomError> {
         self.record_state_hash_impl(invite_code, connection_id, report)
+            .await
+    }
+
+    async fn pin_state_recovery(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        pin: StateRecoveryPin,
+    ) -> Result<(), RoomError> {
+        self.pin_state_recovery_impl(invite_code, connection_id, pin)
             .await
     }
 

@@ -16,17 +16,20 @@ use tokio_postgres::Client;
 
 const INSERT_EVENT_SQL: &str = "\
     INSERT INTO {table} \
-    (timestamp_ms, room_id, invite_code, event_seq, room_epoch, session_epoch, kind, detail) \
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)";
+    (timestamp_ms, room_id, invite_code, event_seq, room_epoch, session_epoch, protocol_version, \
+     kind, detail) \
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)";
 
 const INSERT_SAMPLE_SQL: &str = "\
     INSERT INTO {table} \
-    (timestamp_ms, room_id, invite_code, event_seq, room_epoch, session_epoch, player_index, \
+    (timestamp_ms, room_id, invite_code, event_seq, room_epoch, session_epoch, protocol_version, player_index, \
      runtime_state, local_frame, canonical_frame, released_frame, next_release_frame, \
      accepted_input_frame, frame_delta, round_trip_ms, jitter_ms, prediction_frames, \
-     stall_count, catch_up_frames, late_input_frames, audio_underruns) \
+     stall_count, catch_up_frames, late_input_frames, audio_underruns, input_resend_frames, \
+     input_nacks, replayed_frames, suppressed_audio_frames, suppressed_video_frames, \
+     audio_queue_depth_frames, audio_catch_up_events, audio_trimmed_frames) \
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, \
-            $17, $18, $19, $20, $21)";
+            $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)";
 
 const INSERT_LOBBY_EVENT_SQL: &str = "\
     INSERT INTO {table} \
@@ -159,6 +162,7 @@ async fn write_events(
         let event_seq = u64_to_i64(event.event_seq, "event_seq")?;
         let room_epoch = u64_to_i64(event.room_epoch, "room_epoch")?;
         let session_epoch = u64_to_i64(event.session_epoch, "session_epoch")?;
+        let protocol_version = i16::try_from(event.protocol_version)?;
         let room_id = event.room_id.as_uuid();
 
         client
@@ -171,6 +175,7 @@ async fn write_events(
                     &event_seq,
                     &room_epoch,
                     &session_epoch,
+                    &protocol_version,
                     &event.kind,
                     &event.detail,
                 ],
@@ -194,6 +199,7 @@ async fn write_performance_samples(
         let event_seq = u64_to_i64(sample.event_seq, "event_seq")?;
         let room_epoch = u64_to_i64(sample.room_epoch, "room_epoch")?;
         let session_epoch = u64_to_i64(sample.session_epoch, "session_epoch")?;
+        let protocol_version = i16::try_from(sample.protocol_version)?;
         let local_frame = optional_u64_to_i64(sample.local_frame, "local_frame")?;
         let canonical_frame = u64_to_i64(sample.canonical_frame, "canonical_frame")?;
         let released_frame = optional_u64_to_i64(sample.released_frame, "released_frame")?;
@@ -207,6 +213,26 @@ async fn write_performance_samples(
         let catch_up_frames = sample.catch_up_frames.map(i32::try_from).transpose()?;
         let late_input_frames = sample.late_input_frames.map(i32::try_from).transpose()?;
         let audio_underruns = sample.audio_underruns.map(i32::try_from).transpose()?;
+        let input_resend_frames = sample.input_resend_frames.map(i32::try_from).transpose()?;
+        let input_nacks = sample.input_nacks.map(i32::try_from).transpose()?;
+        let replayed_frames = sample.replayed_frames.map(i32::try_from).transpose()?;
+        let suppressed_audio_frames = sample
+            .suppressed_audio_frames
+            .map(i32::try_from)
+            .transpose()?;
+        let suppressed_video_frames = sample
+            .suppressed_video_frames
+            .map(i32::try_from)
+            .transpose()?;
+        let audio_queue_depth_frames = sample
+            .audio_queue_depth_frames
+            .map(i32::try_from)
+            .transpose()?;
+        let audio_catch_up_events = sample
+            .audio_catch_up_events
+            .map(i32::try_from)
+            .transpose()?;
+        let audio_trimmed_frames = sample.audio_trimmed_frames.map(i32::try_from).transpose()?;
         let room_id = sample.room_id.as_uuid();
         let player_index = i16::from(sample.player_index);
 
@@ -220,6 +246,7 @@ async fn write_performance_samples(
                     &event_seq,
                     &room_epoch,
                     &session_epoch,
+                    &protocol_version,
                     &player_index,
                     &sample.runtime_state,
                     &local_frame,
@@ -235,6 +262,14 @@ async fn write_performance_samples(
                     &catch_up_frames,
                     &late_input_frames,
                     &audio_underruns,
+                    &input_resend_frames,
+                    &input_nacks,
+                    &replayed_frames,
+                    &suppressed_audio_frames,
+                    &suppressed_video_frames,
+                    &audio_queue_depth_frames,
+                    &audio_catch_up_events,
+                    &audio_trimmed_frames,
                 ],
             )
             .await?;

@@ -1,0 +1,14 @@
+{
+  "type": "stateRecoveryPinned",
+  "roomEpoch": 3,
+  "sessionEpoch": 8,
+  "pin": {
+    "recoveryId": 7,
+    "manifest": {
+      "snapshotId": "recovery-7",
+      "repairFrame": 120,
+      "totalBytes": 4,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  }
+}

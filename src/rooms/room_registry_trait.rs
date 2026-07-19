@@ -6,17 +6,17 @@
 
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    ClientRuntimeState, CompatibilityFingerprint, FastInputBatch, HostFrameOpen,
-    InputCursorResponse, InputFrame, InputFrameBatch, LinkCableCompatibility, LinkCablePacket,
-    NetplaySessionDescriptor, RomRelayBlockReason, RomRelayCancelled, RomRelayCompletion,
-    RomRelayFailure, RomRelayProgress, SessionPauseReason, SnapshotChunk,
-    SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport, StrictInputBatch,
+    ClientRuntimeState, CompatibilityFingerprint, FastInputBatch, HostFrameOpen, InputFrame,
+    InputFrameBatch, LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor,
+    RomRelayBlockReason, RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayProgress,
+    SessionPauseReason, SnapshotChunk, SnapshotFileRelayGrantPair, SnapshotManifest,
+    StateHashReport, StateRecoveryPin, StrictInputBatch,
 };
 use crate::rooms::{
     ClientTransportCapabilities, ConnectionId, HostFrameRelayOutcome, InviteCode, PlayerIndex,
     RomRelayGrantPair, RomRelayTransferIntent, RoomDebugEvent, RoomError, RoomEvent,
     RoomInputEvent, RoomJoin, RoomRegistrySnapshot, RoomView, RoomVoiceTokenRefresh,
-    SnapshotFileRelayTransferIntent,
+    ScheduledHostFrameReleaseOutcome, SnapshotFileRelayTransferIntent, StrictInputRelayOutcome,
 };
 use tokio::sync::broadcast;
 
@@ -317,7 +317,7 @@ pub trait RoomRegistry: Send + Sync {
         invite_code: InviteCode,
         connection_id: ConnectionId,
         batch: StrictInputBatch,
-    ) -> Result<InputCursorResponse, RoomError>;
+    ) -> Result<StrictInputRelayOutcome, RoomError>;
 
     /// Validates a host frame open and returns its transport scheduling result.
     async fn relay_host_frame_open(
@@ -334,7 +334,7 @@ pub trait RoomRegistry: Send + Sync {
         room_epoch: u64,
         session_epoch: u64,
         frame: u64,
-    ) -> Result<(), RoomError>;
+    ) -> Result<ScheduledHostFrameReleaseOutcome, RoomError>;
 
     /// Validates and broadcasts one virtual link-cable packet.
     async fn relay_link_cable_packet(
@@ -350,6 +350,14 @@ pub trait RoomRegistry: Send + Sync {
         invite_code: InviteCode,
         connection_id: ConnectionId,
         report: StateHashReport,
+    ) -> Result<(), RoomError>;
+
+    /// Commits a protocol v5 state recovery after the host pins its snapshot.
+    async fn pin_state_recovery(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        pin: StateRecoveryPin,
     ) -> Result<(), RoomError>;
 
     /// Records a client heartbeat and returns the current room view.

@@ -5,10 +5,11 @@
 
 use crate::protocol::{
     NearbyStateHashMatchView, PlayerStateHashView, StateDigestMode, StateHashMismatchView,
-    StateHashReport,
+    StateHashReport, StateRecoveryView,
 };
 use crate::rooms::{
     ConnectionId, NetplayRoom, PlayerRuntimeState, PlayerStatus, RoomError, RoomStatus,
+    StateRecoveryStartOutcome,
 };
 use std::time::{Duration, Instant};
 
@@ -34,6 +35,10 @@ pub(crate) enum StateHashEvaluation {
     TrueMismatch(StateHashMismatchView),
     /// Confirmed mismatches require clients to resync from host state.
     ResyncRequired(StateHashMismatchView),
+    /// Protocol v5 froze the old epoch and requires an exact host snapshot pin.
+    RecoveryPrepare(StateRecoveryView),
+    /// Protocol v5 closed after repeated authoritative repair attempts.
+    RecoveryAttemptLimitExceeded(StateRecoveryView),
 }
 
 impl NetplayRoom {
@@ -112,8 +117,7 @@ impl NetplayRoom {
             if digest_mode == StateDigestMode::Authoritative
                 && self.state_hash_true_mismatch_streak >= STATE_HASH_TRUE_MISMATCHES_BEFORE_RESYNC
             {
-                self.enter_state_hash_resync(mismatch.repair_frame);
-                return Ok(StateHashEvaluation::ResyncRequired(mismatch));
+                return self.begin_authoritative_recovery(mismatch, now);
             }
 
             return Ok(StateHashEvaluation::FrameSkew(mismatch));
@@ -124,8 +128,7 @@ impl NetplayRoom {
         if digest_mode == StateDigestMode::Authoritative
             && self.state_hash_true_mismatch_streak >= STATE_HASH_TRUE_MISMATCHES_BEFORE_RESYNC
         {
-            self.enter_state_hash_resync(mismatch.repair_frame);
-            return Ok(StateHashEvaluation::ResyncRequired(mismatch));
+            return self.begin_authoritative_recovery(mismatch, now);
         }
 
         Ok(StateHashEvaluation::TrueMismatch(mismatch))
@@ -247,6 +250,26 @@ impl NetplayRoom {
                 slot.status = PlayerStatus::Connected;
                 slot.runtime_state = PlayerRuntimeState::Connected;
             });
+    }
+
+    fn begin_authoritative_recovery(
+        &mut self,
+        mismatch: StateHashMismatchView,
+        now: Instant,
+    ) -> Result<StateHashEvaluation, RoomError> {
+        if self.uses_strict_controller_input() {
+            return match self.begin_v5_state_recovery(mismatch, now)? {
+                StateRecoveryStartOutcome::Preparing(recovery) => {
+                    Ok(StateHashEvaluation::RecoveryPrepare(recovery))
+                }
+                StateRecoveryStartOutcome::AttemptLimitExceeded(recovery) => {
+                    Ok(StateHashEvaluation::RecoveryAttemptLimitExceeded(recovery))
+                }
+            };
+        }
+
+        self.enter_state_hash_resync(mismatch.repair_frame);
+        Ok(StateHashEvaluation::ResyncRequired(mismatch))
     }
 
     fn record_state_hash_true_mismatch(&mut self) {

@@ -1,0 +1,26 @@
+{
+  "recoveryId": 7,
+  "phase": "committed",
+  "repairFrame": 120,
+  "mismatch": {
+    "frame": 120,
+    "repairFrame": 120,
+    "hashes": [
+      {
+        "playerIndex": 0,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "playerIndex": 1,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ],
+    "nearbyMatches": []
+  },
+  "pinnedSnapshot": {
+    "snapshotId": "recovery-7",
+    "repairFrame": 120,
+    "totalBytes": 4,
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }
+}

@@ -4,6 +4,7 @@
 //! lifecycle. Domain rules live in smaller modules under `auth`, `rooms`, and
 //! `protocol`.
 
+use axum::serve::ListenerExt;
 use sb_netplay_serv::auth::HttpLicenseAuthority;
 use sb_netplay_serv::config::{ServerConfig, VoiceBrokerConfig};
 use sb_netplay_serv::file_relay::{
@@ -23,6 +24,7 @@ use sb_netplay_serv::rooms::{
     InMemoryRoomRegistry, UuidInviteCodeGenerator, spawn_room_expiration_task,
     spawn_room_frame_clock_task,
 };
+use sb_netplay_serv::transport::configure_low_latency_tcp;
 use sb_netplay_serv::voice::{DisabledVoiceBroker, HttpVoiceBroker, VoiceBroker};
 use std::sync::Arc;
 use tracing::info;
@@ -125,7 +127,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         trust_proxy_headers: config.trust_proxy_headers,
     });
     let app = build_router(services);
-    let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
+    let listener = tokio::net::TcpListener::bind(config.bind_addr)
+        .await?
+        .tap_io(|stream| {
+            if let Err(error) = configure_low_latency_tcp(stream) {
+                tracing::warn!(%error, "failed to configure accepted TCP stream");
+            }
+        });
 
     info!(
         bind_addr = %config.bind_addr,

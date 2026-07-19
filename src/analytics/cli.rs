@@ -249,6 +249,17 @@ async fn print_raw_sessions(
             sample.late_input_frames,
             sample.audio_underruns
         );
+        println!(
+            "  resend={:?} nacks={:?} replay={:?} suppress_audio={:?} suppress_video={:?} audio_queue={:?} audio_catchup={:?} audio_trimmed={:?}",
+            sample.input_resend_frames,
+            sample.input_nacks,
+            sample.replayed_frames,
+            sample.suppressed_audio_frames,
+            sample.suppressed_video_frames,
+            sample.audio_queue_depth_frames,
+            sample.audio_catch_up_events,
+            sample.audio_trimmed_frames
+        );
     }
 
     Ok(())
@@ -330,6 +341,7 @@ async fn run_probe(
             event_seq: 1,
             room_epoch: 1,
             session_epoch: now,
+            protocol_version: crate::protocol::NETPLAY_PROTOCOL_VERSION,
             kind: "telemetryProbe".to_string(),
             detail: "operator telemetry write probe".to_string(),
         }),
@@ -349,6 +361,7 @@ async fn run_probe(
             event_seq: 2,
             room_epoch: 1,
             session_epoch: now,
+            protocol_version: crate::protocol::NETPLAY_PROTOCOL_VERSION,
             player_index: 0,
             runtime_state: "playing".to_string(),
             local_frame: Some(60),
@@ -364,6 +377,14 @@ async fn run_probe(
             catch_up_frames: Some(0),
             late_input_frames: Some(0),
             audio_underruns: Some(0),
+            input_resend_frames: Some(0),
+            input_nacks: Some(0),
+            replayed_frames: Some(0),
+            suppressed_audio_frames: Some(0),
+            suppressed_video_frames: Some(0),
+            audio_queue_depth_frames: Some(0),
+            audio_catch_up_events: Some(0),
+            audio_trimmed_frames: Some(0),
         }),
     ];
 

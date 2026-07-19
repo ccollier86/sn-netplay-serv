@@ -10,6 +10,14 @@ use crate::rooms::{ConnectionId, NetplayRoom, RoomError, RoomStatus};
 pub(crate) struct StrictInputBatchOutcome {
     pub response: InputCursorResponse,
     pub accepted_batch: Option<StrictInputBatch>,
+    pub duplicate_frame_count: usize,
+}
+
+/// Registry-facing strict-input result with payload-free telemetry counts.
+pub struct StrictInputRelayOutcome {
+    pub response: InputCursorResponse,
+    pub accepted_frame_count: usize,
+    pub duplicate_frame_count: usize,
 }
 
 impl NetplayRoom {
@@ -21,6 +29,7 @@ impl NetplayRoom {
     ) -> Result<StrictInputBatchOutcome, RoomError> {
         self.validate_strict_input_envelope(connection_id, &batch)?;
         let player_index = batch.player_index;
+        let frame_count = batch.payloads.len();
         let expected = self
             .next_input_frames
             .get(&player_index)
@@ -82,6 +91,10 @@ impl NetplayRoom {
             .copied()
             .unwrap_or(expected);
 
+        let accepted_frame_count = accepted_batch
+            .as_ref()
+            .map_or(0, |accepted| accepted.payloads.len());
+        let duplicate_frame_count = frame_count.saturating_sub(accepted_frame_count);
         Ok(StrictInputBatchOutcome {
             response: InputCursorResponse::Ack(InputCursorAck {
                 room_epoch: self.room_epoch,
@@ -90,6 +103,7 @@ impl NetplayRoom {
                 next_expected_frame,
             }),
             accepted_batch,
+            duplicate_frame_count,
         })
     }
 
@@ -152,6 +166,7 @@ impl NetplayRoom {
                 reason,
             }),
             accepted_batch: None,
+            duplicate_frame_count: 0,
         }
     }
 }
