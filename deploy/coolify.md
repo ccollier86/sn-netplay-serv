@@ -30,6 +30,10 @@ SB_NETPLAY_AUTHORIZE_URL=https://assets.shadowboy.app/internal/netplay/authorize
 SB_NETPLAY_DESKTOP_AUTHORIZE_URL=
 SB_NETPLAY_LICENSE_INTERNAL_SECRET=<server-to-server-secret>
 SB_NETPLAY_ADMIN_TOKEN=<long-random-operator-token>
+SB_NETPLAY_V5_ENABLED=true
+SB_NETPLAY_MIN_PROTOCOL_ANDROID=4
+SB_NETPLAY_MIN_PROTOCOL_IOS=4
+SB_NETPLAY_MIN_PROTOCOL_DESKTOP=4
 ```
 
 Recommended:
@@ -59,6 +63,13 @@ SB_NETPLAY_VOICE_BROKER_TIMEOUT_MS=2500
 ```
 
 Store these values in Coolify's environment/secret UI, not in git.
+
+The protocol switches above deliberately deploy dual v4/v5 support while each
+platform minimum remains 4. A new v5-only client can create and join v5 rooms,
+and an already-published v4 client remains confined to v4 rooms. Raise one
+platform minimum to 5 only after its forced-update policy has made the old
+client obsolete. Never use these settings to reinterpret an existing room or
+raise every platform minimum before the corresponding clients ship.
 
 `SB_NETPLAY_POSTGRES_URL` is optional for gameplay but recommended for long-term
 diagnostics. When present, the server checks and installs the analytics schema
