@@ -202,8 +202,16 @@ mod room_registry_start_sync_tests;
 mod room_registry_fast_input_tests;
 
 #[cfg(test)]
+#[path = "room_registry_input_grant_tests.rs"]
+mod room_registry_input_grant_tests;
+
+#[cfg(test)]
 #[path = "room_registry_tests.rs"]
 mod room_registry_tests;
+
+#[cfg(test)]
+#[path = "room_registry_runner_handoff_tests.rs"]
+mod room_registry_runner_handoff_tests;
 
 #[cfg(test)]
 #[path = "room_registry_voice_tests.rs"]

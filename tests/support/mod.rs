@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 
+mod websocket_messages;
+
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
 use reqwest::Client;
 use sb_netplay_serv::auth::{
     AuthError, ClientKind, LicenseAuthority, ProtectedClientAuthProof, VerifiedLicense,
@@ -12,29 +13,25 @@ use sb_netplay_serv::http::{
 };
 use sb_netplay_serv::lobbies::InMemoryLobbyRegistry;
 use sb_netplay_serv::observability::InMemoryMetrics;
-use sb_netplay_serv::protocol::{
-    InputFrame, InputFrameBatch, NETPLAY_PROTOCOL_VERSION, decode_input_frame_batch,
-    encode_input_frame_batch,
-};
+use sb_netplay_serv::protocol::NETPLAY_PROTOCOL_VERSION;
 use sb_netplay_serv::rate_limit::{InMemoryRateLimiter, RateLimitPolicy};
 use sb_netplay_serv::rooms::{
-    InMemoryRoomRegistry, InviteCode, InviteCodeGenerator, PlayerIndex, spawn_room_frame_clock_task,
+    InMemoryRoomRegistry, InviteCode, InviteCodeGenerator, spawn_room_frame_clock_task,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
-use tokio::time::{Duration, timeout};
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
-const READ_TIMEOUT: Duration = Duration::from_secs(2);
 const INVITE_CODE: &str = "AB23-CD";
 
 pub struct SmokeServer {
+    auth_calls: Arc<AtomicUsize>,
     pub http_base: String,
     pub ws_base: String,
     frame_clock_task: JoinHandle<()>,
@@ -50,13 +47,20 @@ impl SmokeServer {
         let rooms = Arc::new(InMemoryRoomRegistry::new(Arc::new(
             StaticInviteCodeGenerator,
         )));
+        let auth_calls = Arc::new(AtomicUsize::new(0));
         let frame_clock_task = spawn_room_frame_clock_task(rooms.clone());
-        let app = build_router(test_services(rooms));
+        let app = build_router(test_services(rooms, auth_calls.clone()));
         let task = tokio::spawn(async move {
-            axum::serve(listener, app).await.expect("serve test router");
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .expect("serve test router");
         });
 
         Self {
+            auth_calls,
             frame_clock_task,
             http_base: format!("http://{address}"),
             ws_base: format!("ws://{address}"),
@@ -70,6 +74,21 @@ impl SmokeServer {
 
     pub async fn create_link_room(&self) -> String {
         self.create_room_from_body(create_link_room_body()).await
+    }
+
+    pub fn auth_call_count(&self) -> usize {
+        self.auth_calls.load(Ordering::SeqCst)
+    }
+
+    pub async fn room_status(&self) -> Value {
+        Client::new()
+            .get(format!("{}/v1/rooms/{INVITE_CODE}/status", self.http_base))
+            .send()
+            .await
+            .expect("room status response")
+            .json::<Value>()
+            .await
+            .expect("room status body")
     }
 
     async fn create_room_from_body(&self, body: Value) -> String {
@@ -110,9 +129,33 @@ pub struct SmokeClient {
 
 impl SmokeClient {
     pub async fn connect(server: &SmokeServer, role: &str, token: &str, install_id: &str) -> Self {
+        Self::connect_initial(server, role, token, install_id, false).await
+    }
+
+    pub async fn connect_runner_handoff(
+        server: &SmokeServer,
+        role: &str,
+        token: &str,
+        install_id: &str,
+    ) -> Self {
+        Self::connect_initial(server, role, token, install_id, true).await
+    }
+
+    async fn connect_initial(
+        server: &SmokeServer,
+        role: &str,
+        token: &str,
+        install_id: &str,
+        runner_handoff: bool,
+    ) -> Self {
+        let runner_handoff_query = if runner_handoff {
+            "&runnerHandoff=true"
+        } else {
+            ""
+        };
         let mut request = format!(
-            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion={}",
-            server.ws_base, INVITE_CODE, NETPLAY_PROTOCOL_VERSION
+            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion={}{}",
+            server.ws_base, INVITE_CODE, NETPLAY_PROTOCOL_VERSION, runner_handoff_query
         )
         .into_client_request()
         .expect("websocket request");
@@ -138,11 +181,59 @@ impl SmokeClient {
         }
     }
 
+    pub async fn resume_from_handoff(server: &SmokeServer, handoff: &Value) -> Self {
+        let player_index = handoff["yourPlayerIndex"]
+            .as_u64()
+            .expect("handoff player index") as u8;
+        let room_epoch = handoff["roomEpoch"].as_u64().expect("handoff room epoch");
+        let session_epoch = handoff["sessionEpoch"]
+            .as_u64()
+            .expect("handoff session epoch");
+        let resume_token = handoff["resumeToken"]
+            .as_str()
+            .expect("handoff resume token");
+        let request = format!(
+            "{}/v1/ws?inviteCode={}&protocolVersion={}&playerIndex={player_index}&roomEpoch={room_epoch}&resumeToken={resume_token}",
+            server.ws_base, INVITE_CODE, NETPLAY_PROTOCOL_VERSION
+        )
+        .into_client_request()
+        .expect("resume websocket request");
+        let (socket, response) = connect_async(request).await.expect("runner resume");
+        assert_eq!(response.status().as_u16(), 101);
+
+        Self {
+            socket,
+            input_socket: None,
+            player_index: Some(player_index),
+            room_epoch,
+            session_epoch,
+        }
+    }
+
+    pub async fn close_control(mut self) {
+        self.socket.close(None).await.expect("close control socket");
+    }
+
     pub async fn connect_input(
         &mut self,
         server: &SmokeServer,
         token: &str,
         install_id: &str,
+        room_joined: &Value,
+    ) {
+        self.connect_input_with_auth(server, Some((token, install_id)), room_joined)
+            .await;
+    }
+
+    pub async fn connect_input_capability(&mut self, server: &SmokeServer, room_joined: &Value) {
+        self.connect_input_with_auth(server, None, room_joined)
+            .await;
+    }
+
+    async fn connect_input_with_auth(
+        &mut self,
+        server: &SmokeServer,
+        auth: Option<(&str, &str)>,
         room_joined: &Value,
     ) {
         let player_index = room_joined["yourPlayerIndex"]
@@ -162,15 +253,17 @@ impl SmokeClient {
         )
         .into_client_request()
         .expect("input websocket request");
-        let headers = request.headers_mut();
-        headers.insert(
-            "authorization",
-            HeaderValue::from_str(&format!("Bearer {token}")).expect("authorization header"),
-        );
-        headers.insert(
-            "x-install-id",
-            HeaderValue::from_str(install_id).expect("install id header"),
-        );
+        if let Some((token, install_id)) = auth {
+            let headers = request.headers_mut();
+            headers.insert(
+                "authorization",
+                HeaderValue::from_str(&format!("Bearer {token}")).expect("authorization header"),
+            );
+            headers.insert(
+                "x-install-id",
+                HeaderValue::from_str(install_id).expect("install id header"),
+            );
+        }
 
         let (socket, response) = connect_async(request)
             .await
@@ -178,172 +271,6 @@ impl SmokeClient {
         assert_eq!(response.status().as_u16(), 101);
         self.input_socket = Some(socket);
         self.player_index = Some(player_index);
-    }
-
-    pub async fn send(&mut self, mut payload: Value) {
-        self.attach_epochs(&mut payload);
-        self.socket
-            .send(Message::Text(payload.to_string().into()))
-            .await
-            .expect("send websocket message");
-    }
-
-    pub async fn next_json(&mut self) -> Value {
-        let message = timeout(READ_TIMEOUT, self.socket.next())
-            .await
-            .expect("websocket message timed out")
-            .expect("websocket message")
-            .expect("websocket result");
-
-        match message {
-            Message::Text(payload) => {
-                let value = serde_json::from_str(payload.as_str()).expect("json message");
-                self.update_epochs(&value);
-                value
-            }
-            other => panic!("unexpected websocket message: {other:?}"),
-        }
-    }
-
-    pub async fn send_input_frame(&mut self, frame: u64, payload: Vec<u8>) {
-        let player_index = PlayerIndex::new(
-            self.player_index.expect("connected player index"),
-            sb_netplay_serv::limits::MVP_ROOM_CAPACITY,
-        )
-        .expect("valid player index");
-        let encoded = encode_input_frame_batch(&InputFrameBatch {
-            frames: vec![InputFrame {
-                frame,
-                payload,
-                player_index,
-            }],
-            player_index,
-            room_epoch: self.room_epoch,
-            session_epoch: self.session_epoch,
-        })
-        .expect("encoded input batch");
-        let input_socket = self.input_socket.as_mut().expect("input socket connected");
-
-        input_socket
-            .send(Message::Binary(encoded.into()))
-            .await
-            .expect("send input batch");
-    }
-
-    pub async fn expect_type(&mut self, message_type: &str) -> Value {
-        loop {
-            let message = self.next_json().await;
-            if message["type"] == message_type {
-                return message;
-            }
-        }
-    }
-
-    pub async fn expect_error(&mut self, code: &str) -> Value {
-        loop {
-            let message = self.next_json().await;
-            if message["type"] == "error" && message["code"] == code {
-                return message;
-            }
-        }
-    }
-
-    pub async fn expect_input_from(&mut self, player_index: u8) -> Value {
-        let input_socket = self.input_socket.as_mut().expect("input socket connected");
-
-        loop {
-            let message = timeout(READ_TIMEOUT, input_socket.next())
-                .await
-                .expect("input websocket message timed out")
-                .expect("input websocket message")
-                .expect("input websocket result");
-
-            if let Message::Binary(payload) = message {
-                let Ok(batch) = decode_input_frame_batch(&payload) else {
-                    continue;
-                };
-                if batch.player_index.zero_based() != player_index {
-                    continue;
-                }
-                let input = batch.frames.first().expect("input frame");
-
-                return json!({
-                    "type": "inputFrame",
-                    "input": {
-                        "playerIndex": input.player_index.zero_based(),
-                        "frame": input.frame,
-                        "payload": input.payload
-                    }
-                });
-            }
-        }
-    }
-
-    pub async fn expect_link_packet_from(&mut self, player_index: u8) -> Value {
-        loop {
-            let message = self.next_json().await;
-            if message["type"] == "linkCablePacket"
-                && message["packet"]["playerIndex"] == u64::from(player_index)
-            {
-                return message;
-            }
-        }
-    }
-
-    pub async fn expect_no_link_packet_from(&mut self, player_index: u8) {
-        let result = timeout(Duration::from_millis(200), async {
-            loop {
-                let message = self.next_json().await;
-                if message["type"] == "linkCablePacket"
-                    && message["packet"]["playerIndex"] == u64::from(player_index)
-                {
-                    return message;
-                }
-            }
-        })
-        .await;
-
-        if let Ok(message) = result {
-            panic!("unexpected echoed link packet: {message}");
-        }
-    }
-
-    fn attach_epochs(&self, payload: &mut Value) {
-        let Some(object) = payload.as_object_mut() else {
-            return;
-        };
-        let Some(message_type) = object.get("type").and_then(Value::as_str) else {
-            return;
-        };
-
-        if message_type == "ping" {
-            return;
-        }
-
-        object
-            .entry("roomEpoch")
-            .or_insert_with(|| json!(self.room_epoch));
-        object
-            .entry("sessionEpoch")
-            .or_insert_with(|| json!(self.session_epoch));
-    }
-
-    fn update_epochs(&mut self, message: &Value) {
-        if let Some(room_epoch) = message["roomEpoch"].as_u64() {
-            self.room_epoch = room_epoch;
-        } else if let Some(room_epoch) = message["room"]["roomEpoch"].as_u64() {
-            self.room_epoch = room_epoch;
-        }
-
-        if let Some(session_epoch) = message["sessionEpoch"].as_u64() {
-            self.session_epoch = session_epoch;
-        } else if let Some(session_epoch) = message["room"]["sessionEpoch"].as_u64() {
-            self.session_epoch = session_epoch;
-        }
-
-        if message["type"] == "roomJoined" {
-            self.player_index = message["yourPlayerIndex"].as_u64().map(|value| value as u8);
-        }
     }
 }
 
@@ -465,9 +392,9 @@ impl SmokeClient {
     }
 }
 
-fn test_services(rooms: Arc<InMemoryRoomRegistry>) -> AppServices {
+fn test_services(rooms: Arc<InMemoryRoomRegistry>, auth_calls: Arc<AtomicUsize>) -> AppServices {
     AppServices::new(AppServiceDependencies {
-        license_authority: Arc::new(FakeLicenseAuthority),
+        license_authority: Arc::new(FakeLicenseAuthority { auth_calls }),
         rooms,
         lobbies: Arc::new(InMemoryLobbyRegistry::new(Arc::new(
             StaticInviteCodeGenerator,
@@ -544,7 +471,9 @@ fn create_link_room_body() -> Value {
     })
 }
 
-struct FakeLicenseAuthority;
+struct FakeLicenseAuthority {
+    auth_calls: Arc<AtomicUsize>,
+}
 
 #[async_trait]
 impl LicenseAuthority for FakeLicenseAuthority {
@@ -553,6 +482,7 @@ impl LicenseAuthority for FakeLicenseAuthority {
         auth: ProtectedClientAuthProof,
         _feature: &'static str,
     ) -> Result<VerifiedLicense, AuthError> {
+        self.auth_calls.fetch_add(1, Ordering::SeqCst);
         let subject = match auth.access_token.expose_secret() {
             "host-token" => "host-subject",
             "guest-token" => "guest-subject",

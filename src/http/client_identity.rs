@@ -22,6 +22,24 @@ pub fn request_rate_limit_key(headers: &HeaderMap, trust_proxy_headers: bool) ->
         .unwrap_or_else(|| "anonymous".to_string())
 }
 
+/// Builds a non-spoofable rate-limit key for capability-authenticated sockets.
+///
+/// Unverified installation headers are deliberately ignored. Production uses
+/// the trusted proxy address when configured and otherwise the actual TCP peer.
+pub fn capability_request_rate_limit_key(
+    headers: &HeaderMap,
+    trust_proxy_headers: bool,
+    peer_ip: Option<IpAddr>,
+) -> String {
+    if trust_proxy_headers && let Some(proxy_ip) = trusted_proxy_ip(headers) {
+        return format!("ip:{proxy_ip}");
+    }
+
+    peer_ip
+        .map(|peer_ip| format!("ip:{peer_ip}"))
+        .unwrap_or_else(|| "anonymous".to_string())
+}
+
 fn trusted_proxy_ip(headers: &HeaderMap) -> Option<IpAddr> {
     parsed_header_ip(headers, "cf-connecting-ip")
         .or_else(|| parsed_header_ip(headers, "x-real-ip"))
@@ -51,7 +69,7 @@ fn forwarded_for_last_valid_ip(headers: &HeaderMap) -> Option<IpAddr> {
 
 #[cfg(test)]
 mod tests {
-    use super::request_rate_limit_key;
+    use super::{capability_request_rate_limit_key, request_rate_limit_key};
     use axum::http::{HeaderMap, HeaderValue};
 
     #[test]
@@ -96,5 +114,35 @@ mod tests {
         headers.insert("x-install-id", HeaderValue::from_static("install-1"));
 
         assert_eq!(request_rate_limit_key(&headers, true), "install:install-1");
+    }
+
+    #[test]
+    fn capability_key_ignores_spoofable_installation_headers() {
+        let mut first = HeaderMap::new();
+        first.insert("x-install-id", HeaderValue::from_static("spoof-one"));
+        let mut second = HeaderMap::new();
+        second.insert("x-install-id", HeaderValue::from_static("spoof-two"));
+        let peer_ip = "198.51.100.20".parse().expect("peer ip");
+
+        assert_eq!(
+            capability_request_rate_limit_key(&first, false, Some(peer_ip)),
+            capability_request_rate_limit_key(&second, false, Some(peer_ip))
+        );
+        assert_eq!(
+            capability_request_rate_limit_key(&first, false, Some(peer_ip)),
+            "ip:198.51.100.20"
+        );
+    }
+
+    #[test]
+    fn capability_key_prefers_trusted_proxy_ip() {
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-connecting-ip", HeaderValue::from_static("203.0.113.8"));
+        let peer_ip = "10.0.0.4".parse().expect("peer ip");
+
+        assert_eq!(
+            capability_request_rate_limit_key(&headers, true, Some(peer_ip)),
+            "ip:203.0.113.8"
+        );
     }
 }

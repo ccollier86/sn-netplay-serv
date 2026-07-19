@@ -70,6 +70,10 @@ impl ServerConfig {
             )?,
         };
         let recovery = RoomRecoveryConfig {
+            runner_handoff_grace: optional_duration_seconds_env(
+                "SB_NETPLAY_RUNNER_HANDOFF_GRACE_SECONDS",
+                60,
+            )?,
             reconnect_grace: optional_duration_seconds_env(
                 "SB_NETPLAY_RECONNECT_GRACE_SECONDS",
                 90,

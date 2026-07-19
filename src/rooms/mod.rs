@@ -37,6 +37,7 @@ mod room_registry;
 mod room_registry_snapshot;
 mod room_registry_trait;
 mod room_rom_relay_ops;
+mod room_runner_handoff_ops;
 mod room_snapshot_ops;
 mod room_start_sync;
 mod room_state_hash_ops;

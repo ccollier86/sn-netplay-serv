@@ -13,6 +13,8 @@ pub enum NetplayClientKind {
     Desktop,
     /// ShadowBoy Android.
     Android,
+    /// ShadowBoy iOS.
+    Ios,
 }
 
 #[cfg(test)]
@@ -29,6 +31,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(NetplayClientKind::Android).expect("json"),
             json!("android")
+        );
+        assert_eq!(
+            serde_json::to_value(NetplayClientKind::Ios).expect("json"),
+            json!("ios")
         );
     }
 }

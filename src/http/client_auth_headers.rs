@@ -42,6 +42,8 @@ pub fn client_auth_proof(
             nonce: optional_header(headers, "x-req-nonce"),
             signature: optional_header(headers, "x-req-sig"),
             timestamp: optional_header(headers, "x-req-ts"),
+            app_attest_key_id: optional_header(headers, "x-app-attest-key-id"),
+            app_attest_assertion: optional_header(headers, "x-app-attest-assertion"),
         },
     ))
 }
@@ -94,6 +96,33 @@ mod tests {
         let proof = client_auth_proof(&headers, "GET", "/v1/ws", &[]).expect("proof");
 
         assert_eq!(proof.client_kind, ClientKind::Android);
+    }
+
+    #[test]
+    fn accepts_ios_client_kind_and_app_attest_proof() {
+        let mut headers = valid_headers();
+        headers.insert("x-client-kind", HeaderValue::from_static("ios"));
+        headers.insert(
+            "x-app-attest-key-id",
+            HeaderValue::from_static("app-attest-key"),
+        );
+        headers.insert(
+            "x-app-attest-assertion",
+            HeaderValue::from_static("app-attest-assertion"),
+        );
+
+        let proof =
+            client_auth_proof(&headers, "GET", "/v1/lobbies/public/ws", &[]).expect("proof");
+
+        assert_eq!(proof.client_kind, ClientKind::Ios);
+        assert_eq!(
+            proof.request.app_attest_key_id.as_deref(),
+            Some("app-attest-key")
+        );
+        assert_eq!(
+            proof.request.app_attest_assertion.as_deref(),
+            Some("app-attest-assertion")
+        );
     }
 
     #[test]

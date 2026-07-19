@@ -34,7 +34,7 @@ impl std::fmt::Debug for ProtectedAccessToken {
 }
 
 /// Install id from a protected-client session.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct ProtectedInstallationId(String);
 
 impl ProtectedInstallationId {
@@ -54,8 +54,14 @@ impl ProtectedInstallationId {
     }
 }
 
+impl std::fmt::Debug for ProtectedInstallationId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ProtectedInstallationId(<redacted>)")
+    }
+}
+
 /// Original protected request details for backend signature verification.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct ProtectedRequestProof {
     /// HTTP method used for the netplay request.
     pub method: String,
@@ -69,6 +75,27 @@ pub struct ProtectedRequestProof {
     pub signature: Option<String>,
     /// Request timestamp from `X-Req-Ts`, when supplied.
     pub timestamp: Option<String>,
+    /// App Attest key identifier forwarded without relay-side interpretation.
+    pub app_attest_key_id: Option<String>,
+    /// App Attest assertion forwarded without relay-side interpretation.
+    pub app_attest_assertion: Option<String>,
+}
+
+impl std::fmt::Debug for ProtectedRequestProof {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProtectedRequestProof")
+            .field("method", &self.method)
+            .field("has_nonce", &self.nonce.is_some())
+            .field("has_signature", &self.signature.is_some())
+            .field("has_timestamp", &self.timestamp.is_some())
+            .field("has_app_attest_key_id", &self.app_attest_key_id.is_some())
+            .field(
+                "has_app_attest_assertion",
+                &self.app_attest_assertion.is_some(),
+            )
+            .finish()
+    }
 }
 
 /// Auth proof forwarded from the relay to the metadata service.
@@ -107,7 +134,7 @@ impl std::fmt::Debug for ProtectedClientAuthProof {
             .debug_struct("ProtectedClientAuthProof")
             .field("client_kind", &self.client_kind)
             .field("access_token", &"<redacted>")
-            .field("installation_id", &self.installation_id)
+            .field("installation_id", &"<redacted>")
             .field("request", &self.request)
             .finish()
     }
@@ -129,21 +156,40 @@ mod tests {
     }
 
     #[test]
-    fn auth_proof_debug_output_redacts_token() {
+    fn installation_id_debug_output_redacts_identity() {
+        let installation_id =
+            ProtectedInstallationId::new("secret-install-id").expect("install id");
+
+        assert_eq!(
+            format!("{installation_id:?}"),
+            "ProtectedInstallationId(<redacted>)"
+        );
+    }
+
+    #[test]
+    fn auth_proof_debug_output_redacts_secrets_and_identity() {
         let proof = ProtectedClientAuthProof::new(
             ClientKind::Android,
             ProtectedAccessToken::new("secret-token").expect("token"),
-            ProtectedInstallationId::new("install-1").expect("install id"),
+            ProtectedInstallationId::new("secret-install-id").expect("install id"),
             ProtectedRequestProof {
                 method: "POST".to_string(),
-                path_and_query: "/v1/rooms".to_string(),
-                body_sha256_hex: "hash".to_string(),
+                path_and_query: "/v1/rooms?private=secret".to_string(),
+                body_sha256_hex: "secret-body-hash".to_string(),
                 nonce: None,
                 signature: None,
                 timestamp: None,
+                app_attest_key_id: Some("secret-key-id".to_string()),
+                app_attest_assertion: Some("secret-assertion".to_string()),
             },
         );
 
-        assert!(!format!("{proof:?}").contains("secret-token"));
+        let output = format!("{proof:?}");
+        assert!(!output.contains("secret-token"));
+        assert!(!output.contains("secret-install-id"));
+        assert!(!output.contains("private=secret"));
+        assert!(!output.contains("secret-body-hash"));
+        assert!(!output.contains("secret-key-id"));
+        assert!(!output.contains("secret-assertion"));
     }
 }

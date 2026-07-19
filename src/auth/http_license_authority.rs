@@ -66,6 +66,8 @@ impl LicenseAuthority for HttpLicenseAuthority {
                     path_and_query: auth.request.path_and_query.as_str(),
                     signature: auth.request.signature.as_deref(),
                     timestamp: auth.request.timestamp.as_deref(),
+                    app_attest_key_id: auth.request.app_attest_key_id.as_deref(),
+                    app_attest_assertion: auth.request.app_attest_assertion.as_deref(),
                 },
                 required_entitlement: auth.client_kind.required_entitlement(),
             })
@@ -119,6 +121,10 @@ struct VerifyProtectedRequest<'a> {
     path_and_query: &'a str,
     signature: Option<&'a str>,
     timestamp: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    app_attest_key_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    app_attest_assertion: Option<&'a str>,
 }
 
 #[cfg(test)]
@@ -141,6 +147,8 @@ mod tests {
                 path_and_query: "/v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=1",
                 signature: Some("signature-1"),
                 timestamp: Some("2026-05-17T18:30:00Z"),
+                app_attest_key_id: None,
+                app_attest_assertion: None,
             },
             required_entitlement: ClientKind::Android.required_entitlement(),
         })
@@ -180,6 +188,8 @@ mod tests {
                 path_and_query: "/v1/rooms",
                 signature: None,
                 timestamp: None,
+                app_attest_key_id: None,
+                app_attest_assertion: None,
             },
             required_entitlement: ClientKind::Desktop.required_entitlement(),
         })
@@ -187,5 +197,39 @@ mod tests {
 
         assert_eq!(value["clientKind"], "desktop");
         assert_eq!(value["requiredEntitlement"], "premiumOrTrial");
+    }
+
+    #[test]
+    fn ios_authority_request_forwards_app_attest_proof() {
+        let value = serde_json::to_value(VerifyClientAccessRequest {
+            access_token: "token",
+            client_kind: ClientKind::Ios.as_str(),
+            feature: "netplay",
+            installation_id: "ios-install-1",
+            protected_request: VerifyProtectedRequest {
+                body_sha256_hex: "hash",
+                method: "GET",
+                nonce: Some("nonce"),
+                path_and_query: "/v1/lobbies/public/ws",
+                signature: None,
+                timestamp: Some("1784069961000"),
+                app_attest_key_id: Some("app-attest-key"),
+                app_attest_assertion: Some("app-attest-assertion"),
+            },
+            required_entitlement: ClientKind::Ios.required_entitlement(),
+        })
+        .expect("json");
+
+        assert_eq!(value["clientKind"], "ios");
+        assert_eq!(value["requiredEntitlement"], "eligibleClient");
+        assert_eq!(
+            value["protectedRequest"]["appAttestKeyId"],
+            "app-attest-key"
+        );
+        assert_eq!(
+            value["protectedRequest"]["appAttestAssertion"],
+            "app-attest-assertion"
+        );
+        assert!(value["protectedRequest"]["signature"].is_null());
     }
 }

@@ -74,6 +74,20 @@ pub trait RoomRegistry: Send + Sync {
         capabilities: ClientTransportCapabilities,
     ) -> Result<RoomJoin, RoomError>;
 
+    /// Arms an authenticated initial control join for a short-lived runner takeover.
+    async fn arm_runner_handoff(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<(), RoomError>;
+
+    /// Cancels a runner handoff whose capability could not be delivered.
+    async fn cancel_runner_handoff(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<(), RoomError>;
+
     /// Marks a socket connection as disconnected.
     async fn disconnect(
         &self,

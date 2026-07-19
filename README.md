@@ -12,9 +12,11 @@ Implemented:
 - `GET /health`
 - `POST /v1/rooms` with protocol version and game/core descriptor
 - `GET /v1/rooms/{invite_code}/status`
-- `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=3`
-- `GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=3`
-- `GET /v1/ws?inviteCode=AB23-CD&protocolVersion=3&playerIndex=1&roomEpoch=2&resumeToken=...`
+- `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=4`
+- `GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=4`
+- `GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=4&runnerHandoff=true`
+- `GET /v1/ws?inviteCode=AB23-CD&protocolVersion=4&playerIndex=1&roomEpoch=2&resumeToken=...`
+- `GET /v1/ws/input?inviteCode=AB23-CD&protocolVersion=4&playerIndex=1&roomEpoch=2&sessionEpoch=2&inputSocketToken=...`
 - `GET /internal/metrics`
 - `GET /internal/rooms`
 - `GET /internal/rooms/{invite_code}`
@@ -41,8 +43,11 @@ Implemented:
 - ready/start handling
 - host snapshot chunk and manifest relay
 - frame-numbered input validation and relay
-- protocol v3 room/session epochs
+- protocol v4 room/session epochs
 - resume tokens for slot reclaim after disconnect
+- protected provisional joins with a short-lived desktop-to-runner handoff window
+- capability-only control resume with one-time resume-token rotation
+- control-bound, one-time binary input socket grants
 - app-level heartbeat acknowledgement
 - heartbeat timeout recovery and reconnect grace cleanup
 - coordinated pause/resume for in-game menu and lifecycle pauses
@@ -73,6 +78,7 @@ SB_NETPLAY_TRUST_PROXY_HEADERS=true
 SB_NETPLAY_RATE_CREATE_ROOM_PER_MINUTE=12
 SB_NETPLAY_RATE_WS_JOIN_PER_MINUTE=30
 SB_NETPLAY_RATE_ROOM_STATUS_PER_MINUTE=120
+SB_NETPLAY_RUNNER_HANDOFF_GRACE_SECONDS=60
 SB_NETPLAY_RECONNECT_GRACE_SECONDS=90
 SB_NETPLAY_HEARTBEAT_STALE_SECONDS=15
 SB_NETPLAY_HEARTBEAT_DISCONNECT_SECONDS=30
@@ -177,33 +183,38 @@ already use for metadata, cheats, billing, and updates:
 
 ```text
 Authorization: Bearer <client access token>
-X-Client-Kind: desktop | android
+X-Client-Kind: desktop | android | ios
 X-Install-Id: <installationId>
 X-Req-Ts: <epoch milliseconds>
 X-Req-Nonce: <unique nonce>
-X-Req-Sig: <base64 signature>
+X-Req-Sig: <base64 signature; Desktop, Android, or explicit iOS development>
+X-App-Attest-Key-Id: <key id; production iOS only>
+X-App-Attest-Assertion: <base64 assertion; production iOS only>
 ```
 
 `X-Client-Kind` is optional for existing Desktop clients and defaults to
-`desktop`. Android clients must send `X-Client-Kind: android`. The relay also
-accepts `X-Installation-Id` as an install-id alias for Android.
+`desktop`. Android and iOS clients must identify their platform explicitly. The
+relay also accepts `X-Installation-Id` as an install-id alias.
 
 The relay sends the access token, client kind, install id, requested feature
-`netplay`, and the signed netplay request proof to the metadata service using
-`SB_NETPLAY_LICENSE_INTERNAL_SECRET`.
+`netplay`, and the protected netplay request proof to the metadata service using
+`SB_NETPLAY_LICENSE_INTERNAL_SECRET`. It forwards provider proof fields as
+opaque secrets and never logs or verifies App Attest assertions itself.
 
 The metadata service should validate:
 
 - the client access token
 - the install id
-- the protected request signature when signature fields are present
+- exactly one provider-appropriate protected-request proof when required
 - nonce/timestamp freshness
 - app/version policy tied to the token
 
 Desktop authorization asks for `requiredEntitlement: "premiumOrTrial"`. Android
-authorization asks for `requiredEntitlement: "eligibleClient"` so the Android
-session, install key, signature, nonce, timestamp, and Play Integrity-backed
-bootstrap can be validated without duplicating app-side premium gating.
+and iOS authorization ask for `requiredEntitlement: "eligibleClient"` so the
+mobile session, installation identity, provider proof, nonce, timestamp, and
+integrity-backed bootstrap can be validated without duplicating app-side
+premium gating. Production iOS uses App Attest key/assertion fields instead of
+`X-Req-Sig`; mixed proof families fail closed in the metadata service.
 
 Accepted response shapes:
 
@@ -213,6 +224,22 @@ Accepted response shapes:
 
 If the authorization relay reports that the client is ineligible, the relay
 returns `402 entitlementRequired`.
+
+Protected client authorization is required for room creation and every initial
+host or guest control-socket join, including an initial join with
+`runnerHandoff=true`. A structurally complete reconnect request uses the opaque
+room resume capability instead and must not carry reusable installation
+credentials into the runner. The binary input socket likewise uses only the
+fresh input capability returned by the current control connection.
+
+Runner handoff capabilities expire after
+`SB_NETPLAY_RUNNER_HANDOFF_GRACE_SECONDS` (60 seconds by default). A successful
+claim rotates the resume token. Input capabilities are bound to the control
+connection that issued them and are consumed on first attachment. Losing the
+input socket starts bounded control recovery; clients must reconnect control to
+receive another input capability. HTTP tracing records only request paths,
+transport request debug output redacts capability values, and operator events
+never include those values.
 
 ## Commands
 

@@ -4,7 +4,7 @@
 //! DTOs. WebSocket transport will live in a separate module.
 
 use crate::http::client_auth_headers::client_auth_proof;
-use crate::http::client_identity::request_rate_limit_key;
+use crate::http::client_identity::{capability_request_rate_limit_key, request_rate_limit_key};
 use crate::http::errors::HttpError;
 use crate::http::lobby_routes::{
     LobbyStatusResponse, create_lobby, join_lobby, lobby_status, public_lobbies, websocket_lobby,
@@ -23,18 +23,19 @@ use crate::rate_limit::RateLimitAction;
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, RoomView};
 use crate::rooms::{RoomDebugEvent, RoomRegistrySnapshot};
 use crate::transport::{
-    WebSocketInputJoinRequest, WebSocketJoinRequest, WebSocketJoinRole,
+    WebSocketInputJoinRequest, WebSocketJoinRequest, WebSocketJoinRole, WebSocketRoomJoinIntent,
     handle_websocket_input_session, handle_websocket_session,
 };
 use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::ws::WebSocketUpgrade;
-use axum::extract::{Path, Query, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{HeaderMap, Uri};
 use axum::response::Response;
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
 use tracing::warn;
 
@@ -73,8 +74,20 @@ pub fn build_router(services: AppServices) -> Router {
             get(internal_recent_lobby_events),
         )
         .layer(DefaultBodyLimit::max(MAX_CREATE_ROOM_BODY_BYTES))
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
+                tracing::info_span!(
+                    "http_request",
+                    method = %request.method(),
+                    path = %trace_request_path(request)
+                )
+            }),
+        )
         .with_state(services)
+}
+
+fn trace_request_path<B>(request: &axum::http::Request<B>) -> &str {
+    request.uri().path()
 }
 
 /// Returns a simple process health response.
@@ -137,49 +150,70 @@ pub async fn room_status(
     Ok(Json(RoomStatusResponse { room }))
 }
 
-/// Upgrades an authenticated ShadowBoy client into a room WebSocket.
+/// Upgrades a protected initial join or capability-authorized reconnect.
 pub async fn websocket_room(
     websocket: WebSocketUpgrade,
     State(services): State<AppServices>,
+    connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     Query(query): Query<WebSocketRoomQuery>,
     uri: Uri,
     headers: HeaderMap,
 ) -> Result<Response, HttpError> {
-    enforce_rate_limit(&services, RateLimitAction::WebSocketJoin, &headers)?;
-    let path_and_query = uri
-        .path_and_query()
-        .map(|value| value.as_str())
-        .unwrap_or(uri.path());
-    let auth = client_auth_proof(&headers, "GET", path_and_query, &[])?;
-    let license = match services
-        .license_authority
-        .verify_client_access(auth, NETPLAY_FEATURE)
-        .await
-    {
-        Ok(license) => license,
-        Err(error) => {
-            services.metrics.record_auth_rejected();
-            return Err(error.into());
-        }
-    };
+    enforce_capability_rate_limit(&services, &headers, connect_info)?;
     validate_client_protocol_version(query.protocol_version.ok_or(HttpError::InvalidRequest {
         code: "missingProtocolVersion",
         message: "Desktop netplay protocol version is required.",
     })?)?;
     let invite_code = InviteCode::parse(&query.invite_code)?;
     let reconnect = reconnect_query(&query)?;
+    let intent = match reconnect {
+        Some(reconnect) => {
+            if query.runner_handoff {
+                return Err(HttpError::InvalidRequest {
+                    code: "invalidRunnerHandoffRequest",
+                    message: "runnerHandoff is valid only for an initial room join.",
+                });
+            }
+
+            WebSocketRoomJoinIntent::Resume {
+                player_index: reconnect.player_index,
+                room_epoch: reconnect.room_epoch,
+                resume_token: reconnect.resume_token,
+            }
+        }
+        None => {
+            let path_and_query = uri
+                .path_and_query()
+                .map(|value| value.as_str())
+                .unwrap_or(uri.path());
+            let auth = client_auth_proof(&headers, "GET", path_and_query, &[])?;
+            let license = match services
+                .license_authority
+                .verify_client_access(auth, NETPLAY_FEATURE)
+                .await
+            {
+                Ok(license) => license,
+                Err(error) => {
+                    services.metrics.record_auth_rejected();
+                    return Err(error.into());
+                }
+            };
+
+            WebSocketRoomJoinIntent::Initial {
+                role: query.role,
+                license,
+                runner_handoff: query.runner_handoff,
+            }
+        }
+    };
     let join_request = WebSocketJoinRequest {
         invite_code,
-        reconnect_player_index: reconnect.as_ref().map(|value| value.player_index),
-        reconnect_room_epoch: reconnect.as_ref().map(|value| value.room_epoch),
-        resume_token: reconnect.map(|value| value.resume_token),
-        role: query.role,
+        intent,
         supports_state_file_relay: query.supports_state_file_relay.unwrap_or(false),
         supports_rom_file_relay: query.supports_rom_file_relay.unwrap_or(false),
         supports_scheduled_start: query.supports_scheduled_start.unwrap_or(false),
         supports_clock_sync: query.supports_clock_sync.unwrap_or(false),
         supports_fast_input_relay: query.supports_fast_input_relay.unwrap_or(false),
-        license,
     };
 
     Ok(websocket
@@ -188,31 +222,15 @@ pub async fn websocket_room(
         .on_upgrade(move |socket| handle_websocket_session(socket, services, join_request)))
 }
 
-/// Upgrades an authenticated ShadowBoy client into a binary input socket.
+/// Upgrades a one-time input capability into a binary input socket.
 pub async fn websocket_input_room(
     websocket: WebSocketUpgrade,
     State(services): State<AppServices>,
+    connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     Query(query): Query<WebSocketInputRoomQuery>,
-    uri: Uri,
     headers: HeaderMap,
 ) -> Result<Response, HttpError> {
-    enforce_rate_limit(&services, RateLimitAction::WebSocketJoin, &headers)?;
-    let path_and_query = uri
-        .path_and_query()
-        .map(|value| value.as_str())
-        .unwrap_or(uri.path());
-    let auth = client_auth_proof(&headers, "GET", path_and_query, &[])?;
-    let license = match services
-        .license_authority
-        .verify_client_access(auth, NETPLAY_FEATURE)
-        .await
-    {
-        Ok(license) => license,
-        Err(error) => {
-            services.metrics.record_auth_rejected();
-            return Err(error.into());
-        }
-    };
+    enforce_capability_rate_limit(&services, &headers, connect_info)?;
     validate_client_protocol_version(query.protocol_version.ok_or(HttpError::InvalidRequest {
         code: "missingProtocolVersion",
         message: "Netplay protocol version is required.",
@@ -226,7 +244,6 @@ pub async fn websocket_input_room(
     let join_request = WebSocketInputJoinRequest {
         input_socket_token: query.input_socket_token,
         invite_code,
-        license,
         player_index,
         room_epoch: query.room_epoch,
         session_epoch: query.session_epoch,
@@ -249,6 +266,7 @@ fn netplay_client_kind(client_kind: crate::auth::ClientKind) -> NetplayClientKin
     match client_kind {
         crate::auth::ClientKind::Desktop => NetplayClientKind::Desktop,
         crate::auth::ClientKind::Android => NetplayClientKind::Android,
+        crate::auth::ClientKind::Ios => NetplayClientKind::Ios,
     }
 }
 
@@ -383,6 +401,30 @@ fn enforce_rate_limit(
     }
 }
 
+fn enforce_capability_rate_limit(
+    services: &AppServices,
+    headers: &HeaderMap,
+    connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
+) -> Result<(), HttpError> {
+    let peer_ip = connect_info.map(|Extension(ConnectInfo(address))| address.ip());
+    let key = capability_request_rate_limit_key(headers, services.trust_proxy_headers, peer_ip);
+
+    match services
+        .rate_limiter
+        .check(RateLimitAction::WebSocketJoin, &key)
+    {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            warn!(
+                action = RateLimitAction::WebSocketJoin.as_str(),
+                "rate limit rejected request"
+            );
+            services.metrics.record_rate_limited();
+            Err(error.into())
+        }
+    }
+}
+
 /// Health check response body.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -487,6 +529,8 @@ pub struct WebSocketRoomQuery {
     room_epoch: Option<u64>,
     #[serde(default)]
     resume_token: Option<String>,
+    #[serde(default)]
+    runner_handoff: bool,
     #[serde(default)]
     supports_state_file_relay: Option<bool>,
     #[serde(default)]

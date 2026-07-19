@@ -5,7 +5,7 @@
 //! connection module.
 
 use crate::rooms::{ConnectionId, NetplayRoom, PlayerIndex, RoomError, RoomStatus};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 impl NetplayRoom {
     /// Attaches the binary input socket to an occupied player slot.
@@ -40,10 +40,17 @@ impl NetplayRoom {
             return Err(RoomError::ResumeTokenInvalid);
         }
 
-        if slot.connection_id.is_none() {
-            return Err(RoomError::UnknownConnection);
+        let Some(control_connection_id) = slot.connection_id else {
+            return Err(RoomError::ResumeTokenInvalid);
+        };
+        if slot.input_socket_control_connection_id != Some(control_connection_id)
+            || slot.input_connection_id.is_some()
+        {
+            return Err(RoomError::ResumeTokenInvalid);
         }
 
+        slot.input_socket_token_hash = None;
+        slot.input_socket_control_connection_id = None;
         slot.input_connection_id = Some(input_connection_id);
         slot.last_seen_at = Some(now);
 
@@ -55,13 +62,8 @@ impl NetplayRoom {
         &mut self,
         input_connection_id: ConnectionId,
         now: Instant,
+        reconnect_grace: Duration,
     ) -> Result<bool, RoomError> {
-        let slot = self
-            .players
-            .iter_mut()
-            .find(|slot| slot.input_connection_id == Some(input_connection_id))
-            .ok_or(RoomError::UnknownConnection)?;
-        let player_index = slot.player_index;
         let recoverable = matches!(
             self.status,
             RoomStatus::StartScheduled
@@ -69,15 +71,28 @@ impl NetplayRoom {
                 | RoomStatus::Paused
                 | RoomStatus::Recovering
         );
-        let reconnect_room_epoch = slot.reconnect_room_epoch.unwrap_or(self.room_epoch);
+        let (player_index, control_connection_id) = {
+            let slot = self
+                .players
+                .iter_mut()
+                .find(|slot| slot.input_connection_id == Some(input_connection_id))
+                .ok_or(RoomError::UnknownConnection)?;
+            let control_connection_id = slot.connection_id;
 
-        slot.input_connection_id = None;
-        slot.last_seen_at = Some(now);
+            slot.input_connection_id = None;
+            slot.input_socket_token_hash = None;
+            slot.input_socket_control_connection_id = None;
+            slot.last_seen_at = Some(now);
+
+            (slot.player_index, control_connection_id)
+        };
         self.last_input_frames.remove(&player_index);
         self.next_input_frames.remove(&player_index);
 
         if recoverable {
-            self.enter_recovery_state(reconnect_room_epoch);
+            let control_connection_id =
+                control_connection_id.ok_or(RoomError::UnknownConnection)?;
+            self.disconnect_with_recovery(control_connection_id, now, reconnect_grace)?;
             return Ok(true);
         }
 

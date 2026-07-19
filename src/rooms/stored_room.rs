@@ -36,7 +36,7 @@ pub(super) struct StoredRoom {
 
 impl StoredRoom {
     /// Creates a stored room with a bounded event channel.
-    pub(super) fn new(room: NetplayRoom) -> Self {
+    pub(super) fn new(room: NetplayRoom, now: Instant) -> Self {
         let (events, _) = broadcast::channel(ROOM_EVENT_CHANNEL_CAPACITY);
         let (input_events, _) = broadcast::channel(INPUT_EVENT_CHANNEL_CAPACITY);
 
@@ -48,7 +48,7 @@ impl StoredRoom {
             fast_input_relay_buffer: FastInputRelayBuffer::default(),
             event_seq: 0,
             debug_events: RoomDebugEventLog::default(),
-            created_at: Instant::now(),
+            created_at: now,
         }
     }
 

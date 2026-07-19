@@ -18,6 +18,8 @@ pub(crate) struct PlayerReconnectRequest<'a> {
     pub player_index: PlayerIndex,
     /// Server-side hash of the long-lived control resume token.
     pub resume_token_hash: &'a str,
+    /// Server-side hash of the rotated control resume token.
+    pub next_resume_token_hash: ResumeTokenHash,
     /// Server-side hash of the newly issued input socket token.
     pub input_socket_token_hash: ResumeTokenHash,
     /// Room epoch observed by the reconnecting client.
@@ -132,6 +134,7 @@ impl NetplayRoom {
         slot.runtime_state = PlayerRuntimeState::Connected;
         slot.resume_token_hash = Some(resume_token_hash);
         slot.input_socket_token_hash = Some(input_socket_token_hash);
+        slot.input_socket_control_connection_id = Some(connection_id);
         slot.supports_state_file_relay = capabilities.supports_state_file_relay;
         slot.supports_rom_file_relay = capabilities.supports_rom_file_relay;
         slot.supports_scheduled_start = capabilities.supports_scheduled_start;
@@ -139,6 +142,7 @@ impl NetplayRoom {
         slot.supports_fast_input_relay = capabilities.supports_fast_input_relay;
         slot.reconnect_deadline = None;
         slot.reconnect_room_epoch = None;
+        slot.runner_handoff_deadline = None;
         slot.last_seen_at = Some(now);
         slot.latest_local_frame = None;
         slot.latest_local_frame_reported_at = None;
@@ -172,6 +176,8 @@ impl NetplayRoom {
             .for_each(|slot| {
                 slot.connection_id = None;
                 slot.input_connection_id = None;
+                slot.input_socket_token_hash = None;
+                slot.input_socket_control_connection_id = None;
                 slot.last_seen_at = Some(now);
                 slot.latest_local_frame = None;
                 slot.latest_local_frame_reported_at = None;
@@ -179,6 +185,7 @@ impl NetplayRoom {
                 slot.latest_network_reported_at = None;
                 slot.reconnect_deadline = None;
                 slot.reconnect_room_epoch = None;
+                slot.runner_handoff_deadline = None;
                 slot.status = PlayerStatus::Disconnected;
                 slot.runtime_state = PlayerRuntimeState::Disconnected;
             });
@@ -193,6 +200,10 @@ impl NetplayRoom {
         now: Instant,
         reconnect_grace: Duration,
     ) -> Result<bool, RoomError> {
+        if self.preserve_runner_handoff_disconnect(connection_id, now)? {
+            return Ok(false);
+        }
+
         let slot = self
             .players
             .iter_mut()
@@ -216,6 +227,8 @@ impl NetplayRoom {
 
         slot.connection_id = None;
         slot.input_connection_id = None;
+        slot.input_socket_token_hash = None;
+        slot.input_socket_control_connection_id = None;
         slot.last_seen_at = Some(now);
         self.compatibility.remove(&player_index);
         self.ready_players.remove(&player_index);
@@ -258,14 +271,25 @@ impl NetplayRoom {
             return Err(RoomError::ResumeTokenInvalid);
         }
 
+        let runner_handoff = slot.runner_handoff_deadline.is_some();
+        if (slot.connection_id.is_some() && !runner_handoff)
+            || (slot.reconnect_deadline.is_none() && !runner_handoff)
+        {
+            return Err(RoomError::ResumeTokenInvalid);
+        }
+
         let accepted_epoch = slot.reconnect_room_epoch.unwrap_or(self.room_epoch);
         if request.room_epoch != accepted_epoch && request.room_epoch != self.room_epoch {
             return Err(RoomError::StaleRoomEpoch);
         }
 
-        if let Some(deadline) = slot.reconnect_deadline
-            && request.now > deadline
-        {
+        let reconnect_expired = slot
+            .reconnect_deadline
+            .is_some_and(|deadline| request.now >= deadline);
+        let runner_handoff_expired = slot
+            .runner_handoff_deadline
+            .is_some_and(|deadline| request.now >= deadline);
+        if reconnect_expired || runner_handoff_expired {
             slot.status = PlayerStatus::RecoveryExpired;
             slot.runtime_state = PlayerRuntimeState::RecoveryExpired;
             return Err(RoomError::RecoveryExpired);
@@ -275,7 +299,9 @@ impl NetplayRoom {
         slot.input_connection_id = None;
         slot.status = PlayerStatus::Connected;
         slot.runtime_state = PlayerRuntimeState::Reconnecting;
+        slot.resume_token_hash = Some(request.next_resume_token_hash);
         slot.input_socket_token_hash = Some(request.input_socket_token_hash);
+        slot.input_socket_control_connection_id = Some(request.connection_id);
         slot.supports_state_file_relay = request.capabilities.supports_state_file_relay;
         slot.supports_rom_file_relay = request.capabilities.supports_rom_file_relay;
         slot.supports_scheduled_start = request.capabilities.supports_scheduled_start;
@@ -288,7 +314,10 @@ impl NetplayRoom {
         slot.latest_network_reported_at = None;
         slot.reconnect_deadline = None;
         slot.reconnect_room_epoch = None;
-        self.reset_sync_for_checking_compatibility();
+        slot.runner_handoff_deadline = None;
+        if !runner_handoff {
+            self.restore_checking_compatibility_after_recovery();
+        }
 
         Ok(())
     }
@@ -368,11 +397,14 @@ impl NetplayRoom {
             {
                 slot.connection_id = None;
                 slot.input_connection_id = None;
+                slot.input_socket_token_hash = None;
+                slot.input_socket_control_connection_id = None;
                 slot.last_seen_at = Some(now);
                 slot.status = PlayerStatus::Reconnecting;
                 slot.runtime_state = PlayerRuntimeState::Reconnecting;
                 slot.reconnect_deadline = Some(now + reconnect_grace);
                 slot.reconnect_room_epoch = Some(self.room_epoch);
+                slot.runner_handoff_deadline = None;
             }
         }
 
@@ -437,9 +469,13 @@ impl NetplayRoom {
     }
 
     fn reset_sync_for_checking_compatibility(&mut self) {
-        self.reset_sync_state();
         self.bump_room_epoch();
         self.bump_session_epoch();
+        self.restore_checking_compatibility_after_recovery();
+    }
+
+    fn restore_checking_compatibility_after_recovery(&mut self) {
+        self.reset_sync_state();
         self.status = RoomStatus::CheckingCompatibility;
         self.players
             .iter_mut()
@@ -447,7 +483,9 @@ impl NetplayRoom {
             .for_each(|slot| {
                 slot.status = PlayerStatus::Connected;
                 slot.runtime_state = PlayerRuntimeState::Connected;
-                slot.reconnect_room_epoch = None;
+                if slot.runner_handoff_deadline.is_none() {
+                    slot.reconnect_room_epoch = None;
+                }
             });
     }
 
@@ -467,10 +505,11 @@ impl NetplayRoom {
             slot.runtime_state = PlayerRuntimeState::Reconnecting;
             slot.reconnect_deadline = Some(now + reconnect_grace);
             slot.reconnect_room_epoch = Some(reconnect_room_epoch);
+            slot.runner_handoff_deadline = None;
         }
     }
 
-    fn clear_disconnected_slot(&mut self, player_index: PlayerIndex, is_host: bool) {
+    pub(super) fn clear_disconnected_slot(&mut self, player_index: PlayerIndex, is_host: bool) {
         if let Some(slot) = self
             .players
             .iter_mut()
@@ -478,7 +517,10 @@ impl NetplayRoom {
         {
             slot.reconnect_deadline = None;
             slot.reconnect_room_epoch = None;
+            slot.runner_handoff_deadline = None;
             slot.input_connection_id = None;
+            slot.input_socket_token_hash = None;
+            slot.input_socket_control_connection_id = None;
             slot.latest_local_frame = None;
             slot.latest_local_frame_reported_at = None;
             slot.latest_network_report = None;

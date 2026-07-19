@@ -102,6 +102,8 @@ pub struct PlayerSlot {
     pub resume_token_hash: Option<ResumeTokenHash>,
     /// Hash of the token used to attach the binary input socket.
     pub input_socket_token_hash: Option<ResumeTokenHash>,
+    /// Control-connection generation that issued the pending input token.
+    pub input_socket_control_connection_id: Option<ConnectionId>,
     /// Last heartbeat time seen by the relay.
     pub last_seen_at: Option<Instant>,
     /// Latest local runtime frame reported by this client.
@@ -126,6 +128,8 @@ pub struct PlayerSlot {
     pub reconnect_deadline: Option<Instant>,
     /// Room epoch this client knew before recovery changed room state.
     pub reconnect_room_epoch: Option<u64>,
+    /// Deadline for transferring this initial control slot to a runner process.
+    pub runner_handoff_deadline: Option<Instant>,
 }
 
 impl PlayerSlot {
@@ -142,6 +146,7 @@ impl PlayerSlot {
             runtime_state: PlayerRuntimeState::Empty,
             resume_token_hash: None,
             input_socket_token_hash: None,
+            input_socket_control_connection_id: None,
             last_seen_at: None,
             latest_local_frame: None,
             latest_local_frame_reported_at: None,
@@ -154,6 +159,7 @@ impl PlayerSlot {
             latest_network_reported_at: None,
             reconnect_deadline: None,
             reconnect_room_epoch: None,
+            runner_handoff_deadline: None,
         }
     }
 
@@ -176,6 +182,7 @@ impl PlayerSlot {
             runtime_state: PlayerRuntimeState::Connected,
             resume_token_hash: Some(resume_token_hash),
             input_socket_token_hash: Some(input_socket_token_hash),
+            input_socket_control_connection_id: Some(connection_id),
             last_seen_at: Some(now),
             latest_local_frame: None,
             latest_local_frame_reported_at: None,
@@ -188,6 +195,7 @@ impl PlayerSlot {
             latest_network_reported_at: None,
             reconnect_deadline: None,
             reconnect_room_epoch: None,
+            runner_handoff_deadline: None,
         }
     }
 
@@ -209,6 +217,7 @@ impl PlayerSlot {
         self.runtime_state = PlayerRuntimeState::Connected;
         self.resume_token_hash = Some(resume_token_hash);
         self.input_socket_token_hash = Some(input_socket_token_hash);
+        self.input_socket_control_connection_id = Some(connection_id);
         self.last_seen_at = Some(now);
         self.latest_local_frame = None;
         self.latest_local_frame_reported_at = None;
@@ -221,6 +230,7 @@ impl PlayerSlot {
         self.latest_network_reported_at = None;
         self.reconnect_deadline = None;
         self.reconnect_room_epoch = None;
+        self.runner_handoff_deadline = None;
     }
 
     /// Returns whether the slot is available.

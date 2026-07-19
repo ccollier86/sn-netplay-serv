@@ -281,6 +281,29 @@ mod tests {
     }
 
     #[test]
+    fn accepts_ios_eligible_client_response() {
+        let verified = parse_verified_license(
+            json!({
+                "authorized": true,
+                "clientKind": "ios",
+                "installationId": "ios_inst_123",
+                "subjectId": "ios_inst_123",
+                "tier": "authenticated",
+                "features": {
+                    "netplay": true
+                }
+            }),
+            ClientKind::Ios,
+            "ios_inst_123",
+            "netplay",
+        )
+        .expect("verified");
+
+        assert_eq!(verified.client_kind, ClientKind::Ios);
+        assert_eq!(verified.identity_key(), "ios:ios_inst_123");
+    }
+
+    #[test]
     fn rejects_mismatched_client_kind_response() {
         let result = parse_verified_license(
             json!({

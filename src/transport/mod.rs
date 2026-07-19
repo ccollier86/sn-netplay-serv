@@ -22,6 +22,7 @@ mod websocket_voice_handler;
 pub use websocket_input_session::handle_websocket_input_session;
 pub use websocket_join::{
     WebSocketInputJoinRequest, WebSocketJoinRequest, WebSocketJoinRole, WebSocketLobbyJoinRequest,
+    WebSocketRoomJoinIntent,
 };
 pub use websocket_lobby_session::handle_websocket_lobby_session;
 pub use websocket_public_lobbies_session::handle_public_lobbies_websocket_session;

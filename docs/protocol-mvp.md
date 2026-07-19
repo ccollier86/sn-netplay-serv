@@ -1,4 +1,4 @@
-# Netplay Protocol V3
+# Netplay Protocol V4
 
 The relay coordinates invite-code sessions for ShadowBoy clients. It never
 runs emulator cores, never receives ROM data, and never streams gameplay video.
@@ -29,21 +29,28 @@ Headers:
 
 ```text
 Authorization: Bearer <client-token>
-X-Client-Kind: desktop | android
+X-Client-Kind: desktop | android | ios
 X-Install-Id: <installationId>
 X-Req-Ts: <epoch milliseconds>
 X-Req-Nonce: <unique nonce>
-X-Req-Sig: <base64 signature>
+X-Req-Sig: <base64 signature; Desktop, Android, or explicit iOS development>
+X-App-Attest-Key-Id: <key id; production iOS only>
+X-App-Attest-Assertion: <base64 assertion; production iOS only>
 ```
 
 Desktop signs with the protected-client signer used for metadata, cheat,
 billing, and update requests. Android sends `X-Client-Kind: android` and signs
-with its protected install key. `X-Client-Kind` defaults to `desktop` for older
-Desktop request shapes. `X-Installation-Id` is accepted as an install-id alias.
+with its protected install key. Production iOS sends `X-Client-Kind: ios` and
+an App Attest key/assertion pair instead of `X-Req-Sig`. The relay forwards the
+provider proof without interpreting or logging it. `X-Client-Kind` defaults to
+`desktop` for older Desktop request shapes. `X-Installation-Id` is accepted as
+an install-id alias.
 
 The relay asks the metadata service to authorize feature `netplay`. Desktop
-requests use `requiredEntitlement: "premiumOrTrial"`; Android requests use
-`requiredEntitlement: "eligibleClient"` and leave premium gating inside the app.
+requests use `requiredEntitlement: "premiumOrTrial"`; Android and iOS requests
+use `requiredEntitlement: "eligibleClient"` and leave premium gating inside the
+app. The metadata service selects and validates the proof family from the
+authenticated installation provider and rejects mixed proof families.
 
 Body:
 
@@ -156,17 +163,24 @@ unsupported local runtime combinations before launch.
 Host:
 
 ```text
-GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=3
+GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=4
 ```
 
 Guest:
 
 ```text
-GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=3
+GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=4
 ```
 
-`role` defaults to `guest` when omitted. Required auth headers match room
-creation.
+For a desktop-to-runner transfer, the protected provisional join adds:
+
+```text
+GET /v1/ws?inviteCode=AB23-CD&role=host&protocolVersion=4&runnerHandoff=true
+```
+
+`role` defaults to `guest` when omitted. Every initial join, including a runner
+handoff join, requires the protected auth headers used for room creation.
+`runnerHandoff` is rejected when combined with reconnect fields.
 
 First successful socket message:
 
@@ -178,12 +192,20 @@ First successful socket message:
   "sessionEpoch": 2,
   "yourPlayerIndex": 1,
   "resumeToken": "<opaque-token>",
+  "inputSocketToken": "<opaque-input-token>",
   "room": {}
 }
 ```
 
-The client must keep `resumeToken` in memory for the current room. It is an
-opaque slot-reclaim secret and must not be logged or shown to users.
+The client must keep both tokens in memory for the current room. They are opaque
+capabilities and must not be logged, included in diagnostics, persisted beyond
+the session, or shown to users.
+
+When `runnerHandoff=true`, the relay arms the provisional slot only for the
+configured handoff grace period (60 seconds by default). The runner may claim
+the slot before or after the provisional socket's close is processed. A late
+close from the provisional socket cannot disconnect the runner. If capability
+delivery fails, the handoff is cancelled and ordinary disconnect cleanup runs.
 
 ### Reconnect
 
@@ -191,13 +213,37 @@ Reconnect uses the invite code, the player slot, the last accepted room epoch,
 and the resume token from `roomJoined`:
 
 ```text
-GET /v1/ws?inviteCode=AB23-CD&protocolVersion=3&playerIndex=1&roomEpoch=4&resumeToken=<opaque-token>
+GET /v1/ws?inviteCode=AB23-CD&protocolVersion=4&playerIndex=1&roomEpoch=4&resumeToken=<opaque-token>
 ```
 
 All three reconnect fields are required together. Partial reconnect queries are
-rejected. A successful reconnect returns a fresh `roomJoined`, then the relay
-returns the room to compatibility checking and state sync before gameplay
-continues.
+rejected. A complete reconnect is authorized by this room-scoped capability and
+does not use protected installation headers. A successful reconnect atomically
+rotates `resumeToken`, returns a fresh `roomJoined`, and invalidates replay of
+the presented token. Ordinary gameplay recovery returns the room to
+compatibility checking and state sync before gameplay continues; runner handoff
+does not add another room/session epoch transition.
+
+### Binary Input Socket
+
+The control connection's fresh `roomJoined.inputSocketToken` attaches the
+dedicated binary input socket:
+
+```text
+GET /v1/ws/input?inviteCode=AB23-CD&protocolVersion=4&playerIndex=1&roomEpoch=4&sessionEpoch=4&inputSocketToken=<opaque-token>
+```
+
+The input capability is the sole authorization for this endpoint. It is bound
+to the control-connection generation that issued it and to the supplied player,
+room epoch, and session epoch. Successful attachment consumes it, so replay
+cannot replace the active input socket. If the input socket is lost during
+gameplay, the relay starts bounded control recovery; reconnecting control is the
+only way to obtain another input capability.
+
+Resume and input capabilities appear in URL query parameters for the WebSocket
+handshake. The relay's HTTP tracing records only the route path and never the
+query string. Production rate limiting keys these capability routes by trusted
+proxy IP or actual peer IP, never by an unverified installation header.
 
 ### Server Messages
 

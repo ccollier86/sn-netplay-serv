@@ -40,10 +40,10 @@ impl InMemoryRoomRegistry {
         }
         let view = room.view_for_event(0, now);
 
-        self.invite_codes
-            .write()
-            .await
-            .insert(invite_code.normalized().to_string(), StoredRoom::new(room));
+        self.invite_codes.write().await.insert(
+            invite_code.normalized().to_string(),
+            StoredRoom::new(room, now),
+        );
 
         Ok(view)
     }
@@ -166,11 +166,13 @@ impl InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
         let now = self.clock.now();
+        let next_resume_token = self.resume_token_generator.generate();
         let input_socket_token = self.resume_token_generator.generate();
         let resume_token_hash = hash_resume_token(&resume_token);
         stored_room.room.reconnect_player(PlayerReconnectRequest {
             player_index,
             resume_token_hash: &resume_token_hash,
+            next_resume_token_hash: next_resume_token.hash(),
             input_socket_token_hash: input_socket_token.hash(),
             room_epoch,
             connection_id,
@@ -184,10 +186,51 @@ impl InMemoryRoomRegistry {
         Ok(RoomJoin {
             input_socket_token: input_socket_token.expose().to_string(),
             player_index,
-            resume_token,
+            resume_token: next_resume_token.expose().to_string(),
             voice: stored_room.room.voice_grant_for(player_index),
             room,
         })
+    }
+
+    /// Arms an initial join before capability delivery for a runner takeover.
+    pub(super) async fn arm_runner_handoff_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<(), RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+        let now = self.clock.now();
+
+        stored_room.room.arm_runner_handoff(
+            connection_id,
+            now,
+            self.recovery_config.runner_handoff_grace,
+        )?;
+        stored_room.record_debug_event(
+            now,
+            "runnerHandoffArmed",
+            "initial control slot armed for runner handoff",
+        );
+        self.record_recent_events(stored_room.debug_events(1));
+
+        Ok(())
+    }
+
+    /// Cancels a handoff when its `RoomJoined` capability was not delivered.
+    pub(super) async fn cancel_runner_handoff_impl(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<(), RoomError> {
+        let mut rooms = self.invite_codes.write().await;
+        let stored_room = rooms
+            .get_mut(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+
+        stored_room.room.cancel_runner_handoff(connection_id)
     }
 
     /// Handles a socket disconnection and removes closed rooms.
@@ -334,9 +377,11 @@ impl InMemoryRoomRegistry {
             .room
             .describe_input_connection(connection_id, "room cleanup");
 
-        stored_room
-            .room
-            .disconnect_input_socket(connection_id, now)?;
+        stored_room.room.disconnect_input_socket(
+            connection_id,
+            now,
+            self.recovery_config.reconnect_grace,
+        )?;
         stored_room.emit_state(now, "inputSocketDisconnected", &detail);
         let room = stored_room.view(now);
         self.record_recent_events(stored_room.debug_events(1));
@@ -348,8 +393,21 @@ impl InMemoryRoomRegistry {
     pub(super) async fn sweep_expired_rooms(&self, now: Instant, join_timeout: Duration) -> usize {
         let mut rooms = self.invite_codes.write().await;
         let mut lifecycle_events = Vec::new();
+        let mut handoff_closed_keys = Vec::new();
 
-        for stored_room in rooms.values_mut() {
+        for (key, stored_room) in rooms.iter_mut() {
+            if let Some(room_closed) = stored_room.room.expire_runner_handoffs(now) {
+                stored_room.emit_state(
+                    now,
+                    "runnerHandoffExpired",
+                    "runner handoff deadline expired",
+                );
+                lifecycle_events.extend(stored_room.debug_events(1));
+                if room_closed {
+                    handoff_closed_keys.push(key.clone());
+                }
+            }
+
             if stored_room.mark_stale_connections(
                 now,
                 self.recovery_config.heartbeat_stale,
@@ -369,7 +427,7 @@ impl InMemoryRoomRegistry {
             }
         }
 
-        let expired_keys = rooms
+        let mut expired_keys = rooms
             .iter()
             .filter_map(|(key, stored_room)| {
                 let expired = stored_room.is_expired_waiting(now, join_timeout)
@@ -378,6 +436,9 @@ impl InMemoryRoomRegistry {
                 expired.then_some(key.clone())
             })
             .collect::<Vec<_>>();
+        expired_keys.extend(handoff_closed_keys);
+        expired_keys.sort();
+        expired_keys.dedup();
         let mut voice_cleanup = Vec::new();
         for key in &expired_keys {
             if let Some(mut stored_room) = rooms.remove(key) {

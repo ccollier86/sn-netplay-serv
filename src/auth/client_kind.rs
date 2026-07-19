@@ -11,6 +11,8 @@ pub enum ClientKind {
     Desktop,
     /// ShadowBoy Android protected-client session.
     Android,
+    /// ShadowBoy iOS protected-client session.
+    Ios,
 }
 
 impl ClientKind {
@@ -19,6 +21,7 @@ impl ClientKind {
         match self {
             Self::Desktop => "desktop",
             Self::Android => "android",
+            Self::Ios => "ios",
         }
     }
 
@@ -27,6 +30,7 @@ impl ClientKind {
         match self {
             Self::Desktop => "premiumOrTrial",
             Self::Android => "eligibleClient",
+            Self::Ios => "eligibleClient",
         }
     }
 
@@ -35,6 +39,7 @@ impl ClientKind {
         match value.trim().to_ascii_lowercase().as_str() {
             "desktop" => Ok(Self::Desktop),
             "android" => Ok(Self::Android),
+            "ios" => Ok(Self::Ios),
             _ => Err(AuthError::UnsupportedClientKind),
         }
     }

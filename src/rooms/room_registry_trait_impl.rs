@@ -81,6 +81,24 @@ impl RoomRegistry for InMemoryRoomRegistry {
         .await
     }
 
+    async fn arm_runner_handoff(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<(), RoomError> {
+        self.arm_runner_handoff_impl(invite_code, connection_id)
+            .await
+    }
+
+    async fn cancel_runner_handoff(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<(), RoomError> {
+        self.cancel_runner_handoff_impl(invite_code, connection_id)
+            .await
+    }
+
     async fn disconnect(
         &self,
         invite_code: InviteCode,

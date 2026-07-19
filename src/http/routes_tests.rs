@@ -3,7 +3,7 @@
 //! These cover auth ordering, create-room descriptors, rate limits, and
 //! internal admin observability without growing the production route module.
 
-use super::build_router;
+use super::{build_router, trace_request_path};
 use crate::auth::{
     AuthError, ClientKind, LicenseAuthority, ProtectedClientAuthProof, VerifiedLicense,
 };
@@ -38,6 +38,7 @@ impl LicenseAuthority for FakeLicenseAuthority {
                 match auth.client_kind {
                     ClientKind::Desktop => "premium",
                     ClientKind::Android => "authenticated",
+                    ClientKind::Ios => "authenticated",
                 },
                 vec!["netplay".to_string()],
                 auth.client_kind == ClientKind::Desktop,
@@ -57,6 +58,16 @@ impl InviteCodeGenerator for StaticInviteCodeGenerator {
     fn generate(&self) -> InviteCode {
         InviteCode::parse("AB23-CD").expect("invite")
     }
+}
+
+#[test]
+fn http_trace_path_excludes_capability_query_values() {
+    let request = Request::builder()
+        .uri("/v1/ws/input?resumeToken=secret&inputSocketToken=also-secret")
+        .body(Body::empty())
+        .expect("request");
+
+    assert_eq!(trace_request_path(&request), "/v1/ws/input");
 }
 
 #[tokio::test]
@@ -179,6 +190,35 @@ async fn create_room_accepts_android_client_auth() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(value["room"]["session"]["hostClientKind"], "android");
+}
+
+#[tokio::test]
+async fn create_room_accepts_ios_client_auth() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/rooms")
+                .header("authorization", "Bearer valid")
+                .header("x-client-kind", "ios")
+                .header("x-installation-id", "ios-install-1")
+                .header("x-req-ts", "1784069961000")
+                .header("x-req-nonce", "nonce")
+                .header("x-app-attest-key-id", "app-attest-key")
+                .header("x-app-attest-assertion", "app-attest-assertion")
+                .body(Body::from(create_room_body()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let value = serde_json::from_slice::<Value>(&body).expect("json");
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["room"]["session"]["hostClientKind"], "ios");
 }
 
 #[tokio::test]

@@ -12,7 +12,7 @@ use crate::transport::websocket_outbound::{
     SocketSender, send_server_message, send_static_error, send_upgrade_error,
 };
 use crate::transport::websocket_peer_close::{peer_close_detail, peer_error_detail};
-use crate::transport::{WebSocketJoinRequest, WebSocketJoinRole};
+use crate::transport::{WebSocketJoinRequest, WebSocketJoinRole, WebSocketRoomJoinIntent};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
 use futures_util::stream::SplitStream;
@@ -23,6 +23,7 @@ pub async fn handle_websocket_session(
     services: AppServices,
     request: WebSocketJoinRequest,
 ) {
+    let invite_code = request.invite_code;
     let connection_id = ConnectionId::new();
     let capabilities = ClientTransportCapabilities {
         supports_state_file_relay: request.supports_state_file_relay,
@@ -31,59 +32,53 @@ pub async fn handle_websocket_session(
         supports_clock_sync: request.supports_clock_sync,
         supports_fast_input_relay: request.supports_fast_input_relay,
     };
-    let mut events = match services.rooms.subscribe(request.invite_code.clone()).await {
+    let mut events = match services.rooms.subscribe(invite_code.clone()).await {
         Ok(events) => events,
         Err(error) => {
             send_upgrade_error(socket, error).await;
             return;
         }
     };
-    let reconnect = match (
-        request.reconnect_player_index,
-        request.reconnect_room_epoch,
-        request.resume_token.clone(),
-    ) {
-        (Some(player_index), Some(room_epoch), Some(resume_token)) => {
-            Some((player_index, room_epoch, resume_token))
-        }
-        _ => None,
-    };
-    let join = if let Some((player_index, room_epoch, resume_token)) = reconnect.clone() {
-        services
-            .rooms
-            .reconnect_player(
-                request.invite_code.clone(),
-                player_index,
-                room_epoch,
-                resume_token,
-                connection_id,
-                capabilities,
-            )
-            .await
-    } else {
-        match request.role {
-            WebSocketJoinRole::Host => {
-                services
-                    .rooms
-                    .connect_host(
-                        request.invite_code.clone(),
-                        request.license,
-                        connection_id,
-                        capabilities,
-                    )
-                    .await
-            }
-            WebSocketJoinRole::Guest => {
-                services
-                    .rooms
-                    .connect_guest(
-                        request.invite_code.clone(),
-                        request.license,
-                        connection_id,
-                        capabilities,
-                    )
-                    .await
-            }
+    let (join, reconnecting, runner_handoff) = match request.intent {
+        WebSocketRoomJoinIntent::Resume {
+            player_index,
+            room_epoch,
+            resume_token,
+        } => (
+            services
+                .rooms
+                .reconnect_player(
+                    invite_code.clone(),
+                    player_index,
+                    room_epoch,
+                    resume_token,
+                    connection_id,
+                    capabilities,
+                )
+                .await,
+            true,
+            false,
+        ),
+        WebSocketRoomJoinIntent::Initial {
+            role,
+            license,
+            runner_handoff,
+        } => {
+            let join = match role {
+                WebSocketJoinRole::Host => {
+                    services
+                        .rooms
+                        .connect_host(invite_code.clone(), license, connection_id, capabilities)
+                        .await
+                }
+                WebSocketJoinRole::Guest => {
+                    services
+                        .rooms
+                        .connect_guest(invite_code.clone(), license, connection_id, capabilities)
+                        .await
+                }
+            };
+            (join, false, runner_handoff)
         }
     };
     let join = match join {
@@ -94,8 +89,22 @@ pub async fn handle_websocket_session(
         }
     };
     services.metrics.record_websocket_joined();
-    if reconnect.is_some() {
+    if reconnecting {
         services.metrics.record_player_reconnected();
+    }
+
+    if runner_handoff
+        && let Err(error) = services
+            .rooms
+            .arm_runner_handoff(invite_code.clone(), connection_id)
+            .await
+    {
+        let _ = services
+            .rooms
+            .disconnect(invite_code.clone(), connection_id)
+            .await;
+        send_upgrade_error(socket, error).await;
+        return;
     }
     let (mut sender, mut receiver) = socket.split();
 
@@ -115,10 +124,13 @@ pub async fn handle_websocket_session(
     .await
     .is_err()
     {
-        let _ = services
-            .rooms
-            .disconnect(request.invite_code, connection_id)
-            .await;
+        if runner_handoff {
+            let _ = services
+                .rooms
+                .cancel_runner_handoff(invite_code.clone(), connection_id)
+                .await;
+        }
+        let _ = services.rooms.disconnect(invite_code, connection_id).await;
         return;
     }
 
@@ -127,15 +139,12 @@ pub async fn handle_websocket_session(
         &mut receiver,
         &mut events,
         &services,
-        &request.invite_code,
+        &invite_code,
         connection_id,
     )
     .await;
 
-    let _ = services
-        .rooms
-        .disconnect(request.invite_code, connection_id)
-        .await;
+    let _ = services.rooms.disconnect(invite_code, connection_id).await;
 }
 
 async fn session_loop(
