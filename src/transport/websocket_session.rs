@@ -293,6 +293,7 @@ async fn handle_room_event(
         Ok(RoomEvent::SessionResumeScheduled {
             sequence,
             resume_at_frame,
+            scheduled_start,
             room,
         }) => ServerMessage::SessionResumeScheduled {
             event_seq: room.event_seq,
@@ -300,6 +301,7 @@ async fn handle_room_event(
             session_epoch: room.session_epoch,
             sequence,
             resume_at_frame,
+            scheduled_start,
             room,
         },
         Ok(RoomEvent::PlayerExited {

@@ -242,6 +242,9 @@ pub enum ServerMessage {
         sequence: u64,
         /// Frame where clients resume from.
         resume_at_frame: u64,
+        /// New-epoch synchronized deadline for protocol v5.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        scheduled_start: Option<ScheduledSessionStart>,
         /// Current room state.
         room: RoomView,
     },

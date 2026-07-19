@@ -54,6 +54,8 @@ pub enum RoomEvent {
         sequence: u64,
         /// Frame clients resume from.
         resume_at_frame: u64,
+        /// New-epoch synchronized deadline for protocol v5.
+        scheduled_start: Option<ScheduledSessionStart>,
         /// Current room state.
         room: RoomView,
     },

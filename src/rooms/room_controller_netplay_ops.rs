@@ -4,8 +4,8 @@
 //! room lifecycle model.
 
 use crate::protocol::{
-    InputFrame, InputFrameLimits, NetplaySessionMode, SessionPauseReason, SessionPauseState,
-    SessionPauseView,
+    InputFrame, InputFrameLimits, NetplaySessionMode, ScheduledSessionStart, SessionPauseReason,
+    SessionPauseState, SessionPauseView,
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, NetplayRoom, PlayerIndex, PlayerRuntimeState, PlayerStatus,
@@ -158,7 +158,8 @@ impl NetplayRoom {
         )? {
             SessionPauseReachedOutcome::Pausing(pause)
             | SessionPauseReachedOutcome::Paused(pause) => Ok(pause),
-            SessionPauseReachedOutcome::Resumed { .. } => Err(RoomError::RoomNotReady),
+            SessionPauseReachedOutcome::Resumed { .. }
+            | SessionPauseReachedOutcome::ResumedV5 { .. } => Err(RoomError::RoomNotReady),
         }
     }
 
@@ -169,13 +170,46 @@ impl NetplayRoom {
         sequence: u64,
         paused_at_frame: u64,
     ) -> Result<SessionPauseReachedOutcome, RoomError> {
+        self.mark_session_pause_reached_internal(connection_id, sequence, paused_at_frame, None)
+    }
+
+    /// Records a pause acknowledgement with the registry's server clock.
+    pub(crate) fn mark_session_pause_reached_with_outcome_at(
+        &mut self,
+        connection_id: ConnectionId,
+        sequence: u64,
+        paused_at_frame: u64,
+        server_time_ms: u64,
+    ) -> Result<SessionPauseReachedOutcome, RoomError> {
+        self.mark_session_pause_reached_internal(
+            connection_id,
+            sequence,
+            paused_at_frame,
+            Some(server_time_ms),
+        )
+    }
+
+    fn mark_session_pause_reached_internal(
+        &mut self,
+        connection_id: ConnectionId,
+        sequence: u64,
+        paused_at_frame: u64,
+        server_time_ms: Option<u64>,
+    ) -> Result<SessionPauseReachedOutcome, RoomError> {
+        let strict_resume = self.uses_strict_controller_input();
         let player_index = self
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
         let connected_players = self.connected_player_indices();
         let pause_state = self.pause_state.as_mut().ok_or(RoomError::RoomNotReady)?;
 
-        if !pause_state.has_sequence(sequence) || paused_at_frame < pause_state.pause_at_frame() {
+        let pause_at_frame = pause_state.pause_at_frame();
+        let frame_is_invalid = if strict_resume {
+            paused_at_frame != pause_at_frame
+        } else {
+            paused_at_frame < pause_at_frame
+        };
+        if !pause_state.has_sequence(sequence) || frame_is_invalid {
             return Err(RoomError::RoomNotReady);
         }
 
@@ -183,6 +217,16 @@ impl NetplayRoom {
 
         if pause_state.every_connected_player_acknowledged(&connected_players) {
             if !pause_state.has_holders() {
+                if strict_resume {
+                    let server_time_ms = server_time_ms.ok_or(RoomError::RoomNotReady)?;
+                    let scheduled_start =
+                        self.begin_v5_pause_resume(pause_at_frame, server_time_ms);
+                    return Ok(SessionPauseReachedOutcome::ResumedV5 {
+                        sequence,
+                        scheduled_start,
+                    });
+                }
+
                 let resume_at_frame = pause_state.resume_at_frame();
                 self.pause_state = None;
                 self.status = RoomStatus::Playing;
@@ -246,6 +290,36 @@ impl NetplayRoom {
         _reason: SessionPauseReason,
         sequence: u64,
     ) -> Result<SessionResumeOutcome, RoomError> {
+        self.request_session_resume_internal(connection_id, request_id, _reason, sequence, None)
+    }
+
+    /// Releases a pause holder with the registry's server clock for v5 scheduling.
+    pub(crate) fn request_session_resume_with_id_at(
+        &mut self,
+        connection_id: ConnectionId,
+        request_id: String,
+        reason: SessionPauseReason,
+        sequence: u64,
+        server_time_ms: u64,
+    ) -> Result<SessionResumeOutcome, RoomError> {
+        self.request_session_resume_internal(
+            connection_id,
+            request_id,
+            reason,
+            sequence,
+            Some(server_time_ms),
+        )
+    }
+
+    fn request_session_resume_internal(
+        &mut self,
+        connection_id: ConnectionId,
+        request_id: String,
+        _reason: SessionPauseReason,
+        sequence: u64,
+        server_time_ms: Option<u64>,
+    ) -> Result<SessionResumeOutcome, RoomError> {
+        let strict_resume = self.uses_strict_controller_input();
         let player_index = self
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
@@ -268,6 +342,13 @@ impl NetplayRoom {
             return Ok(SessionResumeOutcome::StillPaused(
                 pause_state.view(current_pause_state),
             ));
+        }
+
+        if strict_resume {
+            let resume_at_frame = pause_state.pause_at_frame();
+            let server_time_ms = server_time_ms.ok_or(RoomError::RoomNotReady)?;
+            let scheduled_start = self.begin_v5_pause_resume(resume_at_frame, server_time_ms);
+            return Ok(SessionResumeOutcome::ResumedV5 { scheduled_start });
         }
 
         let resume_at_frame = pause_state.resume_at_frame();
@@ -382,6 +463,11 @@ pub enum SessionResumeOutcome {
         /// Frame clients resume from.
         resume_at_frame: u64,
     },
+    /// V5 resumed through a new deterministic epoch and future deadline.
+    ResumedV5 {
+        /// Exact new-epoch start contract.
+        scheduled_start: ScheduledSessionStart,
+    },
 }
 
 /// Result of a client acknowledging a scheduled pause frame.
@@ -397,5 +483,12 @@ pub enum SessionPauseReachedOutcome {
         sequence: u64,
         /// Frame clients should resume from.
         resume_at_frame: u64,
+    },
+    /// V5 resumed through a new deterministic epoch and future deadline.
+    ResumedV5 {
+        /// Pause sequence that completed.
+        sequence: u64,
+        /// Exact new-epoch start contract.
+        scheduled_start: ScheduledSessionStart,
     },
 }

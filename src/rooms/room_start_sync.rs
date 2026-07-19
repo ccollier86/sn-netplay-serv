@@ -42,6 +42,32 @@ impl ClockSyncSampleRequestState {
 }
 
 impl NetplayRoom {
+    /// Creates a lightweight v5 resume schedule after the runtime epoch reset.
+    pub(super) fn schedule_v5_resume(
+        &mut self,
+        start_frame: u64,
+        server_time_ms: u64,
+    ) -> ScheduledSessionStart {
+        let uncertainty_ms = self.scheduled_start_uncertainty_budget();
+        let minimum_delay_ms = SCHEDULED_START_MINIMUM_DELAY
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX);
+        let selected_delay_ms =
+            minimum_delay_ms.max(uncertainty_ms.saturating_add(CLOCK_SYNC_SAFETY_MARGIN_MS));
+        let start = ScheduledSessionStart {
+            room_epoch: self.room_epoch,
+            session_epoch: self.session_epoch,
+            start_frame,
+            server_time_ms: server_time_ms.saturating_add(selected_delay_ms),
+            created_at_server_time_ms: server_time_ms,
+            minimum_start_delay_ms: minimum_delay_ms,
+            clock_uncertainty_budget_ms: uncertainty_ms,
+        };
+        self.scheduled_start = Some(start.clone());
+        start
+    }
+
     /// Returns whether all connected players opted into scheduled start.
     pub(super) fn connected_players_support_scheduled_start(&self) -> bool {
         let connected = self.connected_player_indices();

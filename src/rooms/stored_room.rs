@@ -226,11 +226,14 @@ impl StoredRoom {
         now: Instant,
         sequence: u64,
         resume_at_frame: u64,
+        scheduled_start: Option<ScheduledSessionStart>,
     ) {
+        self.synchronize_input_runtime_epoch();
         let room = self.record_event(now, "resumeScheduled", "coordinated resume scheduled");
         let _ = self.events.send(RoomEvent::SessionResumeScheduled {
             sequence,
             resume_at_frame,
+            scheduled_start,
             room,
         });
     }

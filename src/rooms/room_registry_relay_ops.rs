@@ -273,12 +273,16 @@ impl InMemoryRoomRegistry {
         let stored_room = rooms
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
-        let outcome = stored_room.room.mark_session_pause_reached_with_outcome(
-            connection_id,
-            sequence,
-            paused_at_frame,
-        )?;
         let now = self.clock.now();
+        let server_time_ms = self.server_time_ms_at(now);
+        let outcome = stored_room
+            .room
+            .mark_session_pause_reached_with_outcome_at(
+                connection_id,
+                sequence,
+                paused_at_frame,
+                server_time_ms,
+            )?;
 
         match outcome {
             SessionPauseReachedOutcome::Pausing(pause)
@@ -289,7 +293,18 @@ impl InMemoryRoomRegistry {
                 sequence,
                 resume_at_frame,
             } => {
-                stored_room.emit_session_resume_scheduled(now, sequence, resume_at_frame);
+                stored_room.emit_session_resume_scheduled(now, sequence, resume_at_frame, None);
+            }
+            SessionPauseReachedOutcome::ResumedV5 {
+                sequence,
+                scheduled_start,
+            } => {
+                stored_room.emit_session_resume_scheduled(
+                    now,
+                    sequence,
+                    scheduled_start.start_frame,
+                    Some(scheduled_start),
+                );
             }
         }
         let room = stored_room.view(now);
@@ -311,20 +326,30 @@ impl InMemoryRoomRegistry {
         let stored_room = rooms
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
-        let outcome = stored_room.room.request_session_resume_with_id(
+        let now = self.clock.now();
+        let server_time_ms = self.server_time_ms_at(now);
+        let outcome = stored_room.room.request_session_resume_with_id_at(
             connection_id,
             request_id,
             reason,
             sequence,
+            server_time_ms,
         )?;
-        let now = self.clock.now();
 
         match outcome {
             SessionResumeOutcome::StillPaused(pause) => {
                 stored_room.emit_session_pause_updated(now, pause);
             }
             SessionResumeOutcome::Resumed { resume_at_frame } => {
-                stored_room.emit_session_resume_scheduled(now, sequence, resume_at_frame);
+                stored_room.emit_session_resume_scheduled(now, sequence, resume_at_frame, None);
+            }
+            SessionResumeOutcome::ResumedV5 { scheduled_start } => {
+                stored_room.emit_session_resume_scheduled(
+                    now,
+                    sequence,
+                    scheduled_start.start_frame,
+                    Some(scheduled_start),
+                );
             }
         }
         let room = stored_room.view(now);

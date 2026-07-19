@@ -44,6 +44,7 @@ mod room_start_sync;
 mod room_state_hash_ops;
 mod room_status;
 mod room_strict_input_ops;
+mod room_v5_pause_ops;
 mod room_view;
 mod room_voice;
 mod room_voice_ops;
@@ -59,6 +60,8 @@ mod room_v5_compatibility_tests;
 mod room_v5_host_frame_tests;
 #[cfg(test)]
 mod room_v5_input_tests;
+#[cfg(test)]
+mod room_v5_pause_tests;
 #[cfg(test)]
 mod room_v5_test_support;
 

@@ -1,0 +1,167 @@
+use crate::protocol::{HostFrameOpen, SessionPauseReason};
+use crate::rooms::room_v5_test_support::{batch, v5_room};
+use crate::rooms::{
+    HostFrameOpenOutcome, PlayerIndex, RoomError, RoomStatus, SessionPauseReachedOutcome,
+    SessionResumeOutcome,
+};
+
+#[test]
+fn resume_bumps_epoch_clears_future_work_and_schedules_exact_pause_frame() {
+    let mut fixture = v5_room(RoomStatus::Playing);
+    let old_epoch_input = batch(&fixture, PlayerIndex::ONE, 0, &[1]);
+    fixture
+        .room
+        .accept_strict_input_batch(fixture.host_input, old_epoch_input.clone())
+        .expect("pre-pause input");
+    fixture.room.pending_host_frame_open = Some(0);
+    let old_session_epoch = fixture.room.session_epoch;
+
+    let pause = fixture
+        .room
+        .request_session_pause(fixture.host_control, SessionPauseReason::Menu, 0)
+        .expect("pause");
+    assert_eq!(pause.pause_at_frame, 8);
+    assert!(matches!(
+        fixture.room.mark_session_pause_reached_with_outcome_at(
+            fixture.host_control,
+            pause.sequence,
+            pause.pause_at_frame,
+            1_000,
+        ),
+        Ok(SessionPauseReachedOutcome::Pausing(_))
+    ));
+    assert!(matches!(
+        fixture.room.mark_session_pause_reached_with_outcome_at(
+            fixture.guest_control,
+            pause.sequence,
+            pause.pause_at_frame,
+            1_000,
+        ),
+        Ok(SessionPauseReachedOutcome::Paused(_))
+    ));
+
+    let outcome = fixture
+        .room
+        .request_session_resume_with_id_at(
+            fixture.host_control,
+            "resume-1".to_string(),
+            SessionPauseReason::Menu,
+            pause.sequence,
+            1_000,
+        )
+        .expect("resume");
+    let SessionResumeOutcome::ResumedV5 { scheduled_start } = outcome else {
+        panic!("expected v5 scheduled resume");
+    };
+
+    assert_eq!(fixture.room.session_epoch, old_session_epoch + 1);
+    assert_eq!(scheduled_start.session_epoch, old_session_epoch + 1);
+    assert_eq!(scheduled_start.start_frame, pause.pause_at_frame);
+    assert!(scheduled_start.server_time_ms > 1_000);
+    assert_eq!(fixture.room.status(), RoomStatus::StartScheduled);
+    assert!(fixture.room.last_input_frames.is_empty());
+    assert!(fixture.room.next_input_frames.is_empty());
+    assert!(fixture.room.pending_host_frame_open.is_none());
+    assert!(matches!(
+        fixture
+            .room
+            .accept_strict_input_batch(fixture.host_input, old_epoch_input),
+        Err(RoomError::StaleSessionEpoch)
+    ));
+}
+
+#[test]
+fn early_holder_release_auto_schedules_after_both_exact_acks() {
+    let mut fixture = v5_room(RoomStatus::Playing);
+    let pause = fixture
+        .room
+        .request_session_pause(fixture.host_control, SessionPauseReason::Menu, 20)
+        .expect("pause");
+    assert!(matches!(
+        fixture.room.request_session_resume_with_id_at(
+            fixture.host_control,
+            "resume-early".to_string(),
+            SessionPauseReason::Menu,
+            pause.sequence,
+            2_000,
+        ),
+        Ok(SessionResumeOutcome::StillPaused(_))
+    ));
+    fixture
+        .room
+        .mark_session_pause_reached_with_outcome_at(
+            fixture.host_control,
+            pause.sequence,
+            pause.pause_at_frame,
+            2_000,
+        )
+        .expect("host ack");
+    assert!(matches!(
+        fixture.room.mark_session_pause_reached_with_outcome_at(
+            fixture.guest_control,
+            pause.sequence,
+            pause.pause_at_frame,
+            2_000,
+        ),
+        Ok(SessionPauseReachedOutcome::ResumedV5 { scheduled_start, .. })
+            if scheduled_start.start_frame == pause.pause_at_frame
+    ));
+}
+
+#[test]
+fn v5_rejects_an_inexact_pause_ack() {
+    let mut fixture = v5_room(RoomStatus::Playing);
+    let pause = fixture
+        .room
+        .request_session_pause(fixture.host_control, SessionPauseReason::Menu, 0)
+        .expect("pause");
+
+    assert_eq!(
+        fixture.room.mark_session_pause_reached_with_outcome_at(
+            fixture.host_control,
+            pause.sequence,
+            pause.pause_at_frame + 1,
+            1_000,
+        ),
+        Err(RoomError::RoomNotReady)
+    );
+}
+
+#[test]
+fn host_cannot_open_the_pause_boundary_or_later() {
+    let mut fixture = v5_room(RoomStatus::Playing);
+    let input = batch(&fixture, PlayerIndex::ONE, 0, &[1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    fixture
+        .room
+        .accept_strict_input_batch(fixture.host_input, input)
+        .expect("host input");
+    let pause = fixture
+        .room
+        .request_session_pause(fixture.host_control, SessionPauseReason::Menu, 0)
+        .expect("pause");
+
+    for frame in 0..pause.pause_at_frame {
+        let open = host_open(&fixture, frame);
+        assert!(matches!(
+            fixture
+                .room
+                .accept_host_frame_open(fixture.host_input, open, 100),
+            Ok(HostFrameOpenOutcome::Released(_))
+        ));
+    }
+    let blocked = host_open(&fixture, pause.pause_at_frame);
+    assert!(matches!(
+        fixture
+            .room
+            .accept_host_frame_open(fixture.host_input, blocked, 100),
+        Err(RoomError::OutOfOrderFrame)
+    ));
+}
+
+fn host_open(fixture: &super::room_v5_test_support::V5RoomFixture, frame: u64) -> HostFrameOpen {
+    HostFrameOpen {
+        room_epoch: fixture.room.room_epoch,
+        session_epoch: fixture.room.session_epoch,
+        frame,
+    }
+}

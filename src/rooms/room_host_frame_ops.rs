@@ -51,6 +51,13 @@ impl NetplayRoom {
         if open.frame > self.next_release_frame || !self.host_input_covers(open.frame) {
             return Err(RoomError::OutOfOrderFrame);
         }
+        if self
+            .pause_state
+            .as_ref()
+            .is_some_and(|pause| open.frame >= pause.pause_at_frame())
+        {
+            return Err(RoomError::OutOfOrderFrame);
+        }
 
         if self.status == RoomStatus::StartScheduled {
             let start = self.scheduled_start().ok_or(RoomError::RoomNotReady)?;
