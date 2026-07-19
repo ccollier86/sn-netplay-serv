@@ -102,6 +102,8 @@ impl std::fmt::Debug for WebSocketJoinRequest {
 pub struct WebSocketInputJoinRequest {
     /// Room invite code.
     pub invite_code: InviteCode,
+    /// Exact room protocol validated before the WebSocket upgrade.
+    pub protocol_version: u16,
     /// Player slot attaching this input socket.
     pub player_index: PlayerIndex,
     /// Room epoch observed by the client.
@@ -117,6 +119,7 @@ impl std::fmt::Debug for WebSocketInputJoinRequest {
         formatter
             .debug_struct("WebSocketInputJoinRequest")
             .field("invite_code", &self.invite_code)
+            .field("protocol_version", &self.protocol_version)
             .field("player_index", &self.player_index)
             .field("room_epoch", &self.room_epoch)
             .field("session_epoch", &self.session_epoch)
@@ -158,6 +161,7 @@ mod tests {
         };
         let input = WebSocketInputJoinRequest {
             invite_code: InviteCode::parse("AB23-CD").expect("invite"),
+            protocol_version: crate::protocol::NETPLAY_PROTOCOL_VERSION,
             player_index: PlayerIndex::ONE,
             room_epoch: 7,
             session_epoch: 9,

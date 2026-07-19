@@ -6,10 +6,11 @@
 use crate::http::AppServices;
 use crate::protocol::{
     decode_fast_input_batch, decode_input_frame_batch, encode_input_frame_batch,
-    encode_server_frame,
+    encode_server_frame, encode_server_frame_release_v5, encode_strict_input_batch,
 };
 use crate::rooms::{ConnectionId, RoomError, RoomInputEvent};
 use crate::transport::WebSocketInputJoinRequest;
+use crate::transport::websocket_input_v5::handle_v5_binary_message;
 use crate::transport::websocket_outbound::{
     SocketSender, send_binary_bytes, send_binary_message, send_room_error, send_static_error,
     send_upgrade_error,
@@ -65,6 +66,7 @@ pub async fn handle_websocket_input_session(
         &services,
         &request.invite_code,
         connection_id,
+        request.protocol_version,
     )
     .await;
 
@@ -81,16 +83,24 @@ async fn input_session_loop(
     services: &AppServices,
     invite_code: &crate::rooms::InviteCode,
     connection_id: ConnectionId,
+    protocol_version: u16,
 ) {
     loop {
         tokio::select! {
             incoming = receiver.next() => {
-                if !handle_incoming(sender, services, invite_code, connection_id, incoming).await {
+                if !handle_incoming(
+                    sender,
+                    services,
+                    invite_code,
+                    connection_id,
+                    protocol_version,
+                    incoming,
+                ).await {
                     break;
                 }
             }
             event = events.recv() => {
-                if !handle_room_event(sender, connection_id, event).await {
+                if !handle_room_event(sender, connection_id, protocol_version, event).await {
                     break;
                 }
             }
@@ -103,11 +113,15 @@ async fn handle_incoming(
     services: &AppServices,
     invite_code: &crate::rooms::InviteCode,
     connection_id: ConnectionId,
+    protocol_version: u16,
     incoming: Option<Result<Message, axum::Error>>,
 ) -> bool {
     match incoming {
         Some(Ok(Message::Binary(payload))) => {
-            if payload.starts_with(b"SBI2") {
+            if protocol_version >= 5 {
+                handle_v5_binary_message(sender, services, invite_code, connection_id, &payload)
+                    .await
+            } else if payload.starts_with(b"SBI2") {
                 handle_fast_input(sender, services, invite_code, connection_id, payload).await
             } else {
                 handle_legacy_input(sender, services, invite_code, connection_id, &payload).await
@@ -284,10 +298,14 @@ fn is_droppable_input_error(error: &RoomError) -> bool {
 async fn handle_room_event(
     sender: &mut SocketSender,
     connection_id: ConnectionId,
+    protocol_version: u16,
     event: Result<RoomInputEvent, tokio::sync::broadcast::error::RecvError>,
 ) -> bool {
     match event {
         Ok(RoomInputEvent::InputFrameBatch { source, batch }) => {
+            if protocol_version >= 5 {
+                return true;
+            }
             if source == connection_id {
                 return true;
             }
@@ -299,6 +317,9 @@ async fn handle_room_event(
             send_binary_message(sender, payload).await.is_ok()
         }
         Ok(RoomInputEvent::FastInputFrame { source, frame }) => {
+            if protocol_version >= 5 {
+                return true;
+            }
             if source == connection_id {
                 return true;
             }
@@ -306,9 +327,32 @@ async fn handle_room_event(
             send_binary_bytes(sender, frame.encoded()).await.is_ok()
         }
         Ok(RoomInputEvent::ServerFrame { frame }) => {
+            if protocol_version >= 5 {
+                return true;
+            }
             send_binary_message(sender, encode_server_frame(&frame))
                 .await
                 .is_ok()
+        }
+        Ok(RoomInputEvent::StrictInputBatch { source, batch }) => {
+            if protocol_version < 5 || source == connection_id {
+                return true;
+            }
+            let payload = match encode_strict_input_batch(&batch) {
+                Ok(payload) => payload,
+                Err(_) => return false,
+            };
+            send_binary_message(sender, payload).await.is_ok()
+        }
+        Ok(RoomInputEvent::ServerFrameV5 { release }) => {
+            if protocol_version < 5 {
+                return true;
+            }
+            let payload = match encode_server_frame_release_v5(&release) {
+                Ok(payload) => payload,
+                Err(_) => return false,
+            };
+            send_binary_message(sender, payload).await.is_ok()
         }
         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => false,
         Err(tokio::sync::broadcast::error::RecvError::Closed) => false,

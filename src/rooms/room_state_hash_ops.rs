@@ -4,7 +4,8 @@
 //! relay compares reports only after every connected player reported that frame.
 
 use crate::protocol::{
-    NearbyStateHashMatchView, PlayerStateHashView, StateHashMismatchView, StateHashReport,
+    NearbyStateHashMatchView, PlayerStateHashView, StateDigestMode, StateHashMismatchView,
+    StateHashReport,
 };
 use crate::rooms::{
     ConnectionId, NetplayRoom, PlayerRuntimeState, PlayerStatus, RoomError, RoomStatus,
@@ -21,6 +22,8 @@ const STATE_HASH_TRUE_MISMATCHES_BEFORE_RESYNC: u8 = 1;
 /// Result of accepting a deterministic state-hash report.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum StateHashEvaluation {
+    /// The negotiated profile does not produce or compare state digests.
+    Disabled,
     /// Waiting for every connected player to report the compared frame.
     Pending,
     /// All connected players reported matching state for this frame.
@@ -43,6 +46,11 @@ impl NetplayRoom {
     ) -> Result<StateHashEvaluation, RoomError> {
         if self.status != RoomStatus::Playing && self.status != RoomStatus::Paused {
             return Err(RoomError::NotPlaying);
+        }
+
+        let digest_mode = self.state_digest_mode();
+        if digest_mode == StateDigestMode::Disabled {
+            return Ok(StateHashEvaluation::Disabled);
         }
 
         report.validate().map_err(|_| RoomError::InvalidPayload)?;
@@ -101,7 +109,9 @@ impl NetplayRoom {
         if !mismatch.nearby_matches.is_empty() {
             self.record_state_hash_true_mismatch();
 
-            if self.state_hash_true_mismatch_streak >= STATE_HASH_TRUE_MISMATCHES_BEFORE_RESYNC {
+            if digest_mode == StateDigestMode::Authoritative
+                && self.state_hash_true_mismatch_streak >= STATE_HASH_TRUE_MISMATCHES_BEFORE_RESYNC
+            {
                 self.enter_state_hash_resync(mismatch.repair_frame);
                 return Ok(StateHashEvaluation::ResyncRequired(mismatch));
             }
@@ -111,7 +121,9 @@ impl NetplayRoom {
 
         self.record_state_hash_true_mismatch();
 
-        if self.state_hash_true_mismatch_streak >= STATE_HASH_TRUE_MISMATCHES_BEFORE_RESYNC {
+        if digest_mode == StateDigestMode::Authoritative
+            && self.state_hash_true_mismatch_streak >= STATE_HASH_TRUE_MISMATCHES_BEFORE_RESYNC
+        {
             self.enter_state_hash_resync(mismatch.repair_frame);
             return Ok(StateHashEvaluation::ResyncRequired(mismatch));
         }

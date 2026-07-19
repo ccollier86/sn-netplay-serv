@@ -8,6 +8,7 @@ use crate::file_relay::FileRelayBroker;
 use crate::http::AdminAuthorizer;
 use crate::lobbies::LobbyRegistry;
 use crate::observability::MetricsRecorder;
+use crate::protocol::NetplayProtocolRolloutPolicy;
 use crate::protocol::{
     NetplayClientKind, NetplayRoomMode, NetplaySessionDescriptor, RomRelayCapability,
     RomRelayCapabilityReason, RomRelayIntent,
@@ -107,6 +108,8 @@ pub struct AppServices {
     pub rate_limiter: Arc<dyn RateLimiter>,
     /// Process metrics recorder.
     pub metrics: Arc<dyn MetricsRecorder>,
+    /// Platform-scoped netplay protocol rollout policy.
+    pub protocol_rollout: NetplayProtocolRolloutPolicy,
     /// Internal endpoint authorizer.
     pub admin_authorizer: AdminAuthorizer,
     /// Whether proxy forwarding headers are trusted for client identity.
@@ -129,6 +132,8 @@ pub struct AppServiceDependencies {
     pub rate_limiter: Arc<dyn RateLimiter>,
     /// Process metrics recorder.
     pub metrics: Arc<dyn MetricsRecorder>,
+    /// Platform-scoped netplay protocol rollout policy.
+    pub protocol_rollout: NetplayProtocolRolloutPolicy,
     /// Internal endpoint authorizer.
     pub admin_authorizer: AdminAuthorizer,
     /// Whether proxy forwarding headers are trusted for client identity.
@@ -146,6 +151,7 @@ impl AppServices {
             file_relay_policy: dependencies.file_relay_policy,
             rate_limiter: dependencies.rate_limiter,
             metrics: dependencies.metrics,
+            protocol_rollout: dependencies.protocol_rollout,
             admin_authorizer: dependencies.admin_authorizer,
             trust_proxy_headers: dependencies.trust_proxy_headers,
         }

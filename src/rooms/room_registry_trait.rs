@@ -6,15 +6,17 @@
 
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    ClientRuntimeState, CompatibilityFingerprint, FastInputBatch, InputFrame, InputFrameBatch,
-    LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, RomRelayBlockReason,
-    RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayProgress, SessionPauseReason,
-    SnapshotChunk, SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport,
+    ClientRuntimeState, CompatibilityFingerprint, FastInputBatch, HostFrameOpen,
+    InputCursorResponse, InputFrame, InputFrameBatch, LinkCableCompatibility, LinkCablePacket,
+    NetplaySessionDescriptor, RomRelayBlockReason, RomRelayCancelled, RomRelayCompletion,
+    RomRelayFailure, RomRelayProgress, SessionPauseReason, SnapshotChunk,
+    SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport, StrictInputBatch,
 };
 use crate::rooms::{
-    ClientTransportCapabilities, ConnectionId, InviteCode, PlayerIndex, RomRelayGrantPair,
-    RomRelayTransferIntent, RoomDebugEvent, RoomError, RoomEvent, RoomInputEvent, RoomJoin,
-    RoomRegistrySnapshot, RoomView, RoomVoiceTokenRefresh, SnapshotFileRelayTransferIntent,
+    ClientTransportCapabilities, ConnectionId, HostFrameRelayOutcome, InviteCode, PlayerIndex,
+    RomRelayGrantPair, RomRelayTransferIntent, RoomDebugEvent, RoomError, RoomEvent,
+    RoomInputEvent, RoomJoin, RoomRegistrySnapshot, RoomView, RoomVoiceTokenRefresh,
+    SnapshotFileRelayTransferIntent,
 };
 use tokio::sync::broadcast;
 
@@ -35,6 +37,15 @@ pub trait RoomRegistry: Send + Sync {
         host: VerifiedLicense,
         host_connection: ConnectionId,
         session: NetplaySessionDescriptor,
+    ) -> Result<RoomView, RoomError>;
+
+    /// Creates a room using one exact protocol selected at the HTTP boundary.
+    async fn create_room_with_protocol(
+        &self,
+        host: VerifiedLicense,
+        host_connection: ConnectionId,
+        session: NetplaySessionDescriptor,
+        protocol_version: u16,
     ) -> Result<RoomView, RoomError>;
 
     /// Adds a verified guest to an existing room.
@@ -298,6 +309,31 @@ pub trait RoomRegistry: Send + Sync {
         invite_code: InviteCode,
         connection_id: ConnectionId,
         batch: FastInputBatch,
+    ) -> Result<(), RoomError>;
+
+    /// Validates strict v5 input and returns its cumulative cursor response.
+    async fn relay_strict_input_batch(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        batch: StrictInputBatch,
+    ) -> Result<InputCursorResponse, RoomError>;
+
+    /// Validates a host frame open and returns its transport scheduling result.
+    async fn relay_host_frame_open(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        open: HostFrameOpen,
+    ) -> Result<HostFrameRelayOutcome, RoomError>;
+
+    /// Executes the one-shot scheduled release for an early v5 first frame.
+    async fn release_scheduled_v5_host_frame(
+        &self,
+        invite_code: InviteCode,
+        room_epoch: u64,
+        session_epoch: u64,
+        frame: u64,
     ) -> Result<(), RoomError>;
 
     /// Validates and broadcasts one virtual link-cable packet.

@@ -120,6 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         rate_limiter,
         metrics,
+        protocol_rollout: config.protocol_rollout,
         admin_authorizer,
         trust_proxy_headers: config.trust_proxy_headers,
     });

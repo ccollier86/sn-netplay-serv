@@ -634,6 +634,7 @@ fn limited_app(create_room_per_minute: u32) -> axum::Router {
             room_status_per_minute: 120,
         })),
         metrics: Arc::new(InMemoryMetrics::new()),
+        protocol_rollout: crate::protocol::NetplayProtocolRolloutPolicy::default(),
         admin_authorizer: AdminAuthorizer::new(Some("admin-token".to_string())),
         trust_proxy_headers: false,
     });

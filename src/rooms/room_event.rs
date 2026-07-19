@@ -6,8 +6,8 @@
 use crate::protocol::{
     FastInputFrame, InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket,
     RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayGrant, RomRelayProgress,
-    ScheduledSessionStart, ServerFrame, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant,
-    SnapshotManifest, StateHashMismatchView,
+    ScheduledSessionStart, ServerFrame, ServerFrameReleaseV5, SessionPauseView, SnapshotChunk,
+    SnapshotFileRelayGrant, SnapshotManifest, StateHashMismatchView, StrictInputBatch,
 };
 use crate::rooms::{ConnectionId, RoomView};
 
@@ -223,9 +223,21 @@ pub enum RoomInputEvent {
         /// Validated self-contained fast-input record.
         frame: FastInputFrame,
     },
+    /// Strict protocol v5 input should be relayed immediately to the peer.
+    StrictInputBatch {
+        /// Input socket that supplied the batch.
+        source: ConnectionId,
+        /// Newly accepted contiguous input suffix.
+        batch: StrictInputBatch,
+    },
     /// Canonical server frame released to every input socket.
     ServerFrame {
         /// Relay-owned frame release cursor.
         frame: ServerFrame,
+    },
+    /// Host-driven protocol v5 frame release sent to every input socket.
+    ServerFrameV5 {
+        /// Cumulative frame and accepted-input cursors.
+        release: ServerFrameReleaseV5,
     },
 }

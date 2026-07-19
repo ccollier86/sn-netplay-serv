@@ -9,6 +9,7 @@ mod client_network_quality;
 mod client_runtime_state;
 mod clock_sync;
 mod compatibility;
+mod compatibility_v5;
 mod descriptor_validation;
 mod fast_input;
 mod input_batch;
@@ -20,6 +21,7 @@ mod link_cable_packet;
 mod lobby_file_relay;
 mod lobby_messages;
 mod netplay_protocol;
+mod protocol_rollout;
 mod rom_relay;
 mod scheduled_start;
 mod server_frame;
@@ -31,6 +33,7 @@ mod session_pause;
 mod snapshot;
 mod snapshot_file_relay;
 mod state_hash;
+mod strict_input;
 mod voice_descriptor;
 
 pub use client_kind::NetplayClientKind;
@@ -41,6 +44,7 @@ pub use clock_sync::{
     ClockSyncEstimate, ClockSyncPing, ClockSyncPong, ClockSyncSample, ClockSyncSampleRequest,
 };
 pub use compatibility::{CompatibilityFingerprint, CompatibilityMismatch};
+pub use compatibility_v5::{DeterminismProfileV5, StateDigestMode};
 pub use fast_input::{
     FastInputBatch, FastInputCodecError, FastInputFrame, decode_fast_input_batch,
     encode_fast_input_frame,
@@ -59,9 +63,12 @@ pub use lobby_file_relay::{
 };
 pub use lobby_messages::{LobbyClientMessage, LobbyServerMessage};
 pub use netplay_protocol::{
-    MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION, NETPLAY_PROTOCOL_VERSION, NetplayProtocolView,
-    ProtocolVersionError, validate_client_protocol_version,
+    LEGACY_NETPLAY_PROTOCOL_VERSION, MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION,
+    NETPLAY_PROTOCOL_VERSION, NetplayProtocolView, ProtocolVersionError,
+    negotiate_client_protocol_version, validate_client_protocol_version,
+    validate_room_protocol_version,
 };
+pub use protocol_rollout::NetplayProtocolRolloutPolicy;
 pub use rom_relay::{
     NetplayRoomMode, RomIdentity, RomRelayBlockReason, RomRelayBlocked, RomRelayCancelled,
     RomRelayCapability, RomRelayCapabilityReason, RomRelayCompletion, RomRelayFailReason,
@@ -89,5 +96,13 @@ pub use snapshot_file_relay::{
 };
 pub use state_hash::{
     NearbyStateHashMatchView, PlayerStateHashView, StateHashMismatchView, StateHashReport,
+};
+pub use strict_input::{
+    AcceptedInputCursor, HostFrameOpen, InputCursorAck, InputCursorNack, InputCursorNackReason,
+    InputCursorResponse, RetropadInputPayload, ServerFrameReleaseV5, StrictInputBatch,
+    StrictInputCodecError, V5_INPUT_CODEC_ID, V5_INPUT_PREDICTOR_ID, decode_host_frame_open,
+    decode_input_cursor_ack, decode_input_cursor_nack, decode_server_frame_release_v5,
+    decode_strict_input_batch, encode_host_frame_open, encode_input_cursor_ack,
+    encode_input_cursor_nack, encode_server_frame_release_v5, encode_strict_input_batch,
 };
 pub use voice_descriptor::{NetplayVoiceDescriptor, NetplayVoiceMode};

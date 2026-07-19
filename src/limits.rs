@@ -32,6 +32,15 @@ pub const MAX_INPUT_BATCH_FRAMES: usize = 4;
 /// Maximum accepted binary input-batch message size.
 pub const MAX_INPUT_BATCH_BYTES: usize = 8 * 1024;
 
+/// Exact byte width of `shadowboy-retropad-v1-le` controller input.
+pub const V5_RETROPAD_INPUT_BYTES: usize = 10;
+
+/// Maximum accepted lead over the protocol v5 host-open cursor.
+pub const V5_MAX_FUTURE_FRAME_DISTANCE: u64 = 96;
+
+/// Minimum local-input retention required by protocol v5 clients.
+pub const V5_RETAINED_INPUT_FRAMES: usize = 128;
+
 /// Maximum size for one snapshot chunk relayed through the server.
 pub const MAX_SNAPSHOT_CHUNK_BYTES: usize = 256 * 1024;
 

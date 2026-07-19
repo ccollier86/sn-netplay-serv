@@ -11,7 +11,7 @@ use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, LobbyClientCapabilities, LobbyJoin, LobbyView,
     MAX_LOBBY_PLAYERS, PublicLobbySummary,
 };
-use crate::protocol::validate_client_protocol_version;
+use crate::protocol::{NetplayClientKind, validate_client_protocol_version};
 use crate::rate_limit::RateLimitAction;
 use crate::rooms::PlayerVoiceJoinGrant;
 use crate::rooms::{InviteCode, PlayerIndex};
@@ -56,6 +56,10 @@ pub async fn create_lobby(
     };
     let request = parse_create_lobby_request(&body)?;
     validate_client_protocol_version(request.protocol_version)?;
+    services.protocol_rollout.validate_exact(
+        netplay_client_kind(license.client_kind),
+        request.protocol_version,
+    )?;
     let join = services
         .lobbies
         .create_lobby(license, request.params)
@@ -91,6 +95,10 @@ pub async fn join_lobby(
     };
     let request = parse_join_lobby_request(&body)?;
     validate_client_protocol_version(request.protocol_version)?;
+    services.protocol_rollout.validate_exact(
+        netplay_client_kind(license.client_kind),
+        request.protocol_version,
+    )?;
     let invite_code = InviteCode::parse(invite_code)?;
     let join = services
         .lobbies
@@ -194,10 +202,14 @@ pub async fn websocket_lobby(
             return Err(error.into());
         }
     };
-    validate_client_protocol_version(query.protocol_version.ok_or(HttpError::InvalidRequest {
+    let protocol_version = query.protocol_version.ok_or(HttpError::InvalidRequest {
         code: "missingProtocolVersion",
         message: "Netplay protocol version is required.",
-    })?)?;
+    })?;
+    validate_client_protocol_version(protocol_version)?;
+    services
+        .protocol_rollout
+        .validate_exact(netplay_client_kind(license.client_kind), protocol_version)?;
     let invite_code = InviteCode::parse(&query.invite_code)?;
     let reconnect = reconnect_query(&query)?;
     let capabilities = lobby_capabilities(&query, license.client_kind);
@@ -215,6 +227,14 @@ pub async fn websocket_lobby(
         .max_message_size(crate::limits::MAX_WEBSOCKET_MESSAGE_BYTES)
         .max_frame_size(crate::limits::MAX_WEBSOCKET_FRAME_BYTES)
         .on_upgrade(move |socket| handle_websocket_lobby_session(socket, services, join_request)))
+}
+
+fn netplay_client_kind(client_kind: crate::auth::ClientKind) -> NetplayClientKind {
+    match client_kind {
+        crate::auth::ClientKind::Desktop => NetplayClientKind::Desktop,
+        crate::auth::ClientKind::Android => NetplayClientKind::Android,
+        crate::auth::ClientKind::Ios => NetplayClientKind::Ios,
+    }
 }
 
 fn parse_create_lobby_request(body: &[u8]) -> Result<CreateLobbyRequest, HttpError> {

@@ -9,6 +9,7 @@ use std::net::{AddrParseError, SocketAddr};
 
 use crate::file_relay::FileRelayConfig;
 use crate::observability::{PostgresDsn, PostgresTableNames};
+use crate::protocol::NetplayProtocolRolloutPolicy;
 use crate::rate_limit::RateLimitPolicy;
 use crate::rooms::RoomRecoveryConfig;
 
@@ -27,6 +28,8 @@ pub struct ServerConfig {
     pub trust_proxy_headers: bool,
     /// Per-action request rate limits.
     pub rate_limits: RateLimitPolicy,
+    /// Protocol kill switch and platform-specific minimum versions.
+    pub protocol_rollout: NetplayProtocolRolloutPolicy,
     /// In-memory room recovery and heartbeat timing.
     pub recovery: RoomRecoveryConfig,
     /// How long a lobby may remain without meaningful user or gameplay activity.
@@ -69,6 +72,13 @@ impl ServerConfig {
                 120,
             )?,
         };
+        let protocol_rollout = NetplayProtocolRolloutPolicy::new(
+            optional_bool_env("SB_NETPLAY_V5_ENABLED", true)?,
+            optional_u16_env("SB_NETPLAY_MIN_PROTOCOL_ANDROID", 4)?,
+            optional_u16_env("SB_NETPLAY_MIN_PROTOCOL_IOS", 4)?,
+            optional_u16_env("SB_NETPLAY_MIN_PROTOCOL_DESKTOP", 4)?,
+        )
+        .map_err(|_| ConfigError::InvalidProtocolRollout)?;
         let recovery = RoomRecoveryConfig {
             runner_handoff_grace: optional_duration_seconds_env(
                 "SB_NETPLAY_RUNNER_HANDOFF_GRACE_SECONDS",
@@ -103,6 +113,7 @@ impl ServerConfig {
             admin_token,
             trust_proxy_headers,
             rate_limits,
+            protocol_rollout,
             recovery,
             lobby_idle,
             log,
@@ -319,6 +330,17 @@ fn optional_u32_env(name: &'static str, default: u32) -> Result<u32, ConfigError
     }
 }
 
+fn optional_u16_env(name: &'static str, default: u16) -> Result<u16, ConfigError> {
+    match env::var(name) {
+        Ok(value) if !value.trim().is_empty() => value
+            .trim()
+            .parse()
+            .map_err(|_| ConfigError::InvalidUnsigned(name)),
+        Ok(_) => Err(ConfigError::EmptyEnv(name)),
+        Err(_) => Ok(default),
+    }
+}
+
 fn optional_duration_seconds_env(
     name: &'static str,
     default_seconds: u64,
@@ -402,6 +424,9 @@ pub enum ConfigError {
     /// Unsigned integer variable used an unsupported value.
     #[error("environment variable {0} must be an unsigned integer")]
     InvalidUnsigned(&'static str),
+    /// Platform protocol minimums conflict with the enabled server range.
+    #[error("netplay protocol rollout minimums must fit the enabled server range")]
+    InvalidProtocolRollout,
     /// Log format variable used an unsupported value.
     #[error("environment variable {0} must be compact or json")]
     InvalidLogFormat(&'static str),

@@ -21,16 +21,18 @@ impl InMemoryRoomRegistry {
         host: VerifiedLicense,
         host_connection: ConnectionId,
         session: NetplaySessionDescriptor,
+        protocol_version: u16,
     ) -> Result<RoomView, RoomError> {
         let invite_code = self.invite_code_generator.generate();
         let resume_token = self.resume_token_generator.generate();
         let input_socket_token = self.resume_token_generator.generate();
         let now = self.clock.now();
-        let mut room = NetplayRoom::new_with_resume(
+        let mut room = NetplayRoom::new_with_protocol_and_resume(
             host,
             host_connection,
             invite_code.clone(),
             session,
+            protocol_version,
             resume_token.hash(),
             input_socket_token.hash(),
             now,

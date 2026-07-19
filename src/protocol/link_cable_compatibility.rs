@@ -3,7 +3,7 @@
 //! The server compares these values so clients with different link protocols or
 //! runtime profiles do not exchange timing-sensitive cable packets.
 
-use crate::protocol::{LinkCableDescriptor, NETPLAY_PROTOCOL_VERSION};
+use crate::protocol::LinkCableDescriptor;
 use serde::{Deserialize, Serialize};
 
 /// Link-cable runtime compatibility details for one client.
@@ -25,8 +25,7 @@ pub struct LinkCableCompatibility {
 impl LinkCableCompatibility {
     /// Returns whether this client can join the room described by `link`.
     pub fn matches_descriptor(&self, link: &LinkCableDescriptor) -> bool {
-        self.protocol_version == NETPLAY_PROTOCOL_VERSION
-            && self.system_family == link.system_family
+        self.system_family == link.system_family
             && self.link_protocol == link.link_protocol
             && self.runtime_profile == link.runtime_profile
     }

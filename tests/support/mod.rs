@@ -13,7 +13,7 @@ use sb_netplay_serv::http::{
 };
 use sb_netplay_serv::lobbies::InMemoryLobbyRegistry;
 use sb_netplay_serv::observability::InMemoryMetrics;
-use sb_netplay_serv::protocol::NETPLAY_PROTOCOL_VERSION;
+use sb_netplay_serv::protocol::LEGACY_NETPLAY_PROTOCOL_VERSION;
 use sb_netplay_serv::rate_limit::{InMemoryRateLimiter, RateLimitPolicy};
 use sb_netplay_serv::rooms::{
     InMemoryRoomRegistry, InviteCode, InviteCodeGenerator, spawn_room_frame_clock_task,
@@ -155,7 +155,7 @@ impl SmokeClient {
         };
         let mut request = format!(
             "{}/v1/ws?inviteCode={}&role={role}&protocolVersion={}{}",
-            server.ws_base, INVITE_CODE, NETPLAY_PROTOCOL_VERSION, runner_handoff_query
+            server.ws_base, INVITE_CODE, LEGACY_NETPLAY_PROTOCOL_VERSION, runner_handoff_query
         )
         .into_client_request()
         .expect("websocket request");
@@ -194,7 +194,7 @@ impl SmokeClient {
             .expect("handoff resume token");
         let request = format!(
             "{}/v1/ws?inviteCode={}&protocolVersion={}&playerIndex={player_index}&roomEpoch={room_epoch}&resumeToken={resume_token}",
-            server.ws_base, INVITE_CODE, NETPLAY_PROTOCOL_VERSION
+            server.ws_base, INVITE_CODE, LEGACY_NETPLAY_PROTOCOL_VERSION
         )
         .into_client_request()
         .expect("resume websocket request");
@@ -246,7 +246,7 @@ impl SmokeClient {
             "{}/v1/ws/input?inviteCode={}&protocolVersion={}&playerIndex={player_index}&roomEpoch={}&sessionEpoch={}&inputSocketToken={}",
             server.ws_base,
             INVITE_CODE,
-            NETPLAY_PROTOCOL_VERSION,
+            LEGACY_NETPLAY_PROTOCOL_VERSION,
             self.room_epoch,
             self.session_epoch,
             input_socket_token
@@ -277,7 +277,7 @@ impl SmokeClient {
 pub fn compatibility_fingerprint() -> Value {
     json!({
         "desktopVersion": "0.2.13",
-        "protocolVersion": NETPLAY_PROTOCOL_VERSION,
+        "protocolVersion": LEGACY_NETPLAY_PROTOCOL_VERSION,
         "systemId": "gamecube",
         "coreId": "dolphin",
         "coreBuild": "5.0-netplay",
@@ -328,7 +328,7 @@ pub async fn move_pair_to_syncing(host: &mut SmokeClient, guest: &mut SmokeClien
 
 pub fn link_cable_compatibility() -> Value {
     json!({
-        "protocolVersion": NETPLAY_PROTOCOL_VERSION,
+        "protocolVersion": LEGACY_NETPLAY_PROTOCOL_VERSION,
         "systemFamily": "gba",
         "linkProtocol": "gba-link-cable-v1",
         "runtimeProfile": "mgba-link-runtime-v1",
@@ -413,6 +413,7 @@ fn test_services(rooms: Arc<InMemoryRoomRegistry>, auth_calls: Arc<AtomicUsize>)
             room_status_per_minute: 100,
         })),
         metrics: Arc::new(InMemoryMetrics::new()),
+        protocol_rollout: sb_netplay_serv::protocol::NetplayProtocolRolloutPolicy::default(),
         admin_authorizer: AdminAuthorizer::new(None),
         trust_proxy_headers: false,
     })
@@ -420,7 +421,7 @@ fn test_services(rooms: Arc<InMemoryRoomRegistry>, auth_calls: Arc<AtomicUsize>)
 
 fn create_room_body() -> Value {
     json!({
-        "desktopProtocolVersion": NETPLAY_PROTOCOL_VERSION,
+        "desktopProtocolVersion": LEGACY_NETPLAY_PROTOCOL_VERSION,
         "session": {
             "hostAppVersion": "0.2.13",
             "game": {
@@ -444,7 +445,7 @@ fn create_room_body() -> Value {
 
 fn create_link_room_body() -> Value {
     json!({
-        "desktopProtocolVersion": NETPLAY_PROTOCOL_VERSION,
+        "desktopProtocolVersion": LEGACY_NETPLAY_PROTOCOL_VERSION,
         "session": {
             "hostAppVersion": "0.2.13",
             "mode": "linkCable",

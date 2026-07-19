@@ -18,6 +18,7 @@ use crate::lobbies::{LobbyDebugEvent, LobbyRegistrySnapshot};
 use crate::observability::MetricsSnapshot;
 use crate::protocol::{
     NetplayClientKind, NetplaySessionDescriptor, validate_client_protocol_version,
+    validate_room_protocol_version,
 };
 use crate::rate_limit::RateLimitAction;
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, RoomView};
@@ -120,9 +121,16 @@ pub async fn create_room(
         }
     };
     let request = parse_create_room_request(&body)?;
-    validate_client_protocol_version(request.desktop_protocol_version)?;
+    let client_kind = netplay_client_kind(license.client_kind);
+    let protocol_version = services.protocol_rollout.negotiate(
+        client_kind,
+        request
+            .minimum_protocol_version
+            .unwrap_or(request.desktop_protocol_version),
+        request.desktop_protocol_version,
+    )?;
     let mut session = request.session;
-    session.host_client_kind = Some(netplay_client_kind(license.client_kind));
+    session.host_client_kind = Some(client_kind);
     session.rom_relay = None;
     session.validate()?;
     session.rom_relay = services
@@ -130,7 +138,7 @@ pub async fn create_room(
         .direct_rom_relay_capability(services.file_relay.as_ref(), &session);
     let room = services
         .rooms
-        .create_room(license, ConnectionId::new(), session)
+        .create_room_with_protocol(license, ConnectionId::new(), session, protocol_version)
         .await?;
 
     services.metrics.record_room_created();
@@ -160,27 +168,26 @@ pub async fn websocket_room(
     headers: HeaderMap,
 ) -> Result<Response, HttpError> {
     enforce_capability_rate_limit(&services, &headers, connect_info)?;
-    validate_client_protocol_version(query.protocol_version.ok_or(HttpError::InvalidRequest {
+    let protocol_version = query.protocol_version.ok_or(HttpError::InvalidRequest {
         code: "missingProtocolVersion",
         message: "Desktop netplay protocol version is required.",
-    })?)?;
+    })?;
+    validate_client_protocol_version(protocol_version)?;
     let invite_code = InviteCode::parse(&query.invite_code)?;
     let reconnect = reconnect_query(&query)?;
+    if reconnect.is_some() && query.runner_handoff {
+        return Err(HttpError::InvalidRequest {
+            code: "invalidRunnerHandoffRequest",
+            message: "runnerHandoff is valid only for an initial room join.",
+        });
+    }
+    validate_exact_room_protocol(&services, &invite_code, protocol_version).await?;
     let intent = match reconnect {
-        Some(reconnect) => {
-            if query.runner_handoff {
-                return Err(HttpError::InvalidRequest {
-                    code: "invalidRunnerHandoffRequest",
-                    message: "runnerHandoff is valid only for an initial room join.",
-                });
-            }
-
-            WebSocketRoomJoinIntent::Resume {
-                player_index: reconnect.player_index,
-                room_epoch: reconnect.room_epoch,
-                resume_token: reconnect.resume_token,
-            }
-        }
+        Some(reconnect) => WebSocketRoomJoinIntent::Resume {
+            player_index: reconnect.player_index,
+            room_epoch: reconnect.room_epoch,
+            resume_token: reconnect.resume_token,
+        },
         None => {
             let path_and_query = uri
                 .path_and_query()
@@ -198,6 +205,9 @@ pub async fn websocket_room(
                     return Err(error.into());
                 }
             };
+            services
+                .protocol_rollout
+                .validate_exact(netplay_client_kind(license.client_kind), protocol_version)?;
 
             WebSocketRoomJoinIntent::Initial {
                 role: query.role,
@@ -231,11 +241,13 @@ pub async fn websocket_input_room(
     headers: HeaderMap,
 ) -> Result<Response, HttpError> {
     enforce_capability_rate_limit(&services, &headers, connect_info)?;
-    validate_client_protocol_version(query.protocol_version.ok_or(HttpError::InvalidRequest {
+    let protocol_version = query.protocol_version.ok_or(HttpError::InvalidRequest {
         code: "missingProtocolVersion",
         message: "Netplay protocol version is required.",
-    })?)?;
+    })?;
+    validate_client_protocol_version(protocol_version)?;
     let invite_code = InviteCode::parse(&query.invite_code)?;
+    validate_exact_room_protocol(&services, &invite_code, protocol_version).await?;
     let player_index = PlayerIndex::new(query.player_index, crate::limits::MVP_ROOM_CAPACITY)
         .ok_or(HttpError::InvalidRequest {
             code: "invalidPlayerIndex",
@@ -244,6 +256,7 @@ pub async fn websocket_input_room(
     let join_request = WebSocketInputJoinRequest {
         input_socket_token: query.input_socket_token,
         invite_code,
+        protocol_version,
         player_index,
         room_epoch: query.room_epoch,
         session_epoch: query.session_epoch,
@@ -260,6 +273,20 @@ fn parse_create_room_request(body: &[u8]) -> Result<CreateRoomRequest, HttpError
         code: "invalidCreateRoomRequest",
         message: "Create-room request JSON is invalid.",
     })
+}
+
+async fn validate_exact_room_protocol(
+    services: &AppServices,
+    invite_code: &InviteCode,
+    protocol_version: u16,
+) -> Result<(), HttpError> {
+    let room = services.rooms.room_view(invite_code.clone()).await?;
+    validate_room_protocol_version(protocol_version, room.protocol.room_protocol_version).map_err(
+        |_| HttpError::InvalidRequest {
+            code: "roomProtocolVersionMismatch",
+            message: "Update ShadowBoy to join this netplay room.",
+        },
+    )
 }
 
 fn netplay_client_kind(client_kind: crate::auth::ClientKind) -> NetplayClientKind {
@@ -509,8 +536,11 @@ impl EventLogQuery {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRoomRequest {
-    /// Desktop netplay protocol version.
+    /// Newest netplay protocol version supported by this client.
     pub desktop_protocol_version: u16,
+    /// Oldest netplay protocol version supported by this client.
+    #[serde(default)]
+    pub minimum_protocol_version: Option<u16>,
     /// Game/core details for invite preview and ROM matching.
     pub session: NetplaySessionDescriptor,
 }

@@ -7,7 +7,7 @@ use super::{InMemoryRoomRegistry, RoomRegistry};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
     ClientRuntimeState, CompatibilityFingerprint, InputFrame, InputFrameBatch,
-    NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor, SessionPauseReason, SnapshotChunk,
+    LEGACY_NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor, SessionPauseReason, SnapshotChunk,
     SnapshotManifest, StateHashReport,
 };
 use crate::rooms::{
@@ -1335,7 +1335,7 @@ fn descriptor() -> NetplaySessionDescriptor {
 fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {
     CompatibilityFingerprint {
         desktop_version: "0.2.10".to_string(),
-        protocol_version: NETPLAY_PROTOCOL_VERSION,
+        protocol_version: LEGACY_NETPLAY_PROTOCOL_VERSION,
         system_id: "gamecube".to_string(),
         core_id: "dolphin".to_string(),
         core_build: "core-build".to_string(),
@@ -1345,6 +1345,7 @@ fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {
         cheats_hash: "cheats".to_string(),
         system_data_hash: None,
         save_data_mode: "netplay".to_string(),
+        determinism_v5: None,
     }
 }
 

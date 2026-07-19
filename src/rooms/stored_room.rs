@@ -8,8 +8,8 @@ use crate::protocol::{
     ClientNetworkQualityReport, ClientRuntimeState, ClockSyncSampleRequest, FastInputFrame,
     InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket, RomRelayCancelled,
     RomRelayCompletion, RomRelayFailure, RomRelayGrant, RomRelayProgress, ScheduledSessionStart,
-    ServerFrame, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant, SnapshotManifest,
-    StateHashMismatchView,
+    ServerFrame, ServerFrameReleaseV5, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant,
+    SnapshotManifest, StateHashMismatchView, StrictInputBatch,
 };
 use crate::rooms::{
     ConnectionId, FastInputRelayBuffer, InputFrameRelayBuffer, NetplayRoom, RoomDebugEvent,
@@ -29,6 +29,8 @@ pub(super) struct StoredRoom {
     input_events: broadcast::Sender<RoomInputEvent>,
     input_relay_buffer: InputFrameRelayBuffer,
     fast_input_relay_buffer: FastInputRelayBuffer,
+    relay_room_epoch: u64,
+    relay_session_epoch: u64,
     event_seq: u64,
     debug_events: RoomDebugEventLog,
     created_at: Instant,
@@ -40,12 +42,16 @@ impl StoredRoom {
         let (events, _) = broadcast::channel(ROOM_EVENT_CHANNEL_CAPACITY);
         let (input_events, _) = broadcast::channel(INPUT_EVENT_CHANNEL_CAPACITY);
 
+        let relay_room_epoch = room.room_epoch;
+        let relay_session_epoch = room.session_epoch;
         Self {
             room,
             events,
             input_events,
             input_relay_buffer: InputFrameRelayBuffer::default(),
             fast_input_relay_buffer: FastInputRelayBuffer::default(),
+            relay_room_epoch,
+            relay_session_epoch,
             event_seq: 0,
             debug_events: RoomDebugEventLog::default(),
             created_at: now,
@@ -462,6 +468,7 @@ impl StoredRoom {
 
     /// Relays accepted controller input when its server frame is available.
     pub(super) fn relay_accepted_input_frame(&mut self, source: ConnectionId, input: InputFrame) {
+        self.synchronize_input_runtime_epoch();
         if self
             .room
             .released_frame
@@ -481,6 +488,7 @@ impl StoredRoom {
         source: ConnectionId,
         input: FastInputFrame,
     ) {
+        self.synchronize_input_runtime_epoch();
         if self
             .room
             .released_frame
@@ -499,6 +507,7 @@ impl StoredRoom {
         _now: Instant,
         server_time_ms: u64,
     ) -> Option<ServerFrame> {
+        self.synchronize_input_runtime_epoch();
         let frame = self.room.release_next_server_frame(server_time_ms)?;
 
         for ready_batch in
@@ -529,6 +538,36 @@ impl StoredRoom {
         Some(frame)
     }
 
+    /// Immediately publishes a newly accepted strict-input suffix to its peer.
+    pub(super) fn emit_strict_input_batch(
+        &mut self,
+        source: ConnectionId,
+        batch: StrictInputBatch,
+    ) {
+        self.synchronize_input_runtime_epoch();
+        let _ = self
+            .input_events
+            .send(RoomInputEvent::StrictInputBatch { source, batch });
+    }
+
+    /// Publishes one host-driven v5 frame release to every input socket.
+    pub(super) fn emit_v5_server_frame(&mut self, release: ServerFrameReleaseV5) {
+        self.synchronize_input_runtime_epoch();
+        let _ = self
+            .input_events
+            .send(RoomInputEvent::ServerFrameV5 { release });
+    }
+
+    /// Releases an early first host open when its scheduled deadline is due.
+    pub(super) fn emit_due_v5_server_frame(&mut self, server_time_ms: u64) -> bool {
+        self.synchronize_input_runtime_epoch();
+        let Some(release) = self.room.release_due_v5_host_frame(server_time_ms) else {
+            return false;
+        };
+        self.emit_v5_server_frame(release);
+        true
+    }
+
     fn emit_fast_input_frame(&self, source: ConnectionId, frame: FastInputFrame) {
         let _ = self
             .input_events
@@ -547,6 +586,19 @@ impl StoredRoom {
         let _ = self
             .input_events
             .send(RoomInputEvent::InputFrameBatch { source, batch });
+    }
+
+    fn synchronize_input_runtime_epoch(&mut self) {
+        if self.relay_room_epoch == self.room.room_epoch
+            && self.relay_session_epoch == self.room.session_epoch
+        {
+            return;
+        }
+
+        self.input_relay_buffer = InputFrameRelayBuffer::default();
+        self.fast_input_relay_buffer = FastInputRelayBuffer::default();
+        self.relay_room_epoch = self.room.room_epoch;
+        self.relay_session_epoch = self.room.session_epoch;
     }
 
     /// Emits a validated link-cable packet.

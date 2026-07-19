@@ -29,6 +29,7 @@ mod room_event;
 mod room_expiration_task;
 mod room_frame_clock_ops;
 mod room_frame_clock_task;
+mod room_host_frame_ops;
 mod room_input_connection_ops;
 mod room_join;
 mod room_link_cable_ops;
@@ -42,6 +43,7 @@ mod room_snapshot_ops;
 mod room_start_sync;
 mod room_state_hash_ops;
 mod room_status;
+mod room_strict_input_ops;
 mod room_view;
 mod room_voice;
 mod room_voice_ops;
@@ -50,6 +52,15 @@ mod session_pause_state;
 mod snapshot_file_relay;
 mod snapshot_transfer;
 mod stored_room;
+
+#[cfg(test)]
+mod room_v5_compatibility_tests;
+#[cfg(test)]
+mod room_v5_host_frame_tests;
+#[cfg(test)]
+mod room_v5_input_tests;
+#[cfg(test)]
+mod room_v5_test_support;
 
 pub(crate) use adaptive_input_delay_policy::AdaptiveInputDelayPolicy;
 pub use client_transport_capabilities::ClientTransportCapabilities;
@@ -79,6 +90,8 @@ pub use room_debug_event::{
 pub use room_event::{RoomEvent, RoomInputEvent};
 pub use room_expiration_task::spawn_room_expiration_task;
 pub use room_frame_clock_task::spawn_room_frame_clock_task;
+pub(crate) use room_host_frame_ops::HostFrameOpenOutcome;
+pub use room_host_frame_ops::HostFrameRelayOutcome;
 pub use room_join::RoomJoin;
 pub use room_performance_sample::RoomPerformanceSample;
 pub use room_registry::InMemoryRoomRegistry;

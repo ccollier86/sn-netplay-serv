@@ -3,15 +3,16 @@
 use super::InMemoryRoomRegistry;
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    ClientRuntimeState, CompatibilityFingerprint, FastInputBatch, InputFrame, InputFrameBatch,
-    LinkCableCompatibility, LinkCablePacket, NetplaySessionDescriptor, RomRelayBlockReason,
-    RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayProgress, SessionPauseReason,
-    SnapshotChunk, SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport,
+    ClientRuntimeState, CompatibilityFingerprint, FastInputBatch, HostFrameOpen,
+    InputCursorResponse, InputFrame, InputFrameBatch, LinkCableCompatibility, LinkCablePacket,
+    NetplaySessionDescriptor, RomRelayBlockReason, RomRelayCancelled, RomRelayCompletion,
+    RomRelayFailure, RomRelayProgress, SessionPauseReason, SnapshotChunk,
+    SnapshotFileRelayGrantPair, SnapshotManifest, StateHashReport, StrictInputBatch,
 };
 use crate::rooms::{
-    ClientTransportCapabilities, ConnectionId, InviteCode, PlayerIndex, RomRelayGrantPair,
-    RomRelayTransferIntent, RoomDebugEvent, RoomError, RoomEventReceiver, RoomJoin, RoomRegistry,
-    RoomRegistrySnapshot, RoomView, SnapshotFileRelayTransferIntent,
+    ClientTransportCapabilities, ConnectionId, HostFrameRelayOutcome, InviteCode, PlayerIndex,
+    RomRelayGrantPair, RomRelayTransferIntent, RoomDebugEvent, RoomError, RoomEventReceiver,
+    RoomJoin, RoomRegistry, RoomRegistrySnapshot, RoomView, SnapshotFileRelayTransferIntent,
 };
 
 #[async_trait::async_trait]
@@ -26,7 +27,24 @@ impl RoomRegistry for InMemoryRoomRegistry {
         host_connection: ConnectionId,
         session: NetplaySessionDescriptor,
     ) -> Result<RoomView, RoomError> {
-        self.create_room_impl(host, host_connection, session).await
+        self.create_room_impl(
+            host,
+            host_connection,
+            session,
+            crate::protocol::LEGACY_NETPLAY_PROTOCOL_VERSION,
+        )
+        .await
+    }
+
+    async fn create_room_with_protocol(
+        &self,
+        host: VerifiedLicense,
+        host_connection: ConnectionId,
+        session: NetplaySessionDescriptor,
+        protocol_version: u16,
+    ) -> Result<RoomView, RoomError> {
+        self.create_room_impl(host, host_connection, session, protocol_version)
+            .await
     }
 
     async fn join_guest(
@@ -381,6 +399,37 @@ impl RoomRegistry for InMemoryRoomRegistry {
         batch: FastInputBatch,
     ) -> Result<(), RoomError> {
         self.relay_fast_input_batch_impl(invite_code, connection_id, batch)
+            .await
+    }
+
+    async fn relay_strict_input_batch(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        batch: StrictInputBatch,
+    ) -> Result<InputCursorResponse, RoomError> {
+        self.relay_strict_input_batch_impl(invite_code, connection_id, batch)
+            .await
+    }
+
+    async fn relay_host_frame_open(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        open: HostFrameOpen,
+    ) -> Result<HostFrameRelayOutcome, RoomError> {
+        self.relay_host_frame_open_impl(invite_code, connection_id, open)
+            .await
+    }
+
+    async fn release_scheduled_v5_host_frame(
+        &self,
+        invite_code: InviteCode,
+        room_epoch: u64,
+        session_epoch: u64,
+        frame: u64,
+    ) -> Result<(), RoomError> {
+        self.release_scheduled_v5_host_frame_impl(invite_code, room_epoch, session_epoch, frame)
             .await
     }
 

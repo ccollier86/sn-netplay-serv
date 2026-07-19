@@ -1,7 +1,7 @@
 mod support;
 
 use futures_util::StreamExt;
-use sb_netplay_serv::protocol::NETPLAY_PROTOCOL_VERSION;
+use sb_netplay_serv::protocol::LEGACY_NETPLAY_PROTOCOL_VERSION;
 use serde_json::Value;
 use support::{SmokeClient, SmokeServer};
 use tokio::time::{Duration, timeout};
@@ -54,7 +54,7 @@ async fn initial_and_handoff_initial_joins_still_require_protected_auth() {
     assert_handshake_status(
         format!(
             "{}/v1/ws?inviteCode=AB23-CD&role=host&protocolVersion={}",
-            server.ws_base, NETPLAY_PROTOCOL_VERSION
+            server.ws_base, LEGACY_NETPLAY_PROTOCOL_VERSION
         ),
         401,
     )
@@ -62,7 +62,7 @@ async fn initial_and_handoff_initial_joins_still_require_protected_auth() {
     assert_handshake_status(
         format!(
             "{}/v1/ws?inviteCode=AB23-CD&role=host&protocolVersion={}&runnerHandoff=true",
-            server.ws_base, NETPLAY_PROTOCOL_VERSION
+            server.ws_base, LEGACY_NETPLAY_PROTOCOL_VERSION
         ),
         401,
     )
@@ -76,7 +76,7 @@ async fn partial_resume_without_auth_fails_before_initial_join_classification() 
     assert_handshake_status(
         format!(
             "{}/v1/ws?inviteCode=AB23-CD&protocolVersion={}&playerIndex=0",
-            server.ws_base, NETPLAY_PROTOCOL_VERSION
+            server.ws_base, LEGACY_NETPLAY_PROTOCOL_VERSION
         ),
         400,
     )
@@ -84,7 +84,7 @@ async fn partial_resume_without_auth_fails_before_initial_join_classification() 
     assert_handshake_status(
         format!(
             "{}/v1/ws?inviteCode=AB23-CD&protocolVersion={}&playerIndex=0&roomEpoch=1&resumeToken=token&runnerHandoff=true",
-            server.ws_base, NETPLAY_PROTOCOL_VERSION
+            server.ws_base, LEGACY_NETPLAY_PROTOCOL_VERSION
         ),
         400,
     )
@@ -109,7 +109,7 @@ fn input_url(server: &SmokeServer, joined: &Value) -> String {
     format!(
         "{}/v1/ws/input?inviteCode=AB23-CD&protocolVersion={}&playerIndex={}&roomEpoch={}&sessionEpoch={}&inputSocketToken={}",
         server.ws_base,
-        NETPLAY_PROTOCOL_VERSION,
+        LEGACY_NETPLAY_PROTOCOL_VERSION,
         joined["yourPlayerIndex"].as_u64().expect("player index"),
         joined["roomEpoch"].as_u64().expect("room epoch"),
         joined["sessionEpoch"].as_u64().expect("session epoch"),
@@ -121,7 +121,7 @@ fn resume_url(server: &SmokeServer, joined: &Value) -> String {
     format!(
         "{}/v1/ws?inviteCode=AB23-CD&protocolVersion={}&playerIndex={}&roomEpoch={}&resumeToken={}",
         server.ws_base,
-        NETPLAY_PROTOCOL_VERSION,
+        LEGACY_NETPLAY_PROTOCOL_VERSION,
         joined["yourPlayerIndex"].as_u64().expect("player index"),
         joined["roomEpoch"].as_u64().expect("room epoch"),
         joined["resumeToken"].as_str().expect("resume token")

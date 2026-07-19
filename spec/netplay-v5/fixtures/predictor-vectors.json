@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "predictor": "shadowboy-retropad-predictor-v1",
+  "inputCodec": "shadowboy-retropad-v1-le",
+  "vectors": [
+    {
+      "name": "first_prediction_without_history_is_neutral",
+      "mode": "first",
+      "latestRealHex": null,
+      "previousPredictedHex": null,
+      "expectedHex": "00000000000000000000"
+    },
+    {
+      "name": "first_prediction_copies_buttons_dpad_and_axes",
+      "mode": "first",
+      "latestRealHex": "8001e80318fcff7f0080",
+      "previousPredictedHex": null,
+      "expectedHex": "8001e80318fcff7f0080"
+    },
+    {
+      "name": "resimulation_preserves_dpad_and_axes_only",
+      "mode": "resimulation",
+      "latestRealHex": "20210100020003000400",
+      "previousPredictedHex": "5100d204d7f63075d08a",
+      "expectedHex": "5021d204d7f63075d08a"
+    },
+    {
+      "name": "resimulation_refreshes_face_shoulders_triggers_and_stick_clicks",
+      "mode": "resimulation",
+      "latestRealHex": "0fff0a0014001e002800",
+      "previousPredictedHex": "a00064009cffc80038ff",
+      "expectedHex": "afff64009cffc80038ff"
+    }
+  ]
+}

@@ -170,6 +170,7 @@ impl InMemoryRoomRegistry {
             .accept_state_hash(connection_id, report, now)?;
 
         match evaluation {
+            StateHashEvaluation::Disabled => {}
             StateHashEvaluation::Pending => {}
             StateHashEvaluation::Matched(frame) => {
                 stored_room.record_state_hash_match(now, frame);

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 5,
+  "inputCodec": "shadowboy-retropad-v1-le",
+  "inputPayloadBytes": 10,
+  "predictor": "shadowboy-retropad-predictor-v1",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "a92ccd659a98525d85d96d774adbeb6f8c2f7cd5091a49d6ec9f3affd63b3717"
+    },
+    {
+      "path": "fixtures/host-frame-open.hex",
+      "sha256": "bcdddc683c6798a1071db2fd8cedb04c289b15544ea4e6aef103ad5b4834b683"
+    },
+    {
+      "path": "fixtures/input-cursor-ack.hex",
+      "sha256": "deeb1ef5366070de89b9ff12706ca773e55d3c9cc7c2c17aa4017ef84106b829"
+    },
+    {
+      "path": "fixtures/input-cursor-nack.hex",
+      "sha256": "635fb2a918d8efdb10a8ca79b8b14fc0d408b3d8a911174aaf54744c47cf26f0"
+    },
+    {
+      "path": "fixtures/predictor-vectors.json",
+      "sha256": "e0fcd2d1de58df5982213756e8d2738f6eab482603cadac2d0bc35bd290edc6c"
+    },
+    {
+      "path": "fixtures/server-frame-release.hex",
+      "sha256": "23d98a204fe0a016bcaaac810b60bb494cad7c0f31003c5219e6728f6c30589d"
+    },
+    {
+      "path": "fixtures/strict-input-batch.hex",
+      "sha256": "62a27b30ca8e4fa0e0fd14ce6ccd91bb26ff0157537b20f552987516ad6d0c8f"
+    },
+    {
+      "path": "fixtures/values.json",
+      "sha256": "8b63fe43cffc9da29665d185e90c44dc94f9a400cc59aca04b95b57e42cd1118"
+    }
+  ]
+}

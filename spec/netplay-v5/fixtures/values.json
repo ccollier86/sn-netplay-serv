@@ -1,0 +1,20 @@
+{
+  "roomEpoch": 72623859790382856,
+  "sessionEpoch": 1230066625199609624,
+  "playerIndex": 1,
+  "startFrame": 42,
+  "inputPayloadsHex": [
+    "0102030405060708090a",
+    "102030405060708090a0"
+  ],
+  "nextExpectedFrame": 44,
+  "receivedFrame": 46,
+  "nackReason": "input_gap",
+  "hostOpenFrame": 42,
+  "releasedFrame": 42,
+  "nextHostFrame": 43,
+  "acceptedInputCursors": [
+    { "playerIndex": 0, "nextExpectedFrame": 44 },
+    { "playerIndex": 1, "nextExpectedFrame": 45 }
+  ]
+}

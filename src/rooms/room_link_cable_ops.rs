@@ -32,6 +32,13 @@ impl NetplayRoom {
             .ok_or(RoomError::UnknownConnection)?;
         let link = self.link_descriptor()?.clone();
 
+        if compatibility.protocol_version != self.protocol_version() {
+            self.ready_players.remove(&player_index);
+            self.status = RoomStatus::CheckingCompatibility;
+            self.set_player_status(player_index, PlayerStatus::CompatibilityFailed);
+            return Err(RoomError::CompatibilityMismatch);
+        }
+
         if let Err(error) =
             self.link_cable_state
                 .set_compatibility(player_index, &link, compatibility)

@@ -4,6 +4,7 @@
 //! events and wire messages. It does not own room domain rules.
 
 mod websocket_input_session;
+mod websocket_input_v5;
 mod websocket_join;
 mod websocket_lobby_file_relay_grants;
 mod websocket_lobby_outbound;

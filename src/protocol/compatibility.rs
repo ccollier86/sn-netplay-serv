@@ -5,6 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::protocol::compatibility_v5::DeterminismProfileV5;
+use crate::protocol::descriptor_validation::{validate_optional_sha256, validate_sha256};
+
 /// Netplay-relevant compatibility fingerprint for one client.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +35,9 @@ pub struct CompatibilityFingerprint {
     pub system_data_hash: Option<String>,
     /// Save-data mode, for example `netplay`.
     pub save_data_mode: String,
+    /// Required deterministic contract for protocol-v5 rooms.
+    #[serde(default)]
+    pub determinism_v5: Option<DeterminismProfileV5>,
 }
 
 impl CompatibilityFingerprint {
@@ -64,8 +70,30 @@ impl CompatibilityFingerprint {
         if self.save_data_mode != other.save_data_mode {
             return Some(CompatibilityMismatch::SaveDataMode);
         }
+        if self.protocol_version >= 5 {
+            let (Some(left), Some(right)) =
+                (self.determinism_v5.as_ref(), other.determinism_v5.as_ref())
+            else {
+                return Some(CompatibilityMismatch::DeterminismProfileMissing);
+            };
+            if let Some(mismatch) = left.first_mismatch(right) {
+                return Some(mismatch);
+            }
+        }
 
         None
+    }
+
+    /// Returns the negotiated v5 profile only when all fields are valid.
+    pub fn valid_determinism_v5(&self) -> Option<&DeterminismProfileV5> {
+        let hashes_are_valid = validate_sha256("contentHash", &self.content_hash).is_ok()
+            && validate_sha256("settingsHash", &self.settings_hash).is_ok()
+            && validate_sha256("cheatsHash", &self.cheats_hash).is_ok()
+            && validate_optional_sha256("systemDataHash", self.system_data_hash.as_deref()).is_ok();
+
+        self.determinism_v5
+            .as_ref()
+            .filter(|profile| hashes_are_valid && profile.is_valid())
     }
 
     fn normalized_state_format(&self) -> &str {
@@ -94,6 +122,30 @@ pub enum CompatibilityMismatch {
     SystemData,
     /// Save-data mode differs.
     SaveDataMode,
+    /// A protocol-v5 fingerprint omitted its deterministic profile.
+    DeterminismProfileMissing,
+    /// Curated core revisions or deterministic patch sets differ.
+    NetplayCoreCompatibility,
+    /// Clients are not in the same certified platform cohort.
+    PlatformClass,
+    /// Deterministic core options differ.
+    CoreOptions,
+    /// Controller port/device contracts differ.
+    ControllerProfile,
+    /// Input codec, payload size, or predictor differs.
+    InputContract,
+    /// Canonical rational core cadence differs.
+    NominalFrameRate,
+    /// ROM/disc byte lengths differ.
+    RomSize,
+    /// Applied patch/content transform differs.
+    ContentTransformation,
+    /// Startup state/bootstrap behavior differs.
+    StartupStatePolicy,
+    /// A runtime cannot suppress replay output.
+    ReplayOutputSuppression,
+    /// State-digest authority or algorithm differs.
+    DigestContract,
 }
 
 #[cfg(test)]
@@ -155,6 +207,7 @@ mod tests {
             cheats_hash: "cheats".to_string(),
             system_data_hash: None,
             save_data_mode: "netplay".to_string(),
+            determinism_v5: None,
         }
     }
 }

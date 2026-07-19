@@ -7,8 +7,8 @@ use super::{NetplayRoom, RoomStatus};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
     ClientNetworkQualityReport, ClientRuntimeState, CompatibilityFingerprint, InputFrame,
-    InputFrameLimits, LinkCableCompatibility, LinkCablePacket, LinkCablePacketLimits,
-    NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor, RomIdentity, RomRelayBlockReason,
+    InputFrameLimits, LEGACY_NETPLAY_PROTOCOL_VERSION, LinkCableCompatibility, LinkCablePacket,
+    LinkCablePacketLimits, NetplaySessionDescriptor, RomIdentity, RomRelayBlockReason,
     RomRelayCompletion, RomRelayGrant, RomRelayGrantRole, SessionPauseReason, SessionPauseState,
     SnapshotChunk, SnapshotFileRelayGrant, SnapshotFileRelayGrantPair, SnapshotFileRelayGrantRole,
     SnapshotLimits, SnapshotManifest, StateHashReport,
@@ -1264,7 +1264,7 @@ fn license(subject_id: &str) -> VerifiedLicense {
 fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {
     CompatibilityFingerprint {
         desktop_version: "0.2.10".to_string(),
-        protocol_version: NETPLAY_PROTOCOL_VERSION,
+        protocol_version: LEGACY_NETPLAY_PROTOCOL_VERSION,
         system_id: "gamecube".to_string(),
         core_id: "dolphin".to_string(),
         core_build: "core-build".to_string(),
@@ -1274,12 +1274,13 @@ fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {
         cheats_hash: "cheats".to_string(),
         system_data_hash: None,
         save_data_mode: "netplay".to_string(),
+        determinism_v5: None,
     }
 }
 
 fn link_compatibility(system_data_hash: Option<&str>) -> LinkCableCompatibility {
     LinkCableCompatibility {
-        protocol_version: NETPLAY_PROTOCOL_VERSION,
+        protocol_version: LEGACY_NETPLAY_PROTOCOL_VERSION,
         system_family: "gba".to_string(),
         link_protocol: "gba-link-cable-v1".to_string(),
         runtime_profile: "mgba-link-runtime-v1".to_string(),

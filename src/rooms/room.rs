@@ -8,7 +8,7 @@ use crate::auth::VerifiedLicense;
 use crate::limits::MVP_ROOM_CAPACITY;
 use crate::protocol::{
     ClientNetworkQualityReport, CompatibilityFingerprint, InputDelayChange, NetplayProtocolView,
-    NetplaySessionDescriptor, NetplaySessionMode, ScheduledSessionStart,
+    NetplaySessionDescriptor, NetplaySessionMode, ScheduledSessionStart, StateDigestMode,
 };
 use crate::rooms::{
     AdaptiveInputDelayPolicy, ClockSyncSampleRequestState, ConnectionId, InviteCode,
@@ -25,6 +25,7 @@ use std::time::Instant;
 pub struct NetplayRoom {
     room_id: RoomId,
     invite_code: InviteCode,
+    protocol_version: u16,
     pub(super) session: NetplaySessionDescriptor,
     pub(super) max_players: u8,
     pub(super) players: Vec<PlayerSlot>,
@@ -56,6 +57,7 @@ pub struct NetplayRoom {
     pub(super) state_hashes: BTreeMap<u64, HashMap<PlayerIndex, String>>,
     pub(super) state_hash_true_mismatch_streak: u8,
     pub(super) scheduled_start: Option<ScheduledSessionStart>,
+    pub(super) pending_host_frame_open: Option<u64>,
     pub(super) voice: Option<RoomVoiceState>,
 }
 
@@ -88,6 +90,30 @@ impl NetplayRoom {
         host_input_socket_token_hash: ResumeTokenHash,
         now: Instant,
     ) -> Self {
+        Self::new_with_protocol_and_resume(
+            host,
+            host_connection,
+            invite_code,
+            session,
+            crate::protocol::LEGACY_NETPLAY_PROTOCOL_VERSION,
+            host_resume_token_hash,
+            host_input_socket_token_hash,
+            now,
+        )
+    }
+
+    /// Creates a room with an exact negotiated protocol and resume capabilities.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_protocol_and_resume(
+        host: VerifiedLicense,
+        host_connection: ConnectionId,
+        invite_code: InviteCode,
+        session: NetplaySessionDescriptor,
+        protocol_version: u16,
+        host_resume_token_hash: ResumeTokenHash,
+        host_input_socket_token_hash: ResumeTokenHash,
+        now: Instant,
+    ) -> Self {
         let max_players = MVP_ROOM_CAPACITY;
         let mut players = Vec::with_capacity(usize::from(max_players));
         players.push(PlayerSlot::host(
@@ -106,6 +132,7 @@ impl NetplayRoom {
         Self {
             room_id: RoomId::new(),
             invite_code,
+            protocol_version,
             session,
             max_players,
             players,
@@ -137,6 +164,7 @@ impl NetplayRoom {
             state_hashes: BTreeMap::new(),
             state_hash_true_mismatch_streak: 0,
             scheduled_start: None,
+            pending_host_frame_open: None,
             voice: None,
         }
     }
@@ -154,6 +182,28 @@ impl NetplayRoom {
     /// Returns the current room lifecycle status.
     pub fn status(&self) -> RoomStatus {
         self.status
+    }
+
+    /// Returns the exact wire protocol selected when this room was created.
+    pub fn protocol_version(&self) -> u16 {
+        self.protocol_version
+    }
+
+    /// Returns whether this room uses strict controller input and host opens.
+    pub fn uses_strict_controller_input(&self) -> bool {
+        self.protocol_version >= 5 && self.session.mode == NetplaySessionMode::ControllerNetplay
+    }
+
+    /// Returns the state-digest authority negotiated by this room.
+    pub(crate) fn state_digest_mode(&self) -> StateDigestMode {
+        if !self.uses_strict_controller_input() {
+            return StateDigestMode::Authoritative;
+        }
+
+        self.compatibility
+            .values()
+            .find_map(|fingerprint| fingerprint.valid_determinism_v5())
+            .map_or(StateDigestMode::Disabled, |profile| profile.digest_mode)
     }
 
     /// Returns the configured player capacity.
@@ -297,7 +347,7 @@ impl NetplayRoom {
             room_epoch: self.room_epoch,
             session_epoch: self.session_epoch,
             invite_code: self.invite_code.display(),
-            protocol: NetplayProtocolView::default(),
+            protocol: NetplayProtocolView::for_room(self.protocol_version),
             session: self.session.clone(),
             voice: self.voice.as_ref().map(RoomVoiceState::view),
             rom_relay: self.session.rom_relay.clone(),
@@ -439,6 +489,7 @@ impl NetplayRoom {
         self.pending_input_delay_change = None;
         self.state_hashes.clear();
         self.state_hash_true_mismatch_streak = 0;
+        self.pending_host_frame_open = None;
         self.reset_start_sync_state();
     }
 
@@ -451,13 +502,35 @@ impl NetplayRoom {
     }
 
     fn fingerprint_matches_session(&self, fingerprint: &CompatibilityFingerprint) -> bool {
-        fingerprint.protocol_version == crate::protocol::NETPLAY_PROTOCOL_VERSION
+        let legacy_fields_match = fingerprint.protocol_version == self.protocol_version
             && fingerprint.system_id == self.session.game.system_id
             && fingerprint.core_id == self.session.core.core_id
             && self.fingerprint_state_format_matches_session(fingerprint)
             && fingerprint
                 .content_hash
-                .eq_ignore_ascii_case(&self.session.game.rom_sha256)
+                .eq_ignore_ascii_case(&self.session.game.rom_sha256);
+
+        if !legacy_fields_match || !self.uses_strict_controller_input() {
+            return legacy_fields_match;
+        }
+
+        let Some(profile) = fingerprint.valid_determinism_v5() else {
+            return false;
+        };
+        let Some(rom_identity) = self.session.rom_identity.as_ref() else {
+            return false;
+        };
+
+        profile.rom_size_bytes == rom_identity.size_bytes
+            && fingerprint
+                .settings_hash
+                .eq_ignore_ascii_case(&profile.core_options_digest)
+            && self
+                .session
+                .core
+                .core_options_sha256
+                .as_deref()
+                .is_none_or(|digest| digest.eq_ignore_ascii_case(&profile.core_options_digest))
     }
 
     fn fingerprint_state_format_matches_session(

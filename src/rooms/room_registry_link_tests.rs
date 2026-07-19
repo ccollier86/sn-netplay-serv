@@ -6,7 +6,8 @@
 use super::{InMemoryRoomRegistry, RoomRegistry};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    LinkCableCompatibility, LinkCablePacket, NETPLAY_PROTOCOL_VERSION, NetplaySessionDescriptor,
+    LEGACY_NETPLAY_PROTOCOL_VERSION, LinkCableCompatibility, LinkCablePacket,
+    NetplaySessionDescriptor,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, RoomError, RoomEvent, RoomStatus,
@@ -174,7 +175,7 @@ fn link_descriptor() -> NetplaySessionDescriptor {
 
 fn link_compatibility(system_data_hash: Option<&str>) -> LinkCableCompatibility {
     LinkCableCompatibility {
-        protocol_version: NETPLAY_PROTOCOL_VERSION,
+        protocol_version: LEGACY_NETPLAY_PROTOCOL_VERSION,
         system_family: "gba".to_string(),
         link_protocol: "gba-link-cable-v1".to_string(),
         runtime_profile: "mgba-link-runtime-v1".to_string(),

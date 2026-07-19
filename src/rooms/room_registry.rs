@@ -32,6 +32,8 @@ mod start_sync_ops;
 mod sync_ops;
 #[path = "room_registry_trait_impl.rs"]
 mod trait_impl;
+#[path = "room_registry_v5_input_ops.rs"]
+mod v5_input_ops;
 #[path = "room_registry_voice_ops.rs"]
 mod voice_ops;
 
@@ -159,10 +161,10 @@ impl InMemoryRoomRegistry {
         let mut released_count = 0;
 
         for stored_room in rooms.values_mut() {
-            if stored_room
+            let legacy_released = stored_room
                 .emit_next_server_frame(now, server_time_ms)
-                .is_some()
-            {
+                .is_some();
+            if legacy_released {
                 released_count += 1;
             }
         }
