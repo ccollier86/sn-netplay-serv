@@ -10,6 +10,7 @@ use crate::rooms::{
 pub(crate) enum HostFrameOpenOutcome {
     Released(ServerFrameReleaseV5),
     Duplicate(ServerFrameReleaseV5),
+    IgnoredPauseBoundary,
     Pending { delay_ms: u64 },
 }
 
@@ -19,6 +20,8 @@ pub enum HostFrameRelayOutcome {
     Broadcast,
     /// An old host open receives the latest cumulative release directly.
     Duplicate(ServerFrameReleaseV5),
+    /// Ordered work queued before a coordinated pause crossed its stop frame.
+    IgnoredPauseBoundary,
     /// The first open is held until its scheduled one-shot wake.
     Pending {
         /// Wall-clock delay before the scheduled server deadline.
@@ -58,14 +61,14 @@ impl NetplayRoom {
                 .map(HostFrameOpenOutcome::Duplicate)
                 .ok_or(RoomError::OutOfOrderFrame);
         }
-        if open.frame > self.next_release_frame || !self.host_input_covers(open.frame) {
-            return Err(RoomError::OutOfOrderFrame);
-        }
         if self
             .pause_state
             .as_ref()
             .is_some_and(|pause| open.frame > pause.pause_at_frame())
         {
+            return Ok(HostFrameOpenOutcome::IgnoredPauseBoundary);
+        }
+        if open.frame > self.next_release_frame || !self.host_input_covers(open.frame) {
             return Err(RoomError::OutOfOrderFrame);
         }
 

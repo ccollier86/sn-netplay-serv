@@ -96,6 +96,12 @@ async fn scheduled_host_release_and_two_phase_recovery_work_over_real_sockets() 
     let recovery_id = host_prepare["recovery"]["recoveryId"]
         .as_u64()
         .expect("recovery id");
+
+    host.send_strict_input(1, &[3]).await;
+    let transition_nack = host.expect_input_nack().await;
+    assert_eq!(transition_nack.expected_frame, 1);
+    assert_eq!(transition_nack.reason, InputCursorNackReason::SessionState);
+
     let repair_bytes = [9_u8, 8, 7, 6];
     let pinned_manifest = json!({
         "snapshotId": "snapshot-1",

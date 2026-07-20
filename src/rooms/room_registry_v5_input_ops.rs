@@ -57,6 +57,9 @@ impl InMemoryRoomRegistry {
             HostFrameOpenOutcome::Duplicate(release) => {
                 Ok(HostFrameRelayOutcome::Duplicate(release))
             }
+            HostFrameOpenOutcome::IgnoredPauseBoundary => {
+                Ok(HostFrameRelayOutcome::IgnoredPauseBoundary)
+            }
             HostFrameOpenOutcome::Pending { delay_ms } => Ok(HostFrameRelayOutcome::Pending {
                 delay_ms,
                 room_epoch: stored_room.room.room_epoch,

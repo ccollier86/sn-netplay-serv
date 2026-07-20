@@ -128,7 +128,7 @@ fn v5_rejects_an_inexact_pause_ack() {
 }
 
 #[test]
-fn host_can_open_the_pause_boundary_but_not_a_later_frame() {
+fn queued_host_opens_after_the_pause_boundary_are_ignored() {
     let mut fixture = v5_room(RoomStatus::Playing);
     let input = batch(&fixture, PlayerIndex::ONE, 0, &[1, 2, 3, 4, 5, 6, 7, 8, 9]);
     fixture
@@ -149,13 +149,17 @@ fn host_can_open_the_pause_boundary_but_not_a_later_frame() {
             Ok(HostFrameOpenOutcome::Released(_))
         ));
     }
-    let blocked = host_open(&fixture, pause.pause_at_frame + 1);
-    assert!(matches!(
-        fixture
-            .room
-            .accept_host_frame_open(fixture.host_input, blocked, 100),
-        Err(RoomError::OutOfOrderFrame)
-    ));
+    for frame in pause.pause_at_frame + 1..=pause.pause_at_frame + 3 {
+        assert!(matches!(
+            fixture.room.accept_host_frame_open(
+                fixture.host_input,
+                host_open(&fixture, frame),
+                100
+            ),
+            Ok(HostFrameOpenOutcome::IgnoredPauseBoundary)
+        ));
+    }
+    assert_eq!(fixture.room.next_release_frame, pause.pause_at_frame + 1);
 }
 
 fn host_open(fixture: &super::room_v5_test_support::V5RoomFixture, frame: u64) -> HostFrameOpen {

@@ -864,7 +864,7 @@ async fn host_launch_requires_connected_players_ready() {
 
     let duplicate = registry
         .return_lobby_from_game(
-            invite,
+            invite.clone(),
             host_connection,
             published_epoch,
             selected.proposal_id,
@@ -876,6 +876,49 @@ async fn host_launch_requires_connected_players_ready() {
 
     assert_eq!(duplicate.status, LobbyStatus::GameSelected);
     assert!(events.try_recv().is_err());
+
+    let mut next_game = game_candidate();
+    next_game.title = "Starlight Ruins II".to_string();
+    next_game.content_sha256 = Some("d".repeat(64));
+    let next_selection = registry
+        .select_lobby_game(invite.clone(), host_connection, next_game)
+        .await
+        .expect("host can change game after return")
+        .selected_game
+        .expect("next selection");
+    let unready = registry
+        .set_lobby_game_readiness(
+            invite.clone(),
+            host_connection,
+            next_selection.proposal_id,
+            LobbyGameReadinessStatus::NotReady,
+            None,
+        )
+        .await
+        .expect("host can unready after return");
+    assert_eq!(unready.status, LobbyStatus::GameSelected);
+    for connection in [host_connection, guest_connection] {
+        registry
+            .set_lobby_game_readiness(
+                invite.clone(),
+                connection,
+                next_selection.proposal_id,
+                LobbyGameReadinessStatus::Ready,
+                None,
+            )
+            .await
+            .expect("player ready for relaunch");
+    }
+    let relaunched = registry
+        .request_lobby_game_launch(invite, host_connection, next_selection.proposal_id)
+        .await
+        .expect("host can relaunch after return");
+
+    assert_eq!(relaunched.status, LobbyStatus::InGame);
+    assert_eq!(
+        relaunched.pending_launch.expect("relaunch").proposal_id,
+        next_selection.proposal_id
+    );
 }
 
 #[tokio::test]
