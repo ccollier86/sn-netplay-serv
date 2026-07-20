@@ -64,7 +64,7 @@ impl NetplayRoom {
         if self
             .pause_state
             .as_ref()
-            .is_some_and(|pause| open.frame >= pause.pause_at_frame())
+            .is_some_and(|pause| open.frame > pause.pause_at_frame())
         {
             return Err(RoomError::OutOfOrderFrame);
         }

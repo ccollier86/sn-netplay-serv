@@ -8,6 +8,7 @@ use crate::protocol::{
 use crate::rooms::{
     ConnectionId, HostFrameRelayOutcome, InviteCode, ScheduledHostFrameReleaseOutcome,
 };
+use crate::transport::websocket_input_session::is_droppable_input_error;
 use crate::transport::websocket_outbound::{SocketSender, send_binary_message};
 
 /// Applies one protocol v5 binary message without emitting JSON on the hot lane.
@@ -62,6 +63,7 @@ async fn handle_strict_input(
         .await
     {
         Ok(outcome) => outcome,
+        Err(error) if is_droppable_input_error(&error) => return true,
         Err(error) => {
             reject_v5_message(
                 services,
@@ -142,6 +144,7 @@ async fn handle_host_open(
             );
             true
         }
+        Err(error) if is_droppable_input_error(&error) => true,
         Err(error) => {
             reject_v5_message(
                 services,

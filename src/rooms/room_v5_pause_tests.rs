@@ -128,7 +128,7 @@ fn v5_rejects_an_inexact_pause_ack() {
 }
 
 #[test]
-fn host_cannot_open_the_pause_boundary_or_later() {
+fn host_can_open_the_pause_boundary_but_not_a_later_frame() {
     let mut fixture = v5_room(RoomStatus::Playing);
     let input = batch(&fixture, PlayerIndex::ONE, 0, &[1, 2, 3, 4, 5, 6, 7, 8, 9]);
     fixture
@@ -140,7 +140,7 @@ fn host_cannot_open_the_pause_boundary_or_later() {
         .request_session_pause(fixture.host_control, SessionPauseReason::Menu, 0)
         .expect("pause");
 
-    for frame in 0..pause.pause_at_frame {
+    for frame in 0..=pause.pause_at_frame {
         let open = host_open(&fixture, frame);
         assert!(matches!(
             fixture
@@ -149,7 +149,7 @@ fn host_cannot_open_the_pause_boundary_or_later() {
             Ok(HostFrameOpenOutcome::Released(_))
         ));
     }
-    let blocked = host_open(&fixture, pause.pause_at_frame);
+    let blocked = host_open(&fixture, pause.pause_at_frame + 1);
     assert!(matches!(
         fixture
             .room

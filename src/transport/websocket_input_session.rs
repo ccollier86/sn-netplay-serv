@@ -316,7 +316,7 @@ async fn record_transport_close(
         .await;
 }
 
-fn is_droppable_input_error(error: &RoomError) -> bool {
+pub(super) fn is_droppable_input_error(error: &RoomError) -> bool {
     matches!(
         error,
         RoomError::NotPlaying | RoomError::StaleRoomEpoch | RoomError::StaleSessionEpoch
