@@ -142,6 +142,40 @@ async fn scheduled_host_release_and_two_phase_recovery_work_over_real_sockets() 
     host.expect_error("snapshotInvalid").await;
 
     relay_snapshot(&mut host, &mut guest, &repair_bytes).await;
+    let recovery_start_delay_ms = schedule_start(&mut host, &mut guest).await;
+
+    // A client at the recovery checkpoint must not lose the fresh epoch if a
+    // digest reaches the control lane just before the host frame-open.
+    host.send(json!({
+        "type": "stateHash",
+        "report": { "frame": 0, "sha256": "c".repeat(64) }
+    }))
+    .await;
+    guest
+        .send(json!({
+            "type": "stateHash",
+            "report": { "frame": 0, "sha256": "c".repeat(64) }
+        }))
+        .await;
+
+    host.send_strict_input(0, &[4]).await;
+    assert_eq!(host.expect_input_ack().await.next_expected_frame, 1);
+    assert_eq!(guest.expect_strict_input_from(0).await.start_frame, 0);
+    guest.send_strict_input(0, &[5]).await;
+    assert_eq!(guest.expect_input_ack().await.next_expected_frame, 1);
+    assert_eq!(host.expect_strict_input_from(1).await.start_frame, 0);
+
+    host.send_host_frame_open(0).await;
+    tokio::time::sleep(std::time::Duration::from_millis(
+        recovery_start_delay_ms.saturating_add(100),
+    ))
+    .await;
+    assert_eq!(host.expect_v5_release().await.released_frame, 0);
+    assert_eq!(guest.expect_v5_release().await.released_frame, 0);
+
+    let recovered_status = server.room_status().await;
+    assert_eq!(recovered_status["room"]["status"], "playing");
+    assert_eq!(server.metrics().v5_frame_releases_total, 2);
 }
 
 #[tokio::test]

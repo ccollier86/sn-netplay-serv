@@ -49,7 +49,10 @@ impl NetplayRoom {
         report: StateHashReport,
         now: Instant,
     ) -> Result<StateHashEvaluation, RoomError> {
-        if self.status != RoomStatus::Playing && self.status != RoomStatus::Paused {
+        if !matches!(
+            self.status,
+            RoomStatus::StartScheduled | RoomStatus::Playing | RoomStatus::Paused
+        ) {
             return Err(RoomError::NotPlaying);
         }
 
@@ -62,6 +65,14 @@ impl NetplayRoom {
         let player_index = self
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
+
+        // The host frame-open is what promotes a scheduled epoch to Playing.
+        // Ignore a boundary digest that races that promotion instead of
+        // tearing down an otherwise valid recovered session.
+        if self.status == RoomStatus::StartScheduled {
+            return Ok(StateHashEvaluation::Pending);
+        }
+
         let normalized_hash = report.sha256.to_ascii_lowercase();
         let connected_players = self.connected_player_indices();
         let frame_hashes = self.state_hashes.entry(report.frame).or_default();

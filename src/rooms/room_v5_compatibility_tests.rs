@@ -107,6 +107,38 @@ fn authoritative_digest_mismatch_enters_recovery() {
 }
 
 #[test]
+fn scheduled_epoch_ignores_boundary_hash_until_host_frame_open() {
+    let mut fixture =
+        compatible_v5_room(StateDigestMode::Authoritative, RoomStatus::StartScheduled);
+    let session_epoch = fixture.room.session_epoch;
+
+    assert_eq!(
+        fixture
+            .room
+            .accept_state_hash(
+                fixture.host_control,
+                state_hash(1_200, 'a'),
+                std::time::Instant::now(),
+            )
+            .expect("host boundary digest"),
+        StateHashEvaluation::Pending
+    );
+    assert_eq!(
+        fixture
+            .room
+            .accept_state_hash(
+                fixture.guest_control,
+                state_hash(1_200, 'b'),
+                std::time::Instant::now(),
+            )
+            .expect("guest boundary digest"),
+        StateHashEvaluation::Pending
+    );
+    assert_eq!(fixture.room.session_epoch, session_epoch);
+    assert_eq!(fixture.room.status(), RoomStatus::StartScheduled);
+}
+
+#[test]
 fn disabled_digest_reports_are_ignored() {
     let mut fixture = compatible_v5_room(StateDigestMode::Disabled, RoomStatus::Playing);
     assert_eq!(
