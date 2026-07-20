@@ -5,7 +5,7 @@ use crate::protocol::{
     HostFrameOpen, InputCursorNack, InputCursorNackReason, InputCursorResponse, StrictInputBatch,
 };
 use crate::rooms::{
-    ConnectionId, HostFrameOpenOutcome, HostFrameRelayOutcome, InviteCode, RoomError,
+    ConnectionId, HostFrameOpenOutcome, HostFrameRelayOutcome, InviteCode, RoomError, RoomStatus,
     ScheduledHostFrameReleaseOutcome, StrictInputRelayOutcome,
 };
 
@@ -72,6 +72,7 @@ impl InMemoryRoomRegistry {
                             received_frame: batch_context.3,
                             reason: InputCursorNackReason::SessionState,
                         }),
+                        send_response: false,
                         accepted_frame_count: 0,
                         duplicate_frame_count: 0,
                     });
@@ -80,6 +81,43 @@ impl InMemoryRoomRegistry {
             }
         };
         if let InputCursorResponse::Nack(nack) = outcome.response {
+            let transition_in_progress = stored_room.room.status() != RoomStatus::Playing
+                && (stored_room.room.state_recovery.is_some()
+                    || stored_room.room.pause_state.is_some()
+                    || matches!(
+                        stored_room.room.status(),
+                        RoomStatus::StartScheduled
+                            | RoomStatus::RepairingState
+                            | RoomStatus::Recovering
+                    ));
+            if transition_in_progress {
+                let detail = format!(
+                    "ignored v5 transition input response: expected room/session {}/{}, received {}/{}, player {}, expected frame {}, received frames {}..={}, reason {:?}, next release {}, status {:?}",
+                    nack.room_epoch,
+                    nack.session_epoch,
+                    batch_context.0,
+                    batch_context.1,
+                    nack.player_index.zero_based(),
+                    nack.expected_frame,
+                    batch_context.3,
+                    batch_context.4,
+                    nack.reason,
+                    stored_room.room.next_release_frame,
+                    stored_room.room.status(),
+                );
+                stored_room.record_debug_event(
+                    self.clock.now(),
+                    "v5TransitionInputIgnored",
+                    &detail,
+                );
+                self.record_recent_events(stored_room.debug_events(1));
+                return Ok(StrictInputRelayOutcome {
+                    response: outcome.response,
+                    send_response: false,
+                    accepted_frame_count: 0,
+                    duplicate_frame_count: outcome.duplicate_frame_count,
+                });
+            }
             let detail = format!(
                 "nacked v5 input cursor: room/session {}/{}, player {}, expected frame {}, received frame {}, reason {:?}, batch {}..={}, next release {}, status {:?}",
                 nack.room_epoch,
@@ -105,6 +143,7 @@ impl InMemoryRoomRegistry {
         }
         Ok(StrictInputRelayOutcome {
             response: outcome.response,
+            send_response: true,
             accepted_frame_count,
             duplicate_frame_count: outcome.duplicate_frame_count,
         })

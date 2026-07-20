@@ -133,6 +133,14 @@ impl SmokeClient {
         }
     }
 
+    pub async fn expect_no_input_message(&mut self) {
+        let input_socket = self.input_socket.as_mut().expect("input socket connected");
+        match timeout(Duration::from_millis(100), input_socket.next()).await {
+            Err(_) => {}
+            Ok(message) => panic!("unexpected input websocket message: {message:?}"),
+        }
+    }
+
     pub async fn expect_input_ack(&mut self) -> InputCursorAck {
         loop {
             let payload = self.next_input_binary().await;

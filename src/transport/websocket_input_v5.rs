@@ -75,13 +75,16 @@ async fn handle_strict_input(
             return false;
         }
     };
-    let nacked = matches!(outcome.response, InputCursorResponse::Nack(_));
+    let nacked = outcome.send_response && matches!(outcome.response, InputCursorResponse::Nack(_));
     services.metrics.record_v5_input_batch(
         frame_count,
         outcome.accepted_frame_count as u64,
         outcome.duplicate_frame_count as u64,
         nacked,
     );
+    if !outcome.send_response {
+        return true;
+    }
     let encoded = match outcome.response {
         InputCursorResponse::Ack(ack) => encode_input_cursor_ack(&ack),
         InputCursorResponse::Nack(nack) => encode_input_cursor_nack(&nack),

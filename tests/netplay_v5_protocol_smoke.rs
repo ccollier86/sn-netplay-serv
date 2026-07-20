@@ -103,7 +103,7 @@ async fn scheduled_host_release_and_two_phase_recovery_work_over_real_sockets() 
     assert_eq!(host_release.next_host_frame, 1);
     assert_eq!(server.metrics().v5_frame_releases_total, 1);
 
-    let (_, old_session_epoch) = host.epochs();
+    let (old_room_epoch, old_session_epoch) = host.epochs();
     let repair_frame = 600_u64;
     host.send(json!({
         "type": "stateHash",
@@ -129,9 +129,7 @@ async fn scheduled_host_release_and_two_phase_recovery_work_over_real_sockets() 
     // It is obsolete transition work, not a reason to close the binary input socket.
     host.send_host_frame_open(1).await;
     host.send_strict_input(1, &[3]).await;
-    let transition_nack = host.expect_input_nack().await;
-    assert_eq!(transition_nack.expected_frame, 1);
-    assert_eq!(transition_nack.reason, InputCursorNackReason::SessionState);
+    host.expect_no_input_message().await;
 
     let repair_bytes = [9_u8, 8, 7, 6];
     let pinned_manifest = json!({
@@ -155,6 +153,15 @@ async fn scheduled_host_release_and_two_phase_recovery_work_over_real_sockets() 
     assert_eq!(host_commit["sessionEpoch"], old_session_epoch + 1);
     assert_eq!(guest_commit["room"]["status"], "checkingCompatibility");
     assert_eq!(host_commit["recovery"]["pinnedSnapshot"], pinned_manifest);
+
+    // The control commit can overtake old-epoch input already queued on the
+    // binary lane. The relay must drop it instead of stamping the new epoch on
+    // a SessionState NACK that causes the client to close its input socket.
+    host.send_strict_input_at_epochs(old_room_epoch, old_session_epoch, 1, &[3])
+        .await;
+    host.send_host_frame_open_at_epochs(old_room_epoch, old_session_epoch, 1)
+        .await;
+    host.expect_no_input_message().await;
 
     host.send(json!({
         "type": "stateRecoveryPinned",
@@ -350,16 +357,13 @@ async fn pause_control_ack_cannot_overtake_input_and_resume_starts_at_p_plus_one
                 .expect("resume creation time"),
         );
 
-    // Old-epoch transition work receives a current-epoch NACK, and the exact
-    // same input sockets remain usable for P+1 without reconnecting.
+    // Old-epoch transition work is dropped without a misleading current-epoch
+    // NACK, and the same input sockets remain usable for P+1.
     host.send_strict_input_at_epochs(old_room_epoch, old_session_epoch, pause_at_frame + 1, &[5])
         .await;
-    let stale_nack = host.expect_input_nack().await;
-    assert_eq!(stale_nack.session_epoch, old_session_epoch + 1);
-    assert_eq!(stale_nack.expected_frame, pause_at_frame + 1);
-    assert_eq!(stale_nack.reason, InputCursorNackReason::SessionState);
     host.send_host_frame_open_at_epochs(old_room_epoch, old_session_epoch, pause_at_frame + 1)
         .await;
+    host.expect_no_input_message().await;
 
     host.send_strict_input(pause_at_frame + 1, &[5]).await;
     assert_eq!(

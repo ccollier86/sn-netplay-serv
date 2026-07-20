@@ -81,6 +81,12 @@ impl NetplayRoom {
         if self.status == RoomStatus::StartScheduled && open.frame > self.next_release_frame {
             return Ok(HostFrameOpenOutcome::IgnoredTransitionBoundary);
         }
+        if !matches!(
+            self.status,
+            RoomStatus::StartScheduled | RoomStatus::Playing
+        ) {
+            return Ok(HostFrameOpenOutcome::IgnoredTransitionBoundary);
+        }
         if open.frame > self.next_release_frame || !self.host_input_covers(open.frame) {
             return Err(RoomError::OutOfOrderFrame);
         }

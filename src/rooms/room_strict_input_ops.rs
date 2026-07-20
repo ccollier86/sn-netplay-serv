@@ -16,6 +16,10 @@ pub(crate) struct StrictInputBatchOutcome {
 /// Registry-facing strict-input result with payload-free telemetry counts.
 pub struct StrictInputRelayOutcome {
     pub response: InputCursorResponse,
+    /// False when obsolete transition work was intentionally dropped. In that
+    /// case the transport must not stamp the room's new epoch onto a response
+    /// to an old-epoch packet.
+    pub send_response: bool,
     pub accepted_frame_count: usize,
     pub duplicate_frame_count: usize,
 }
