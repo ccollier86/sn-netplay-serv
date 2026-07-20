@@ -13,8 +13,8 @@ Build locally:
 ```
 
 The script derives the complete current Git commit SHA, embeds it in the relay
-binary and OCI metadata, and tags the same image with both that immutable SHA
-and `latest`. It refuses a tag that does not equal the current commit.
+binary and OCI metadata, and tags the image as `latest`. Publishing is done
+locally with the Docker CLI; repository pushes do not build or publish images.
 
 The build script defaults to `linux/amd64` so Mac builds still produce the
 Coolify server image. Override `SB_NETPLAY_IMAGE_PLATFORM` only if the deploy
@@ -31,20 +31,12 @@ If you have already run `docker login ghcr.io` with a token that has
 `write:packages`, the push script can use that existing Docker login without
 `GHCR_TOKEN`.
 
-Use the immutable SHA tag for a pinned deployment:
-
-```bash
-relay_sha="$(git rev-parse HEAD)"
-./scripts/build-ghcr-image.sh "$relay_sha"
-./scripts/push-ghcr-image.sh "$relay_sha"
-```
-
-Then set this in Coolify:
+Keep this set in Coolify:
 
 ```text
-SB_NETPLAY_IMAGE=ghcr.io/ccollier86/sb-netplay-serv:<complete-commit-sha>
+SB_NETPLAY_IMAGE=ghcr.io/ccollier86/sb-netplay-serv:latest
 ```
 
 `GET /health` exposes `buildSha`, `imageIdentity`, `version`, and the supported
-protocol range. Verify those values against the immutable tag after deployment;
-do not infer the running revision from `latest` alone.
+protocol range. After redeploying `latest`, verify that `buildSha` equals the
+commit embedded by the local build before beginning live client acceptance.

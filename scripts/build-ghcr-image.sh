@@ -11,20 +11,14 @@ source "$ROOT/scripts/project-storage-env.sh"
 
 image_repository="${SB_NETPLAY_IMAGE_REPOSITORY:-ghcr.io/ccollier86/sb-netplay-serv}"
 build_sha="$(git -C "$ROOT" rev-parse HEAD)"
-tag="${1:-$build_sha}"
 platform="${SB_NETPLAY_IMAGE_PLATFORM:-linux/amd64}"
 
 if [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
-  echo "Commit all relay changes before building an immutable image." >&2
+  echo "Commit all relay changes before building the latest image." >&2
   exit 2
 fi
 
-if [[ "$tag" != "$build_sha" ]]; then
-  echo "Image tag must be the complete current commit SHA: $build_sha" >&2
-  exit 2
-fi
-
-image_identity="${image_repository}:${tag}"
+image_identity="${image_repository}:latest"
 
 cd "$ROOT"
 docker build \
@@ -32,8 +26,7 @@ docker build \
   --platform "${platform}" \
   --build-arg "SB_NETPLAY_BUILD_SHA=${build_sha}" \
   --build-arg "SB_NETPLAY_IMAGE_IDENTITY=${image_identity}" \
-  -t "${image_repository}:${tag}" \
   -t "${image_repository}:latest" \
   .
 
-echo "Built ${image_identity} and ${image_repository}:latest (${platform}, ${build_sha})"
+echo "Built ${image_identity} (${platform}, ${build_sha})"
