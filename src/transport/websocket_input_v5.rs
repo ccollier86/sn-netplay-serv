@@ -127,7 +127,7 @@ async fn handle_host_open(
             services.metrics.record_v5_frame_released();
             true
         }
-        Ok(HostFrameRelayOutcome::IgnoredPauseBoundary) => true,
+        Ok(HostFrameRelayOutcome::IgnoredTransitionBoundary) => true,
         Ok(HostFrameRelayOutcome::Pending {
             delay_ms,
             room_epoch,

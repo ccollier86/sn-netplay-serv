@@ -97,6 +97,9 @@ async fn scheduled_host_release_and_two_phase_recovery_work_over_real_sockets() 
         .as_u64()
         .expect("recovery id");
 
+    // A host open can already be queued when the control lane freezes the old epoch.
+    // It is obsolete transition work, not a reason to close the binary input socket.
+    host.send_host_frame_open(1).await;
     host.send_strict_input(1, &[3]).await;
     let transition_nack = host.expect_input_nack().await;
     assert_eq!(transition_nack.expected_frame, 1);

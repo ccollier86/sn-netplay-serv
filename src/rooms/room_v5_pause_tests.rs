@@ -156,7 +156,7 @@ fn queued_host_opens_after_the_pause_boundary_are_ignored() {
                 host_open(&fixture, frame),
                 100
             ),
-            Ok(HostFrameOpenOutcome::IgnoredPauseBoundary)
+            Ok(HostFrameOpenOutcome::IgnoredTransitionBoundary)
         ));
     }
     assert_eq!(fixture.room.next_release_frame, pause.pause_at_frame + 1);
