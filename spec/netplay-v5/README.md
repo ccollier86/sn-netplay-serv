@@ -243,13 +243,17 @@ policy. Solo playback is unchanged.
 
 - Decode and validate the complete message before mutating room state.
 - Reject unknown magic/discriminators, invalid lengths, invalid player indices,
-  unsorted release cursors, wrong epochs, and wrong ownership.
+  unsorted release cursors, wrong epochs, and wrong ownership, except for the
+  bounded scheduled-transition drop rule below.
 - Ignore old duplicate input or host-open records idempotently.
 - NACK a future input cursor; never synthesize missing input.
-- During a scheduled transition, treat stale/future input or host-open work as
-  recoverable cursor feedback and retain room/session/preparation context in
-  diagnostics. Outside that bounded transition, enforce normal lane-integrity
-  limits.
+- During a scheduled transition, including old-epoch work queued before the
+  control transition became visible to the input lane, drop obsolete or
+  otherwise inadmissible input/open work without ACK, NACK, cursor advancement,
+  release advancement, or socket closure. Record the expected and received
+  epochs, room status, frames, release cursor, and accepted-input cursors for
+  diagnosis. Outside that bounded transition, enforce normal epoch and
+  lane-integrity limits.
 - Close and recover when a bounded input receiver lags instead of dropping.
 - Close a v5 input socket that exceeds the transport token bucket rather than
   allowing duplicate-message abuse to monopolize room processing.
