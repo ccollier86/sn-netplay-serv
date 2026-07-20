@@ -14,6 +14,8 @@ pub(crate) struct StateRecoveryTransaction {
     recovery_id: u64,
     mismatch: StateHashMismatchView,
     pinned_snapshot: Option<SnapshotManifest>,
+    preparing_room_epoch: u64,
+    preparing_session_epoch: u64,
     started_at: Instant,
 }
 
@@ -21,12 +23,16 @@ impl StateRecoveryTransaction {
     pub(crate) fn preparing(
         recovery_id: u64,
         mismatch: StateHashMismatchView,
+        preparing_room_epoch: u64,
+        preparing_session_epoch: u64,
         started_at: Instant,
     ) -> Self {
         Self {
             recovery_id,
             mismatch,
             pinned_snapshot: None,
+            preparing_room_epoch,
+            preparing_session_epoch,
             started_at,
         }
     }
@@ -37,6 +43,10 @@ impl StateRecoveryTransaction {
 
     pub(crate) fn repair_frame(&self) -> u64 {
         self.mismatch.repair_frame
+    }
+
+    pub(crate) fn accepts_message_epoch(&self, room_epoch: u64, session_epoch: u64) -> bool {
+        room_epoch == self.preparing_room_epoch && session_epoch == self.preparing_session_epoch
     }
 
     pub(crate) fn commit(&mut self, manifest: SnapshotManifest) {

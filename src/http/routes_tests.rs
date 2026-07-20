@@ -83,6 +83,24 @@ async fn health_returns_ok() {
         .expect("response");
 
     assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .expect("health response body");
+    let value: Value = serde_json::from_slice(&body).expect("health response json");
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(value["minSupportedProtocolVersion"], 4);
+    assert_eq!(value["maxSupportedProtocolVersion"], 5);
+    assert!(
+        value["buildSha"]
+            .as_str()
+            .is_some_and(|sha| !sha.is_empty())
+    );
+    assert!(
+        value["imageIdentity"]
+            .as_str()
+            .is_some_and(|identity| !identity.is_empty())
+    );
 }
 
 #[tokio::test]

@@ -86,6 +86,23 @@ Public health check:
 curl -fsS https://netplay.shadowboy.app/health
 ```
 
+The response must identify the immutable deployed image and source revision:
+
+```json
+{
+  "status": "ok",
+  "buildSha": "<complete-commit-sha>",
+  "imageIdentity": "ghcr.io/ccollier86/sb-netplay-serv:<complete-commit-sha>",
+  "version": "0.1.0",
+  "minSupportedProtocolVersion": 4,
+  "maxSupportedProtocolVersion": 5
+}
+```
+
+Compare `buildSha` with the requested `SB_NETPLAY_IMAGE` before live client
+acceptance. A healthy response from a different SHA is not a successful
+rollout.
+
 Authenticated metrics:
 
 ```bash

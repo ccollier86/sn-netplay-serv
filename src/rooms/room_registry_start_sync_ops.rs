@@ -22,10 +22,12 @@ impl InMemoryRoomRegistry {
             .ok_or(RoomError::NotFound)?;
         let now = self.clock.now();
         let server_time_ms = self.server_time_ms_at(now);
-        let outcome =
-            stored_room
-                .room
-                .accept_clock_sync_sample(connection_id, sample, server_time_ms)?;
+        let outcome = stored_room.room.accept_clock_sync_sample(
+            connection_id,
+            sample,
+            now,
+            server_time_ms,
+        )?;
 
         match outcome {
             StartSyncOutcome::Waiting => {

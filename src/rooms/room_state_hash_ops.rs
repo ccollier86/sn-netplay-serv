@@ -4,8 +4,8 @@
 //! relay compares reports only after every connected player reported that frame.
 
 use crate::protocol::{
-    NearbyStateHashMatchView, PlayerStateHashView, StateDigestMode, StateHashMismatchView,
-    StateHashReport, StateRecoveryView,
+    AUTHORITATIVE_STATE_HASH_INTERVAL_FRAMES, NearbyStateHashMatchView, PlayerStateHashView,
+    StateDigestMode, StateHashMismatchView, StateHashReport, StateRecoveryView,
 };
 use crate::rooms::{
     ConnectionId, NetplayRoom, PlayerRuntimeState, PlayerStatus, RoomError, RoomStatus,
@@ -62,6 +62,8 @@ impl NetplayRoom {
         }
 
         report.validate().map_err(|_| RoomError::InvalidPayload)?;
+        let authoritative_v5 =
+            self.uses_strict_controller_input() && digest_mode == StateDigestMode::Authoritative;
         let player_index = self
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
@@ -71,6 +73,21 @@ impl NetplayRoom {
         // tearing down an otherwise valid recovered session.
         if self.status == RoomStatus::StartScheduled {
             return Ok(StateHashEvaluation::Pending);
+        }
+        if authoritative_v5 {
+            if report.frame == 0
+                || !report
+                    .frame
+                    .is_multiple_of(AUTHORITATIVE_STATE_HASH_INTERVAL_FRAMES)
+            {
+                return Err(RoomError::InvalidPayload);
+            }
+            if report.frame < self.next_authoritative_state_hash_frame {
+                return Ok(StateHashEvaluation::Pending);
+            }
+            if report.frame != self.next_authoritative_state_hash_frame {
+                return Err(RoomError::InvalidPayload);
+            }
         }
 
         let normalized_hash = report.sha256.to_ascii_lowercase();
@@ -99,11 +116,15 @@ impl NetplayRoom {
             .collect::<Vec<_>>();
 
         hashes.sort_by_key(|hash| hash.player_index.zero_based());
-        let nearby_matches = self.nearby_state_hash_matches(
-            report.frame,
-            &hashes,
-            self.dynamic_nearby_state_hash_window(now),
-        );
+        let nearby_matches = if authoritative_v5 {
+            Vec::new()
+        } else {
+            self.nearby_state_hash_matches(
+                report.frame,
+                &hashes,
+                self.dynamic_nearby_state_hash_window(now),
+            )
+        };
         self.prune_state_hashes(report.frame);
 
         let Some(first_hash) = hashes.first().map(|hash| hash.sha256.as_str()) else {
@@ -112,6 +133,11 @@ impl NetplayRoom {
 
         if hashes.iter().all(|hash| hash.sha256 == first_hash) {
             self.reset_state_hash_mismatch_streak();
+            if authoritative_v5 {
+                self.next_authoritative_state_hash_frame = report
+                    .frame
+                    .saturating_add(AUTHORITATIVE_STATE_HASH_INTERVAL_FRAMES);
+            }
             return Ok(StateHashEvaluation::Matched(report.frame));
         }
 
@@ -291,6 +317,33 @@ impl NetplayRoom {
     fn reset_state_hash_mismatch_streak(&mut self) {
         self.state_hash_true_mismatch_streak = 0;
     }
+
+    pub(super) fn reset_authoritative_state_hash_cursor(&mut self, start_frame: u64) {
+        self.next_authoritative_state_hash_frame = next_authoritative_checkpoint_after(start_frame);
+    }
+
+    pub(super) fn reset_authoritative_state_hash_cursor_for_resume(&mut self, resume_frame: u64) {
+        self.next_authoritative_state_hash_frame =
+            next_authoritative_checkpoint_at_or_after(resume_frame);
+    }
+}
+
+fn next_authoritative_checkpoint_after(frame: u64) -> u64 {
+    frame
+        .checked_div(AUTHORITATIVE_STATE_HASH_INTERVAL_FRAMES)
+        .unwrap_or_default()
+        .saturating_add(1)
+        .saturating_mul(AUTHORITATIVE_STATE_HASH_INTERVAL_FRAMES)
+}
+
+fn next_authoritative_checkpoint_at_or_after(frame: u64) -> u64 {
+    if frame == 0 {
+        return AUTHORITATIVE_STATE_HASH_INTERVAL_FRAMES;
+    }
+
+    frame
+        .div_ceil(AUTHORITATIVE_STATE_HASH_INTERVAL_FRAMES)
+        .saturating_mul(AUTHORITATIVE_STATE_HASH_INTERVAL_FRAMES)
 }
 
 fn frame_spread(frames: &[u64]) -> Option<u64> {

@@ -1,7 +1,9 @@
 //! Protocol-v5 strict input and host-driven frame relay operations.
 
 use super::InMemoryRoomRegistry;
-use crate::protocol::{HostFrameOpen, StrictInputBatch};
+use crate::protocol::{
+    HostFrameOpen, InputCursorNack, InputCursorNackReason, InputCursorResponse, StrictInputBatch,
+};
 use crate::rooms::{
     ConnectionId, HostFrameOpenOutcome, HostFrameRelayOutcome, InviteCode, RoomError,
     ScheduledHostFrameReleaseOutcome, StrictInputRelayOutcome,
@@ -18,9 +20,82 @@ impl InMemoryRoomRegistry {
         let stored_room = rooms
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
-        let outcome = stored_room
+        let batch_context = (
+            batch.room_epoch,
+            batch.session_epoch,
+            batch.player_index,
+            batch.start_frame,
+            batch.end_frame(),
+        );
+        let outcome = match stored_room
             .room
-            .accept_strict_input_batch(connection_id, batch)?;
+            .accept_strict_input_batch(connection_id, batch)
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                if matches!(
+                    error,
+                    RoomError::NotPlaying
+                        | RoomError::StaleRoomEpoch
+                        | RoomError::StaleSessionEpoch
+                ) {
+                    let detail = format!(
+                        "ignored v5 transition input: expected room/session {}/{}, received {}/{}, player {}, frames {}..={}, next release {}, status {:?}",
+                        stored_room.room.room_epoch,
+                        stored_room.room.session_epoch,
+                        batch_context.0,
+                        batch_context.1,
+                        batch_context.2.zero_based(),
+                        batch_context.3,
+                        batch_context.4,
+                        stored_room.room.next_release_frame,
+                        stored_room.room.status(),
+                    );
+                    stored_room.record_debug_event(
+                        self.clock.now(),
+                        "v5TransitionInputIgnored",
+                        &detail,
+                    );
+                    self.record_recent_events(stored_room.debug_events(1));
+                    let expected_frame = stored_room
+                        .room
+                        .next_input_frames
+                        .get(&batch_context.2)
+                        .copied()
+                        .unwrap_or(stored_room.room.sync_start_frame);
+                    return Ok(StrictInputRelayOutcome {
+                        response: InputCursorResponse::Nack(InputCursorNack {
+                            room_epoch: stored_room.room.room_epoch,
+                            session_epoch: stored_room.room.session_epoch,
+                            player_index: batch_context.2,
+                            expected_frame,
+                            received_frame: batch_context.3,
+                            reason: InputCursorNackReason::SessionState,
+                        }),
+                        accepted_frame_count: 0,
+                        duplicate_frame_count: 0,
+                    });
+                }
+                return Err(error);
+            }
+        };
+        if let InputCursorResponse::Nack(nack) = outcome.response {
+            let detail = format!(
+                "nacked v5 input cursor: room/session {}/{}, player {}, expected frame {}, received frame {}, reason {:?}, batch {}..={}, next release {}, status {:?}",
+                nack.room_epoch,
+                nack.session_epoch,
+                nack.player_index.zero_based(),
+                nack.expected_frame,
+                nack.received_frame,
+                nack.reason,
+                batch_context.3,
+                batch_context.4,
+                stored_room.room.next_release_frame,
+                stored_room.room.status(),
+            );
+            stored_room.record_debug_event(self.clock.now(), "v5InputCursorNacked", &detail);
+            self.record_recent_events(stored_room.debug_events(1));
+        }
         let accepted_frame_count = outcome
             .accepted_batch
             .as_ref()
@@ -46,10 +121,42 @@ impl InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
         let server_time_ms = self.server_time_ms_at(self.clock.now());
-        match stored_room
-            .room
-            .accept_host_frame_open(connection_id, open, server_time_ms)?
-        {
+        let open_context = open;
+        let outcome = match stored_room.room.accept_host_frame_open(
+            connection_id,
+            open,
+            server_time_ms,
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                if matches!(
+                    error,
+                    RoomError::NotPlaying
+                        | RoomError::StaleRoomEpoch
+                        | RoomError::StaleSessionEpoch
+                ) {
+                    let detail = format!(
+                        "ignored v5 transition host open: expected room/session {}/{}, received {}/{}, expected frame {}, received frame {}, status {:?}",
+                        stored_room.room.room_epoch,
+                        stored_room.room.session_epoch,
+                        open_context.room_epoch,
+                        open_context.session_epoch,
+                        stored_room.room.next_release_frame,
+                        open_context.frame,
+                        stored_room.room.status(),
+                    );
+                    stored_room.record_debug_event(
+                        self.clock.now(),
+                        "v5TransitionHostOpenIgnored",
+                        &detail,
+                    );
+                    self.record_recent_events(stored_room.debug_events(1));
+                    return Ok(HostFrameRelayOutcome::IgnoredTransitionBoundary);
+                }
+                return Err(error);
+            }
+        };
+        match outcome {
             HostFrameOpenOutcome::Released(release) => {
                 stored_room.emit_v5_server_frame(release);
                 Ok(HostFrameRelayOutcome::Broadcast)
@@ -58,6 +165,20 @@ impl InMemoryRoomRegistry {
                 Ok(HostFrameRelayOutcome::Duplicate(release))
             }
             HostFrameOpenOutcome::IgnoredTransitionBoundary => {
+                let detail = format!(
+                    "ignored v5 transition host open: room/session {}/{}, expected frame {}, received frame {}, status {:?}",
+                    stored_room.room.room_epoch,
+                    stored_room.room.session_epoch,
+                    stored_room.room.next_release_frame,
+                    open_context.frame,
+                    stored_room.room.status(),
+                );
+                stored_room.record_debug_event(
+                    self.clock.now(),
+                    "v5TransitionHostOpenIgnored",
+                    &detail,
+                );
+                self.record_recent_events(stored_room.debug_events(1));
                 Ok(HostFrameRelayOutcome::IgnoredTransitionBoundary)
             }
             HostFrameOpenOutcome::Pending { delay_ms } => Ok(HostFrameRelayOutcome::Pending {

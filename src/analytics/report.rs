@@ -34,6 +34,10 @@ pub struct SessionReport {
     pub max_audio_queue_depth_frames: Option<u32>,
     pub total_audio_catch_up_events: u64,
     pub total_audio_trimmed_frames: u64,
+    pub total_audio_rebuffer_events: u64,
+    pub max_audio_consecutive_missing_frames: Option<u32>,
+    pub min_audio_queue_frames: Option<u32>,
+    pub max_audio_queue_frames: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -65,6 +69,10 @@ pub struct FleetReport {
     pub max_audio_queue_depth_frames: Option<u32>,
     pub total_audio_catch_up_events: u64,
     pub total_audio_trimmed_frames: u64,
+    pub total_audio_rebuffer_events: u64,
+    pub max_audio_consecutive_missing_frames: Option<u32>,
+    pub min_audio_queue_frames: Option<u32>,
+    pub max_audio_queue_frames: Option<u32>,
 }
 
 pub fn build_session_reports(
@@ -145,6 +153,31 @@ pub fn build_session_reports(
             u64::from(sample.audio_catch_up_events.unwrap_or_default());
         report.total_audio_trimmed_frames +=
             u64::from(sample.audio_trimmed_frames.unwrap_or_default());
+        report.total_audio_rebuffer_events +=
+            u64::from(sample.audio_rebuffer_events.unwrap_or_default());
+        if let Some(missing) = sample.audio_max_consecutive_missing_frames {
+            report.max_audio_consecutive_missing_frames = Some(
+                report
+                    .max_audio_consecutive_missing_frames
+                    .unwrap_or_default()
+                    .max(missing),
+            );
+        }
+        if let Some(minimum) = sample.audio_queue_min_frames {
+            report.min_audio_queue_frames = Some(
+                report
+                    .min_audio_queue_frames
+                    .map_or(minimum, |current| current.min(minimum)),
+            );
+        }
+        if let Some(maximum) = sample.audio_queue_max_frames {
+            report.max_audio_queue_frames = Some(
+                report
+                    .max_audio_queue_frames
+                    .unwrap_or_default()
+                    .max(maximum),
+            );
+        }
 
         if let Some(frame_delta) = sample.frame_delta {
             let abs = frame_delta.unsigned_abs();
@@ -273,6 +306,22 @@ pub fn build_fleet_report(sessions: &[SessionReport]) -> FleetReport {
             .iter()
             .map(|session| session.total_audio_trimmed_frames)
             .sum(),
+        total_audio_rebuffer_events: sessions
+            .iter()
+            .map(|session| session.total_audio_rebuffer_events)
+            .sum(),
+        max_audio_consecutive_missing_frames: sessions
+            .iter()
+            .filter_map(|session| session.max_audio_consecutive_missing_frames)
+            .max(),
+        min_audio_queue_frames: sessions
+            .iter()
+            .filter_map(|session| session.min_audio_queue_frames)
+            .min(),
+        max_audio_queue_frames: sessions
+            .iter()
+            .filter_map(|session| session.max_audio_queue_frames)
+            .max(),
     }
 }
 
@@ -330,6 +379,13 @@ pub fn print_report(fleet: &FleetReport, sessions: &[SessionReport]) {
         fleet.total_audio_catch_up_events,
         fleet.total_audio_trimmed_frames
     );
+    println!(
+        "audio recovery: {} sustained rebuffers | max missing {} frames | queue range {}-{} frames",
+        fleet.total_audio_rebuffer_events,
+        fmt_optional_u32(fleet.max_audio_consecutive_missing_frames),
+        fmt_optional_u32(fleet.min_audio_queue_frames),
+        fmt_optional_u32(fleet.max_audio_queue_frames)
+    );
     println!();
     println!(
         "{:<36} {:<6} {:<5} {:<8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>8} {:>8} {:>8}",
@@ -379,6 +435,12 @@ fn session_key(room_id: &str, session_epoch: u64) -> String {
 fn fmt_optional_ms(value: Option<f64>) -> String {
     value
         .map(|value| format!("{value:.1}ms"))
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
+fn fmt_optional_u32(value: Option<u32>) -> String {
+    value
+        .map(|value| value.to_string())
         .unwrap_or_else(|| "n/a".to_string())
 }
 

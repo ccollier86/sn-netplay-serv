@@ -183,6 +183,14 @@ public sealed interface ClientMessage {
         public val sessionEpoch: Long,
         public val report: StateHashReport,
     ) : ClientMessage
+
+    @Serializable
+    @SerialName("stateRecoveryPinned")
+    public data class StateRecoveryPinned(
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val pin: StateRecoveryPin,
+    ) : ClientMessage
 }
 
 @Serializable
@@ -309,6 +317,49 @@ public sealed interface ServerMessage {
         public val roomEpoch: Long,
         public val sessionEpoch: Long,
         public val mismatch: StateHashMismatchView,
+        public val room: RoomView,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long = eventSeq
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("stateRecoveryPrepare")
+    public data class StateRecoveryPrepare(
+        public val eventSeq: Long,
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val recovery: StateRecoveryView,
+        public val room: RoomView,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long = eventSeq
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("stateRecoveryCommitted")
+    public data class StateRecoveryCommitted(
+        public val eventSeq: Long,
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val recovery: StateRecoveryView,
+        public val room: RoomView,
+    ) : ServerMessage {
+        override val eventSeqOrNull: Long = eventSeq
+        override val roomEpochOrNull: Long = roomEpoch
+        override val sessionEpochOrNull: Long = sessionEpoch
+    }
+
+    @Serializable
+    @SerialName("stateRecoveryFailed")
+    public data class StateRecoveryFailed(
+        public val eventSeq: Long,
+        public val roomEpoch: Long,
+        public val sessionEpoch: Long,
+        public val recovery: StateRecoveryView,
+        public val reason: String,
         public val room: RoomView,
     ) : ServerMessage {
         override val eventSeqOrNull: Long = eventSeq

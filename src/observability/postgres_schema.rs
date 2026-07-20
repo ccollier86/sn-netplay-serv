@@ -101,6 +101,26 @@ pub fn create_table_queries(tables: &PostgresTableNames) -> Vec<String> {
             "audio_trimmed_frames",
             "INTEGER",
         ),
+        add_column_query(
+            &tables.performance_samples,
+            "audio_rebuffer_events",
+            "INTEGER",
+        ),
+        add_column_query(
+            &tables.performance_samples,
+            "audio_max_consecutive_missing_frames",
+            "INTEGER",
+        ),
+        add_column_query(
+            &tables.performance_samples,
+            "audio_queue_min_frames",
+            "INTEGER",
+        ),
+        add_column_query(
+            &tables.performance_samples,
+            "audio_queue_max_frames",
+            "INTEGER",
+        ),
         create_events_session_index_query(&tables.events),
         create_lobby_events_index_query(&tables.lobby_events),
         create_samples_session_index_query(&tables.performance_samples),
@@ -116,7 +136,7 @@ pub fn split_batch(batch: &[NetplayTelemetryRecord]) -> PostgresTelemetryBatch {
             NetplayTelemetryRecord::RoomEvent(event) => grouped.events.push(event.clone()),
             NetplayTelemetryRecord::LobbyEvent(event) => grouped.lobby_events.push(event.clone()),
             NetplayTelemetryRecord::PerformanceSample(sample) => {
-                grouped.performance_samples.push(sample.clone())
+                grouped.performance_samples.push((**sample).clone())
             }
         }
     }
@@ -188,7 +208,11 @@ fn create_performance_samples_table_query(table: &str) -> String {
          suppressed_video_frames INTEGER, \
          audio_queue_depth_frames INTEGER, \
          audio_catch_up_events INTEGER, \
-         audio_trimmed_frames INTEGER\
+         audio_trimmed_frames INTEGER, \
+         audio_rebuffer_events INTEGER, \
+         audio_max_consecutive_missing_frames INTEGER, \
+         audio_queue_min_frames INTEGER, \
+         audio_queue_max_frames INTEGER\
          )",
         quote_identifier(table)
     )
@@ -274,7 +298,7 @@ mod tests {
                 kind: "lobbyCreated".to_string(),
                 detail: "lobby created".to_string(),
             }),
-            NetplayTelemetryRecord::PerformanceSample(NetplayPerformanceSample {
+            NetplayTelemetryRecord::PerformanceSample(Box::new(NetplayPerformanceSample {
                 timestamp_ms: 1,
                 room_id,
                 invite_code: "AB23-CD".to_string(),
@@ -305,7 +329,11 @@ mod tests {
                 audio_queue_depth_frames: Some(3),
                 audio_catch_up_events: Some(1),
                 audio_trimmed_frames: Some(1),
-            }),
+                audio_rebuffer_events: Some(1),
+                audio_max_consecutive_missing_frames: Some(24),
+                audio_queue_min_frames: Some(0),
+                audio_queue_max_frames: Some(8),
+            })),
         ];
 
         let grouped = split_batch(&batch);

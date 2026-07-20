@@ -92,7 +92,9 @@ impl RoomDebugEventSink for BoundedTelemetrySink {
     }
 
     fn record_performance_sample(&self, sample: RoomPerformanceSample) {
-        self.try_record(NetplayTelemetryRecord::PerformanceSample(sample.into()));
+        self.try_record(NetplayTelemetryRecord::PerformanceSample(Box::new(
+            sample.into(),
+        )));
     }
 }
 

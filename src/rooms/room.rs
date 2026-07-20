@@ -43,6 +43,7 @@ pub struct NetplayRoom {
     pub(super) next_input_frames: HashMap<PlayerIndex, u64>,
     pub(super) link_cable_state: LinkCableRoomState,
     pub(super) host_snapshot_completed: bool,
+    pub(super) completed_snapshot_manifest: Option<crate::protocol::SnapshotManifest>,
     pub(super) next_pause_sequence: u64,
     pub(super) pause_state: Option<SessionPauseStateTracker>,
     pub(super) snapshot_transfer: Option<SnapshotTransferState>,
@@ -56,6 +57,7 @@ pub struct NetplayRoom {
     pub(super) input_delay_policy: AdaptiveInputDelayPolicy,
     pub(super) state_hashes: BTreeMap<u64, HashMap<PlayerIndex, String>>,
     pub(super) state_hash_true_mismatch_streak: u8,
+    pub(super) next_authoritative_state_hash_frame: u64,
     pub(super) next_state_recovery_id: u64,
     pub(super) state_recovery: Option<StateRecoveryTransaction>,
     pub(super) state_recovery_started_at: VecDeque<Instant>,
@@ -153,6 +155,7 @@ impl NetplayRoom {
             next_input_frames: HashMap::new(),
             link_cable_state: LinkCableRoomState::default(),
             host_snapshot_completed: false,
+            completed_snapshot_manifest: None,
             next_pause_sequence: 1,
             pause_state: None,
             snapshot_transfer: None,
@@ -166,6 +169,8 @@ impl NetplayRoom {
             input_delay_policy: AdaptiveInputDelayPolicy::new(now),
             state_hashes: BTreeMap::new(),
             state_hash_true_mismatch_streak: 0,
+            next_authoritative_state_hash_frame:
+                crate::protocol::AUTHORITATIVE_STATE_HASH_INTERVAL_FRAMES,
             next_state_recovery_id: 1,
             state_recovery: None,
             state_recovery_started_at: VecDeque::new(),
@@ -206,10 +211,16 @@ impl NetplayRoom {
             return StateDigestMode::Authoritative;
         }
 
-        self.compatibility
+        let mode = self
+            .compatibility
             .values()
             .find_map(|fingerprint| fingerprint.valid_determinism_v5())
-            .map_or(StateDigestMode::Disabled, |profile| profile.digest_mode)
+            .map_or(StateDigestMode::Disabled, |profile| profile.digest_mode);
+        if mode == StateDigestMode::Authoritative && self.session.game.system_id != "snes" {
+            StateDigestMode::Disabled
+        } else {
+            mode
+        }
     }
 
     /// Returns the configured player capacity.
@@ -483,12 +494,21 @@ impl NetplayRoom {
     }
 
     pub(super) fn reset_sync_state_to(&mut self, start_frame: u64) {
+        if self.uses_strict_controller_input() {
+            self.players.iter_mut().for_each(|slot| {
+                slot.latest_local_frame = None;
+                slot.latest_local_frame_reported_at = None;
+                slot.latest_network_report = None;
+                slot.latest_network_reported_at = None;
+            });
+        }
         self.compatibility.clear();
         self.ready_players.clear();
         self.last_input_frames.clear();
         self.next_input_frames.clear();
         self.link_cable_state.reset();
         self.host_snapshot_completed = false;
+        self.completed_snapshot_manifest = None;
         self.pause_state = None;
         self.snapshot_transfer = None;
         self.snapshot_file_relay_transfer = None;
@@ -500,6 +520,7 @@ impl NetplayRoom {
         self.pending_input_delay_change = None;
         self.state_hashes.clear();
         self.state_hash_true_mismatch_streak = 0;
+        self.reset_authoritative_state_hash_cursor(start_frame);
         self.state_recovery = None;
         self.pending_host_frame_open = None;
         self.reset_start_sync_state();

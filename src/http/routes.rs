@@ -17,8 +17,8 @@ use crate::limits::{
 use crate::lobbies::{LobbyDebugEvent, LobbyRegistrySnapshot};
 use crate::observability::MetricsSnapshot;
 use crate::protocol::{
-    NetplayClientKind, NetplaySessionDescriptor, validate_client_protocol_version,
-    validate_room_protocol_version,
+    MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION, NETPLAY_PROTOCOL_VERSION, NetplayClientKind,
+    NetplaySessionDescriptor, validate_client_protocol_version, validate_room_protocol_version,
 };
 use crate::rate_limit::RateLimitAction;
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, RoomView};
@@ -93,7 +93,14 @@ fn trace_request_path<B>(request: &axum::http::Request<B>) -> &str {
 
 /// Returns a simple process health response.
 pub async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok" })
+    Json(HealthResponse {
+        status: "ok",
+        build_sha: option_env!("SB_NETPLAY_BUILD_SHA").unwrap_or("development"),
+        image_identity: option_env!("SB_NETPLAY_IMAGE_IDENTITY").unwrap_or("local"),
+        version: env!("CARGO_PKG_VERSION"),
+        min_supported_protocol_version: MIN_SUPPORTED_NETPLAY_PROTOCOL_VERSION,
+        max_supported_protocol_version: NETPLAY_PROTOCOL_VERSION,
+    })
 }
 
 /// Creates a netplay room for the verified host.
@@ -458,6 +465,16 @@ fn enforce_capability_rate_limit(
 pub struct HealthResponse {
     /// Static process status.
     pub status: &'static str,
+    /// Source revision embedded when the executable was built.
+    pub build_sha: &'static str,
+    /// Immutable image name and tag embedded when the executable was built.
+    pub image_identity: &'static str,
+    /// Relay package version embedded by Cargo.
+    pub version: &'static str,
+    /// Oldest netplay protocol accepted by this relay build.
+    pub min_supported_protocol_version: u16,
+    /// Newest netplay protocol accepted by this relay build.
+    pub max_supported_protocol_version: u16,
 }
 
 /// Room creation response body.

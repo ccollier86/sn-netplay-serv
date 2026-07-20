@@ -19,13 +19,21 @@ impl NetplayRoom {
         connection_id: ConnectionId,
         chunk: &SnapshotChunk,
         limits: SnapshotLimits,
-    ) -> Result<(), RoomError> {
+    ) -> Result<bool, RoomError> {
+        if self.host_snapshot_completed {
+            self.validate_host_snapshot_identity(connection_id)?;
+            self.validate_snapshot_repair_frame(chunk.repair_frame)?;
+            self.validate_v5_recovery_snapshot_chunk(chunk)?;
+            return self
+                .snapshot_transfer
+                .as_ref()
+                .is_some_and(|transfer| transfer.is_duplicate_chunk(chunk))
+                .then_some(false)
+                .ok_or(RoomError::SnapshotInvalid);
+        }
         self.validate_host_snapshot_sender(connection_id)?;
         self.validate_snapshot_repair_frame(chunk.repair_frame)?;
         self.validate_v5_recovery_snapshot_chunk(chunk)?;
-        if self.host_snapshot_completed {
-            return Err(RoomError::SnapshotInvalid);
-        }
         self.snapshot_transfer
             .get_or_insert_with(SnapshotTransferState::new)
             .accept_chunk(chunk, limits)
@@ -37,7 +45,15 @@ impl NetplayRoom {
         connection_id: ConnectionId,
         manifest: &SnapshotManifest,
         limits: SnapshotLimits,
-    ) -> Result<(), RoomError> {
+    ) -> Result<bool, RoomError> {
+        if self.host_snapshot_completed {
+            self.validate_host_snapshot_identity(connection_id)?;
+            self.validate_snapshot_repair_frame(manifest.repair_frame)?;
+            self.validate_v5_recovery_snapshot(manifest)?;
+            return (self.completed_snapshot_manifest.as_ref() == Some(manifest))
+                .then_some(false)
+                .ok_or(RoomError::SnapshotInvalid);
+        }
         self.validate_host_snapshot_sender(connection_id)?;
         self.validate_snapshot_repair_frame(manifest.repair_frame)?;
         self.validate_v5_recovery_snapshot(manifest)?;
@@ -46,10 +62,10 @@ impl NetplayRoom {
             .as_ref()
             .ok_or(RoomError::SnapshotInvalid)?;
         transfer.complete(manifest, limits)?;
-        self.snapshot_transfer = None;
         self.host_snapshot_completed = true;
+        self.completed_snapshot_manifest = Some(manifest.clone());
 
-        Ok(())
+        Ok(true)
     }
 
     /// Validates that the host may request a file-relay snapshot transfer.
@@ -130,7 +146,22 @@ impl NetplayRoom {
         transfer_id: &str,
         manifest: &SnapshotManifest,
         limits: SnapshotLimits,
-    ) -> Result<(ConnectionId, SnapshotFileRelayGrant), RoomError> {
+    ) -> Result<Option<(ConnectionId, SnapshotFileRelayGrant)>, RoomError> {
+        if self.host_snapshot_completed {
+            let transfer = self
+                .snapshot_file_relay_transfer
+                .as_ref()
+                .ok_or(RoomError::SnapshotInvalid)?;
+            if transfer.source_connection != connection_id
+                || transfer.download_grant.transfer_id != transfer_id
+                || transfer.manifest != *manifest
+                || self.completed_snapshot_manifest.as_ref() != Some(manifest)
+            {
+                return Err(RoomError::SnapshotInvalid);
+            }
+            return Ok(None);
+        }
+
         self.validate_host_snapshot_sender(connection_id)?;
         self.validate_snapshot_repair_frame(manifest.repair_frame)?;
         self.validate_v5_recovery_snapshot(manifest)?;
@@ -140,14 +171,13 @@ impl NetplayRoom {
 
         let transfer = self
             .snapshot_file_relay_transfer
-            .take()
+            .as_ref()
             .ok_or(RoomError::SnapshotInvalid)?;
 
         if transfer.source_connection != connection_id
             || transfer.download_grant.transfer_id != transfer_id
             || transfer.manifest != *manifest
         {
-            self.snapshot_file_relay_transfer = Some(transfer);
             return Err(RoomError::SnapshotInvalid);
         }
 
@@ -159,8 +189,9 @@ impl NetplayRoom {
             .ok_or(RoomError::RoomNotReady)?;
 
         self.host_snapshot_completed = true;
+        self.completed_snapshot_manifest = Some(manifest.clone());
 
-        Ok((receiver_connection, transfer.download_grant))
+        Ok(Some((receiver_connection, transfer.download_grant.clone())))
     }
 
     fn role_for_connection(&self, connection_id: ConnectionId) -> Option<PlayerRole> {
@@ -171,11 +202,20 @@ impl NetplayRoom {
     }
 
     fn validate_host_snapshot_sender(&self, connection_id: ConnectionId) -> Result<(), RoomError> {
-        if self.session.mode != NetplaySessionMode::ControllerNetplay {
+        self.validate_host_snapshot_identity(connection_id)?;
+
+        if self.status != RoomStatus::SyncingState && self.status != RoomStatus::Ready {
             return Err(RoomError::RoomNotReady);
         }
 
-        if self.status != RoomStatus::SyncingState && self.status != RoomStatus::Ready {
+        Ok(())
+    }
+
+    fn validate_host_snapshot_identity(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Result<(), RoomError> {
+        if self.session.mode != NetplaySessionMode::ControllerNetplay {
             return Err(RoomError::RoomNotReady);
         }
 

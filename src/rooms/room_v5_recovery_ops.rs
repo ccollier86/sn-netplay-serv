@@ -39,9 +39,12 @@ impl NetplayRoom {
 
         let recovery_id = self.next_state_recovery_id;
         self.next_state_recovery_id = self.next_state_recovery_id.saturating_add(1);
+        let repair_frame = mismatch.repair_frame;
         self.state_recovery = Some(StateRecoveryTransaction::preparing(
             recovery_id,
             mismatch,
+            self.room_epoch,
+            self.session_epoch,
             now,
         ));
 
@@ -56,6 +59,7 @@ impl NetplayRoom {
         }
 
         self.state_recovery_started_at.push_back(now);
+        self.reset_authoritative_state_hash_cursor(repair_frame);
         self.status = RoomStatus::RepairingState;
         self.pending_host_frame_open = None;
         self.scheduled_start = None;
@@ -76,13 +80,32 @@ impl NetplayRoom {
     }
 
     /// Accepts the host's durable snapshot identity and commits a fresh epoch.
+    #[cfg(test)]
     pub(super) fn accept_v5_state_recovery_pin(
         &mut self,
         connection_id: ConnectionId,
         pin: StateRecoveryPin,
         limits: SnapshotLimits,
     ) -> Result<StateRecoveryView, RoomError> {
-        if !self.uses_strict_controller_input() || self.status != RoomStatus::RepairingState {
+        self.accept_v5_state_recovery_pin_for_epoch(
+            connection_id,
+            self.room_epoch,
+            self.session_epoch,
+            pin,
+            limits,
+        )
+    }
+
+    /// Accepts a pin from the preparing epoch and makes exact retries idempotent.
+    pub(super) fn accept_v5_state_recovery_pin_for_epoch(
+        &mut self,
+        connection_id: ConnectionId,
+        room_epoch: u64,
+        session_epoch: u64,
+        pin: StateRecoveryPin,
+        limits: SnapshotLimits,
+    ) -> Result<StateRecoveryView, RoomError> {
+        if !self.uses_strict_controller_input() {
             return Err(RoomError::RoomNotReady);
         }
 
@@ -104,11 +127,27 @@ impl NetplayRoom {
             .state_recovery
             .as_ref()
             .ok_or(RoomError::RoomNotReady)?;
-        if !transaction.is_preparing()
-            || transaction.recovery_id() != pin.recovery_id
+        if !transaction.accepts_message_epoch(room_epoch, session_epoch) {
+            return if room_epoch != self.room_epoch {
+                Err(RoomError::StaleRoomEpoch)
+            } else {
+                Err(RoomError::StaleSessionEpoch)
+            };
+        }
+        if transaction.recovery_id() != pin.recovery_id
             || transaction.repair_frame() != pin.manifest.repair_frame
         {
             return Err(RoomError::SnapshotInvalid);
+        }
+        if !transaction.is_preparing() {
+            return if transaction.expected_snapshot() == Some(&pin.manifest) {
+                Ok(transaction.view())
+            } else {
+                Err(RoomError::SnapshotInvalid)
+            };
+        }
+        if self.status != RoomStatus::RepairingState {
+            return Err(RoomError::RoomNotReady);
         }
 
         let repair_frame = transaction.repair_frame();

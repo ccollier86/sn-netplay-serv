@@ -596,14 +596,15 @@ async fn handle_client_message(
         } => {
             apply_room_result(
                 sender,
-                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
-            )
-            .await?;
-            apply_room_result(
-                sender,
                 services
                     .rooms
-                    .pin_state_recovery(invite_code.clone(), connection_id, pin)
+                    .pin_state_recovery(
+                        invite_code.clone(),
+                        connection_id,
+                        room_epoch,
+                        session_epoch,
+                        pin,
+                    )
                     .await,
             )
             .await

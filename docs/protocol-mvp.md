@@ -15,6 +15,20 @@ version `3` when creating a room and opening a room WebSocket.
 
 Returns process health.
 
+The response also carries immutable deployment identity and the supported
+protocol range:
+
+```json
+{
+  "status": "ok",
+  "buildSha": "0123456789abcdef0123456789abcdef01234567",
+  "imageIdentity": "ghcr.io/ccollier86/sb-netplay-serv:0123456789abcdef0123456789abcdef01234567",
+  "version": "0.1.0",
+  "minSupportedProtocolVersion": 4,
+  "maxSupportedProtocolVersion": 5
+}
+```
+
 ```json
 {
   "status": "ok"

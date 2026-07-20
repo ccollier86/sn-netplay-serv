@@ -85,6 +85,36 @@ fn scheduled_first_open_is_held_until_server_deadline() {
 }
 
 #[test]
+fn scheduled_future_open_is_nonfatal_while_first_release_is_pending() {
+    let mut fixture = v5_room(RoomStatus::StartScheduled);
+    fixture.room.scheduled_start = Some(ScheduledSessionStart {
+        room_epoch: fixture.room.room_epoch,
+        session_epoch: fixture.room.session_epoch,
+        start_frame: 0,
+        server_time_ms: 1_000,
+        created_at_server_time_ms: 900,
+        minimum_start_delay_ms: 100,
+        clock_uncertainty_budget_ms: 0,
+    });
+    accept_host_input_zero(&mut fixture);
+
+    assert!(matches!(
+        fixture
+            .room
+            .accept_host_frame_open(fixture.host_input, host_open(&fixture, 0), 999),
+        Ok(HostFrameOpenOutcome::Pending { .. })
+    ));
+    assert!(matches!(
+        fixture
+            .room
+            .accept_host_frame_open(fixture.host_input, host_open(&fixture, 1), 999),
+        Ok(HostFrameOpenOutcome::IgnoredTransitionBoundary)
+    ));
+    assert_eq!(fixture.room.pending_host_frame_open, Some(0));
+    assert_eq!(fixture.room.next_release_frame, 0);
+}
+
+#[test]
 fn periodic_legacy_clock_cannot_advance_a_v5_room() {
     let mut fixture = v5_room(RoomStatus::Playing);
     accept_host_input_zero(&mut fixture);

@@ -27,7 +27,7 @@ impl NetplayRoom {
         connection_id: ConnectionId,
         batch: StrictInputBatch,
     ) -> Result<StrictInputBatchOutcome, RoomError> {
-        self.validate_strict_input_envelope(connection_id, &batch)?;
+        self.validate_strict_input_sender(connection_id, &batch)?;
         let player_index = batch.player_index;
         let frame_count = batch.payloads.len();
         let expected = self
@@ -35,6 +35,14 @@ impl NetplayRoom {
             .get(&player_index)
             .copied()
             .unwrap_or(self.sync_start_frame);
+        if batch.room_epoch != self.room_epoch || batch.session_epoch != self.session_epoch {
+            return Ok(self.strict_input_nack(
+                player_index,
+                expected,
+                batch.start_frame,
+                InputCursorNackReason::SessionState,
+            ));
+        }
         let end_frame = batch
             .start_frame
             .checked_add(batch.payloads.len().saturating_sub(1) as u64)
@@ -107,19 +115,13 @@ impl NetplayRoom {
         })
     }
 
-    fn validate_strict_input_envelope(
+    fn validate_strict_input_sender(
         &self,
         connection_id: ConnectionId,
         batch: &StrictInputBatch,
     ) -> Result<(), RoomError> {
         if !self.uses_strict_controller_input() {
             return Err(RoomError::InvalidPayload);
-        }
-        if batch.room_epoch != self.room_epoch {
-            return Err(RoomError::StaleRoomEpoch);
-        }
-        if batch.session_epoch != self.session_epoch {
-            return Err(RoomError::StaleSessionEpoch);
         }
         let owned = self
             .player_index_for_input_connection(connection_id)

@@ -21,6 +21,7 @@ public data class RoomView(
     public val romRelay: RomRelayCapability? = null,
     public val maxPlayers: Int,
     public val pause: SessionPauseView? = null,
+    public val stateRecovery: StateRecoveryView? = null,
     public val frameClock: RoomFrameClockView = RoomFrameClockView(),
     public val status: RoomStatus,
     public val players: List<PlayerSlotView>,

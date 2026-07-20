@@ -23,6 +23,7 @@ impl NetplayRoom {
         self.pending_input_delay_change = None;
         self.state_hashes.clear();
         self.state_hash_true_mismatch_streak = 0;
+        self.reset_authoritative_state_hash_cursor_for_resume(resume_frame);
         self.pending_host_frame_open = None;
         self.scheduled_start = None;
         self.status = RoomStatus::StartScheduled;

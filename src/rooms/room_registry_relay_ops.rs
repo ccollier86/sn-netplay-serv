@@ -211,6 +211,8 @@ impl InMemoryRoomRegistry {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        room_epoch: u64,
+        session_epoch: u64,
         pin: StateRecoveryPin,
     ) -> Result<(), RoomError> {
         let mut rooms = self.invite_codes.write().await;
@@ -218,8 +220,10 @@ impl InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
         let now = self.clock.now();
-        let recovery = stored_room.room.accept_v5_state_recovery_pin(
+        let recovery = stored_room.room.accept_v5_state_recovery_pin_for_epoch(
             connection_id,
+            room_epoch,
+            session_epoch,
             pin,
             SnapshotLimits::default(),
         )?;

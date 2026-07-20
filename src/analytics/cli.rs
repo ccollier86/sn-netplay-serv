@@ -250,7 +250,7 @@ async fn print_raw_sessions(
             sample.audio_underruns
         );
         println!(
-            "  resend={:?} nacks={:?} replay={:?} suppress_audio={:?} suppress_video={:?} audio_queue={:?} audio_catchup={:?} audio_trimmed={:?}",
+            "  resend={:?} nacks={:?} replay={:?} suppress_audio={:?} suppress_video={:?} audio_queue={:?} audio_catchup={:?} audio_trimmed={:?} audio_rebuffers={:?} max_missing={:?} queue_min={:?} queue_max={:?}",
             sample.input_resend_frames,
             sample.input_nacks,
             sample.replayed_frames,
@@ -258,7 +258,11 @@ async fn print_raw_sessions(
             sample.suppressed_video_frames,
             sample.audio_queue_depth_frames,
             sample.audio_catch_up_events,
-            sample.audio_trimmed_frames
+            sample.audio_trimmed_frames,
+            sample.audio_rebuffer_events,
+            sample.audio_max_consecutive_missing_frames,
+            sample.audio_queue_min_frames,
+            sample.audio_queue_max_frames
         );
     }
 
@@ -354,7 +358,7 @@ async fn run_probe(
             kind: "telemetryProbe".to_string(),
             detail: "operator lobby telemetry write probe".to_string(),
         }),
-        NetplayTelemetryRecord::PerformanceSample(NetplayPerformanceSample {
+        NetplayTelemetryRecord::PerformanceSample(Box::new(NetplayPerformanceSample {
             timestamp_ms: now,
             room_id,
             invite_code: "PROB-E1".to_string(),
@@ -385,7 +389,11 @@ async fn run_probe(
             audio_queue_depth_frames: Some(0),
             audio_catch_up_events: Some(0),
             audio_trimmed_frames: Some(0),
-        }),
+            audio_rebuffer_events: Some(0),
+            audio_max_consecutive_missing_frames: Some(0),
+            audio_queue_min_frames: Some(0),
+            audio_queue_max_frames: Some(0),
+        })),
     ];
 
     writer.write_batch(&batch).await?;

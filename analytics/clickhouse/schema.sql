@@ -34,7 +34,19 @@ CREATE TABLE IF NOT EXISTS netplay_performance_samples
   stall_count Nullable(UInt32),
   catch_up_frames Nullable(UInt32),
   late_input_frames Nullable(UInt32),
-  audio_underruns Nullable(UInt32)
+  audio_underruns Nullable(UInt32),
+  input_resend_frames Nullable(UInt32),
+  input_nacks Nullable(UInt32),
+  replayed_frames Nullable(UInt32),
+  suppressed_audio_frames Nullable(UInt32),
+  suppressed_video_frames Nullable(UInt32),
+  audio_queue_depth_frames Nullable(UInt32),
+  audio_catch_up_events Nullable(UInt32),
+  audio_trimmed_frames Nullable(UInt32),
+  audio_rebuffer_events Nullable(UInt32),
+  audio_max_consecutive_missing_frames Nullable(UInt32),
+  audio_queue_min_frames Nullable(UInt32),
+  audio_queue_max_frames Nullable(UInt32)
 )
 ENGINE = MergeTree
 ORDER BY (timestamp_ms, room_id, session_epoch, player_index);

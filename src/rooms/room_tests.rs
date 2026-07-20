@@ -324,25 +324,33 @@ fn host_can_relay_snapshot_manifest_during_sync() {
     let guest_connection = ConnectionId::new();
     let mut room = compatible_room(host_connection, guest_connection);
 
-    room.accept_snapshot_chunk(
-        host_connection,
-        &SnapshotChunk {
-            snapshot_id: "snapshot-1".to_string(),
-            repair_frame: 0,
-            index: 0,
-            bytes: vec![1, 2, 3],
-        },
-        SnapshotLimits::default(),
-    )
-    .expect("chunk");
+    let chunk = SnapshotChunk {
+        snapshot_id: "snapshot-1".to_string(),
+        repair_frame: 0,
+        index: 0,
+        bytes: vec![1, 2, 3],
+    };
+    room.accept_snapshot_chunk(host_connection, &chunk, SnapshotLimits::default())
+        .expect("chunk");
 
-    let result = room.accept_snapshot_complete(
-        host_connection,
-        &snapshot_manifest(&[1, 2, 3]),
-        SnapshotLimits::default(),
+    let manifest = snapshot_manifest(&[1, 2, 3]);
+    let result =
+        room.accept_snapshot_complete(host_connection, &manifest, SnapshotLimits::default());
+
+    assert_eq!(result, Ok(true));
+    room.status = RoomStatus::Playing;
+    assert_eq!(
+        room.accept_snapshot_chunk(host_connection, &chunk, SnapshotLimits::default()),
+        Ok(false),
     );
-
-    assert!(result.is_ok());
+    assert_eq!(
+        room.accept_snapshot_complete(host_connection, &manifest, SnapshotLimits::default()),
+        Ok(false),
+    );
+    assert_eq!(
+        room.accept_snapshot_complete(guest_connection, &manifest, SnapshotLimits::default()),
+        Err(RoomError::HostOnly),
+    );
 }
 
 #[test]
@@ -388,7 +396,20 @@ fn snapshot_file_relay_completion_allows_ready() {
             &manifest,
             SnapshotLimits::default(),
         )
-        .expect("upload complete");
+        .expect("upload complete")
+        .expect("new upload completion");
+    room.status = RoomStatus::Playing;
+    assert_eq!(
+        room.accept_snapshot_file_relay_upload_complete(
+            host_connection,
+            &upload.transfer_id,
+            &manifest,
+            SnapshotLimits::default(),
+        )
+        .expect("duplicate upload completion"),
+        None,
+    );
+    room.status = RoomStatus::SyncingState;
     attach_input_sockets(&mut room, host_input_connection, guest_input_connection);
 
     let started = room

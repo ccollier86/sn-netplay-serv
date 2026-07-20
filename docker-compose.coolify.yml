@@ -5,7 +5,7 @@
 
 services:
   netplay:
-    image: ghcr.io/ccollier86/sb-netplay-serv:latest
+    image: ${SB_NETPLAY_IMAGE:-ghcr.io/ccollier86/sb-netplay-serv:latest}
     restart: unless-stopped
     environment:
       - SERVICE_URL_NETPLAY

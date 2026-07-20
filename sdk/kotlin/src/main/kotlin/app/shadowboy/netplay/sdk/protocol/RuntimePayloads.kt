@@ -1,5 +1,6 @@
 package app.shadowboy.netplay.sdk.protocol
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -117,4 +118,28 @@ public data class StateHashMismatchView(
     public val repairFrame: Long,
     public val hashes: List<PlayerStateHashView>,
     public val nearbyMatches: List<NearbyStateHashMatchView> = emptyList(),
+)
+
+@Serializable
+public enum class StateRecoveryPhase {
+    @SerialName("preparing")
+    Preparing,
+
+    @SerialName("committed")
+    Committed,
+}
+
+@Serializable
+public data class StateRecoveryView(
+    public val recoveryId: Long,
+    public val phase: StateRecoveryPhase,
+    public val repairFrame: Long,
+    public val mismatch: StateHashMismatchView,
+    public val pinnedSnapshot: SnapshotManifest? = null,
+)
+
+@Serializable
+public data class StateRecoveryPin(
+    public val recoveryId: Long,
+    public val manifest: SnapshotManifest,
 )

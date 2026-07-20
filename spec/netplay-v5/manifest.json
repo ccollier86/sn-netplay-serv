@@ -7,7 +7,7 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "ace10dff83e6c8b146608441b8ab62b54f9fb23289438d4c3c7b45b8080d685f"
+      "sha256": "244d7f09333bff608987688c074be88222cf5f4e26c07dbc8d287eeeeb8c8abc"
     },
     {
       "path": "fixtures/host-frame-open.hex",

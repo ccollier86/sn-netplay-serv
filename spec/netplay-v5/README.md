@@ -129,10 +129,12 @@ For each canonical frame, a client performs one ordered transaction:
 3. The host captures any required start-of-frame rollback state, then queues
    `SBO1` on the same writer after its input.
 4. Apply `SBA1`/`SBN1` cumulatively and resend from the exact requested cursor.
-5. Apply `SBF2` to the released host cursor, then simulate at the negotiated
-   local core cadence only while release, prediction, and sender bounds permit;
-   do not wait for a per-frame relay round trip. Use real input where present
-   and the normative predictor where remote input has not arrived.
+5. Apply `SBF2` to the released host cursor. The exact first `SBF2` after a
+   scheduled transition is a one-frame execution barrier: no core frame may
+   run until that release arrives. After that first frame, simulate at the
+   negotiated local core cadence while release, prediction, and sender bounds
+   permit; do not wait for a per-frame relay round trip. Use real input where
+   present and the normative predictor where remote input has not arrived.
 6. During rollback replay, suppress both video and audio callbacks. Publish
    video and enqueue audio only for the final committed simulation.
 7. Advance the local frame only after the emulator transaction succeeds.
@@ -142,20 +144,49 @@ wake work or detect a stall, but it must never release gameplay frames.
 
 ## Scheduled Start And Resume
 
-ROM relay and the initial host state transfer complete before either client
-sends `deterministicReady`. The relay then emits `startSession` with a
-`scheduledStart` containing the exact room/session epoch, start frame, and
-future server time. Clients convert that time with their sampled clock estimate
-and must not run the start frame early. The relay uses a one-shot wake and emits
-the first `SBF2` only after the deadline and the required host input/open exist.
+ROM relay, initial host-state transfer, and local state loading complete before
+a client begins the clock-sync generation used for scheduled start. Samples
+and pongs belong to one room, session, preparation, and clock generation;
+responses from any older generation are ignored. The relay emits
+`startSession` with a `scheduledStart` containing the exact room/session epoch,
+start frame, and future server time.
 
-A v5 pause is also frame exact. No host open at or beyond `pauseAtFrame` is
-accepted. Every client stops and acknowledges that exact frame. Once every
-holder releases, `sessionResumeScheduled` increments the session epoch, clears
-all old input/replay work, and supplies a new `scheduledStart`. Old-epoch work
-must be discarded rather than translated.
+Before scheduling, the relay derives the initial input delay from fresh reports
+for both data paths: host RTT / 2 + guest RTT / 2 + host jitter + guest jitter.
+It converts that duration with the negotiated frame rate, adds one safety
+frame, and clamps the result to 2 through 8 frames. If both fresh reports are
+not available, the configured default is retained.
+
+At the converted local deadline each client captures and queues the start
+frame's input exactly once. The host also queues that frame's `SBO1` exactly
+once, after its input. Neither client executes the core or advances to capture
+the following frame. Only the `SBF2` for that exact room epoch, session epoch,
+and start frame releases core execution. This first-release rule applies to
+initial launch, pause resume, and state-recovery restart. It is a transition
+barrier, not a conversion of predictive NES, SNES, or Genesis play into
+per-frame lockstep.
+
+A v5 pause is frame exact. Both clients execute pause frame `P` exactly once,
+freeze published output, and settle pending rollback through `P`. A client may
+acknowledge only after relay release and accepted-input cursors prove every
+player complete through `P`; it retries that acknowledgement idempotently until
+its player is listed in the room view. Once every holder releases,
+`sessionResumeScheduled.resumeAtFrame` is `P + 1`. The relay increments the
+session epoch and supplies a scheduled transition for `P + 1`; clients discard
+all old-epoch input, open, and replay work and wait for the exact first `SBF2`
+before executing it.
 
 ## Two-Phase State Recovery
+
+SNES is the only predictive profile with authoritative V5 state digests. It
+serializes start-of-frame checkpoints only at exact frames 600, 1200, 1800, and
+so on. Reports may arrive later, but their frame remains the canonical
+checkpoint. Authoritative decisions never match nearby frames: a same-frame
+match continues and the first same-frame mismatch starts exactly one recovery.
+After repairing frame `P`, the next checkpoint is `P + 600`. NES and Genesis
+remain predictive without authoritative digests. N64 remains strict lockstep,
+with digests disabled and no live state serialization. GameCube is outside the
+V5 release.
 
 Authoritative state digest mismatch uses a two-phase transaction:
 
@@ -169,6 +200,19 @@ Authoritative state digest mismatch uses a two-phase transaction:
    scheduled release run in the fresh epoch. No substitute snapshot id, frame,
    byte count, or checksum is accepted.
 
+The transaction is keyed by `recoveryId`. Duplicate prepare, pin, commit,
+transfer, and start messages are idempotent. Prepare freezes and resets a
+client runtime once; the host persists one checkpoint and resends the same pin.
+Commit validates the ID, frame, and manifest without resetting again. A
+reconnecting client hydrates the active transaction from
+`RoomView.stateRecovery` before processing later events.
+
+Initial launch transfer remains modal. During live recovery neither snapshot
+upload, download, nor apply may publish blocking progress; clients show only
+small repairing/restored notifications. Recovery is complete only after the
+fresh epoch's first released frame has actually executed, not when
+`startSession` is received.
+
 The host has 10 seconds to pin state. A room permits two repair attempts in a
 rolling 60-second window. Timeout emits reason `snapshotPinTimedOut`; exceeding
 the attempt budget emits `recoveryAttemptLimitExceeded`; either failure closes
@@ -181,11 +225,19 @@ the gameplay room instead of leaving clients wedged.
 ## Health Reports
 
 V5 heartbeats retain the existing RTT, jitter, prediction, stall, catch-up,
-late-input, and audio-underrun fields. Clients also report interval counters for
-input resend frames, NACKs, replayed frames, suppressed audio/video frames,
+late-input, and raw audio-underrun fields. Clients also report interval counters
+for input resend frames, NACKs, replayed frames, suppressed audio/video frames,
 audio catch-up operations, and trimmed audio frames, plus the current audio
-queue depth. All fields are optional for wire compatibility; production v5
-clients populate every counter.
+queue depth. Optional audio diagnostics additionally report sustained rebuffer
+events, maximum consecutive missing frames, and minimum/maximum queue depth.
+All fields are optional for wire compatibility; production v5 clients populate
+every counter they support.
+
+N64 playback keeps a 6 ms fade for an isolated missing-audio gap without
+de-priming the sink. Only 24 ms or more of consecutive missing audio enters the
+existing 48 ms recovery prefill; a complete callback resets the gap accumulator
+and recovery fades back in. Native Oboe and AudioTrack fallback use equivalent
+policy. Solo playback is unchanged.
 
 ## Failure Rules
 
@@ -194,7 +246,10 @@ clients populate every counter.
   unsorted release cursors, wrong epochs, and wrong ownership.
 - Ignore old duplicate input or host-open records idempotently.
 - NACK a future input cursor; never synthesize missing input.
-- Treat a future host-open cursor as a lane-integrity failure and recover.
+- During a scheduled transition, treat stale/future input or host-open work as
+  recoverable cursor feedback and retain room/session/preparation context in
+  diagnostics. Outside that bounded transition, enforce normal lane-integrity
+  limits.
 - Close and recover when a bounded input receiver lags instead of dropping.
 - Close a v5 input socket that exceeds the transport token bucket rather than
   allowing duplicate-message abuse to monopolize room processing.

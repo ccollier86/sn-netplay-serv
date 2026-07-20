@@ -99,7 +99,8 @@ pub use snapshot_file_relay::{
     SnapshotFileRelayGrant, SnapshotFileRelayGrantPair, SnapshotFileRelayGrantRole,
 };
 pub use state_hash::{
-    NearbyStateHashMatchView, PlayerStateHashView, StateHashMismatchView, StateHashReport,
+    AUTHORITATIVE_STATE_HASH_INTERVAL_FRAMES, NearbyStateHashMatchView, PlayerStateHashView,
+    StateHashMismatchView, StateHashReport,
 };
 pub use state_recovery::{StateRecoveryPhase, StateRecoveryPin, StateRecoveryView};
 pub use strict_input::{

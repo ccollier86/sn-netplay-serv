@@ -70,14 +70,25 @@ impl SmokeClient {
     }
 
     pub async fn send_strict_input(&mut self, start_frame: u64, fills: &[u8]) {
+        self.send_strict_input_at_epochs(self.room_epoch, self.session_epoch, start_frame, fills)
+            .await;
+    }
+
+    pub async fn send_strict_input_at_epochs(
+        &mut self,
+        room_epoch: u64,
+        session_epoch: u64,
+        start_frame: u64,
+        fills: &[u8],
+    ) {
         let player_index = PlayerIndex::new(
             self.player_index.expect("connected player index"),
             sb_netplay_serv::limits::MVP_ROOM_CAPACITY,
         )
         .expect("valid player index");
         let encoded = encode_strict_input_batch(&StrictInputBatch {
-            room_epoch: self.room_epoch,
-            session_epoch: self.session_epoch,
+            room_epoch,
+            session_epoch,
             player_index,
             start_frame,
             payloads: fills.iter().map(|fill| [*fill; 10]).collect(),
@@ -87,9 +98,19 @@ impl SmokeClient {
     }
 
     pub async fn send_host_frame_open(&mut self, frame: u64) {
+        self.send_host_frame_open_at_epochs(self.room_epoch, self.session_epoch, frame)
+            .await;
+    }
+
+    pub async fn send_host_frame_open_at_epochs(
+        &mut self,
+        room_epoch: u64,
+        session_epoch: u64,
+        frame: u64,
+    ) {
         self.send_input_binary(encode_host_frame_open(&HostFrameOpen {
-            room_epoch: self.room_epoch,
-            session_epoch: self.session_epoch,
+            room_epoch,
+            session_epoch,
             frame,
         }))
         .await;

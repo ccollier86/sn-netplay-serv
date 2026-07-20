@@ -114,6 +114,7 @@ impl NetplayRoom {
         &mut self,
         connection_id: ConnectionId,
         sample: ClockSyncSample,
+        now: Instant,
         server_receive_time_ms: u64,
     ) -> Result<StartSyncOutcome, RoomError> {
         if !self.connected_players_support_scheduled_start() {
@@ -158,7 +159,7 @@ impl NetplayRoom {
             .or_default()
             .insert(sample.sample_index);
 
-        Ok(self.try_schedule_start(server_receive_time_ms))
+        Ok(self.try_schedule_start(now, server_receive_time_ms))
     }
 
     /// Marks one player deterministic-ready and schedules start if possible.
@@ -192,7 +193,7 @@ impl NetplayRoom {
             slot.runtime_state = PlayerRuntimeState::DeterministicReady;
         }
 
-        Ok(self.try_schedule_start(server_time_ms))
+        Ok(self.try_schedule_start(now, server_time_ms))
     }
 
     /// Clears all v2 start-sync state for a new room/session epoch.
@@ -208,7 +209,7 @@ impl NetplayRoom {
         self.scheduled_start.as_ref()
     }
 
-    fn try_schedule_start(&mut self, server_time_ms: u64) -> StartSyncOutcome {
+    fn try_schedule_start(&mut self, now: Instant, server_time_ms: u64) -> StartSyncOutcome {
         if let Some(start) = self.scheduled_start.as_ref() {
             return StartSyncOutcome::Scheduled(start.clone());
         }
@@ -216,6 +217,8 @@ impl NetplayRoom {
         if !self.connected_players_ready_for_scheduling() {
             return StartSyncOutcome::Waiting;
         }
+
+        self.apply_initial_v5_input_delay(now);
 
         let uncertainty_ms = self.scheduled_start_uncertainty_budget();
         let selected_delay_ms = SCHEDULED_START_MINIMUM_DELAY

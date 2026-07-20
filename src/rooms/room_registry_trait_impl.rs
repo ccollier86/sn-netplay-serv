@@ -458,9 +458,11 @@ impl RoomRegistry for InMemoryRoomRegistry {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        room_epoch: u64,
+        session_epoch: u64,
         pin: StateRecoveryPin,
     ) -> Result<(), RoomError> {
-        self.pin_state_recovery_impl(invite_code, connection_id, pin)
+        self.pin_state_recovery_impl(invite_code, connection_id, room_epoch, session_epoch, pin)
             .await
     }
 

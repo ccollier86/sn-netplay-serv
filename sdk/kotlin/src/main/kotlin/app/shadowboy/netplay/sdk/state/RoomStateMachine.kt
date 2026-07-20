@@ -2,6 +2,8 @@ package app.shadowboy.netplay.sdk.state
 
 import app.shadowboy.netplay.sdk.protocol.RoomView
 import app.shadowboy.netplay.sdk.protocol.ServerMessage
+import app.shadowboy.netplay.sdk.protocol.StateRecoveryPhase
+import app.shadowboy.netplay.sdk.protocol.StateRecoveryView
 
 public data class NetplayClientState(
     public val room: RoomView? = null,
@@ -10,6 +12,7 @@ public data class NetplayClientState(
     public val roomEpoch: Long = 0,
     public val sessionEpoch: Long = 0,
     public val resync: NetplayResyncState? = null,
+    public val stateRecovery: StateRecoveryView? = null,
     public val runtimeResetRequired: Boolean = false,
     public val voice: NetplayVoiceGrantState = NetplayVoiceGrantState(),
     public val lastError: NetplayCloseReason.RelayError? = null,
@@ -32,6 +35,7 @@ public data class NetplayClientDiagnostics(
     public val latestEventSeq: Long,
     public val reconnectTicketAvailable: Boolean,
     public val resync: NetplayResyncState?,
+    public val stateRecovery: StateRecoveryView?,
     public val roomEpoch: Long,
     public val sessionEpoch: Long,
     public val voice: NetplayVoiceDiagnostics,
@@ -70,10 +74,18 @@ public class RoomStateMachine(
                 updateRoom(message.room)
             }
             is ServerMessage.StateHashMismatch -> {
-                resync.apply(message, ResyncContext(assignedPlayerIndex = state.assignedPlayerIndex))
+                if (message.room.protocol.protocolVersion < 5) {
+                    resync.apply(
+                        message,
+                        ResyncContext(assignedPlayerIndex = state.assignedPlayerIndex),
+                    )
+                }
                 frameClock.reset()
                 updateRoom(message.room)
             }
+            is ServerMessage.StateRecoveryPrepare -> updateRoom(message.room)
+            is ServerMessage.StateRecoveryCommitted -> updateRoom(message.room)
+            is ServerMessage.StateRecoveryFailed -> updateRoom(message.room)
             is ServerMessage.InputDelayChanged -> updateRoom(message.room)
             is ServerMessage.StartSession -> {
                 resync.markComplete()
@@ -138,6 +150,28 @@ public class RoomStateMachine(
 
     public fun acknowledgeRuntimeReset() {
         state = state.copy(runtimeResetRequired = false)
+    }
+
+    /** Clears V5 recovery only after the repaired epoch's first released frame was executed. */
+    public fun markStateRecoveryFrameExecuted(
+        roomEpoch: Long,
+        sessionEpoch: Long,
+        frame: Long,
+    ): NetplayClientState {
+        val recovery = state.stateRecovery ?: return state
+        if (
+            recovery.phase != StateRecoveryPhase.Committed ||
+            !isExactRuntimeEpochCurrent(roomEpoch, sessionEpoch) ||
+            frame != recovery.repairFrame
+        ) {
+            return state
+        }
+
+        state = state.copy(
+            room = state.room?.copy(stateRecovery = null),
+            stateRecovery = null,
+        )
+        return state
     }
 
     public fun isMessageCurrent(message: ServerMessage): Boolean {
@@ -217,6 +251,10 @@ public class RoomStateMachine(
         }
 
     public fun effectivePauseReason(): NetplayEffectivePauseReason? {
+        if (state.stateRecovery != null) {
+            return NetplayEffectivePauseReason.StateResync
+        }
+
         val currentResync = resync.currentResync
         if (currentResync != null) {
             return if (currentResync.reason == NetplayResyncReason.Recovery) {
@@ -245,6 +283,7 @@ public class RoomStateMachine(
             latestEventSeq = state.latestEventSeq,
             reconnectTicketAvailable = reconnectTokens.current() != null,
             resync = resync.currentResync,
+            stateRecovery = state.stateRecovery,
             roomEpoch = state.roomEpoch,
             sessionEpoch = state.sessionEpoch,
             voice = voice.diagnostics(),
@@ -261,6 +300,11 @@ public class RoomStateMachine(
 
     private fun updateRoom(room: RoomView, assignedPlayerIndex: Int? = state.assignedPlayerIndex) {
         val sessionChanged = state.sessionEpoch != 0L && room.sessionEpoch > state.sessionEpoch
+        val previousRecoveryId = state.stateRecovery?.recoveryId
+        val nextRecoveryId = room.stateRecovery?.recoveryId
+        val recoveryStarted = nextRecoveryId != null && nextRecoveryId != previousRecoveryId
+        val recoveryEpochRotation =
+            sessionChanged && nextRecoveryId != null && nextRecoveryId == previousRecoveryId
         if (sessionChanged) {
             frameClock.reset()
         }
@@ -275,7 +319,10 @@ public class RoomStateMachine(
             roomEpoch = room.roomEpoch,
             sessionEpoch = room.sessionEpoch,
             resync = resync.currentResync,
-            runtimeResetRequired = state.runtimeResetRequired || sessionChanged,
+            stateRecovery = room.stateRecovery,
+            runtimeResetRequired = state.runtimeResetRequired ||
+                recoveryStarted ||
+                (sessionChanged && !recoveryEpochRotation),
             voice = voice.state,
             lastError = null,
         )

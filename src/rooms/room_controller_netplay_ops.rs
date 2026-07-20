@@ -213,14 +213,30 @@ impl NetplayRoom {
             return Err(RoomError::RoomNotReady);
         }
 
+        if strict_resume
+            && (self
+                .released_frame
+                .is_none_or(|released| released < pause_at_frame)
+                || connected_players.iter().any(|player_index| {
+                    self.next_input_frames
+                        .get(player_index)
+                        .copied()
+                        .unwrap_or(self.sync_start_frame)
+                        <= pause_at_frame
+                }))
+        {
+            return Err(RoomError::RoomNotReady);
+        }
+
         pause_state.acknowledge(player_index, paused_at_frame);
 
         if pause_state.every_connected_player_acknowledged(&connected_players) {
             if !pause_state.has_holders() {
                 if strict_resume {
                     let server_time_ms = server_time_ms.ok_or(RoomError::RoomNotReady)?;
+                    let resume_at_frame = pause_state.resume_at_frame();
                     let scheduled_start =
-                        self.begin_v5_pause_resume(pause_at_frame, server_time_ms);
+                        self.begin_v5_pause_resume(resume_at_frame, server_time_ms);
                     return Ok(SessionPauseReachedOutcome::ResumedV5 {
                         sequence,
                         scheduled_start,
@@ -345,7 +361,7 @@ impl NetplayRoom {
         }
 
         if strict_resume {
-            let resume_at_frame = pause_state.pause_at_frame();
+            let resume_at_frame = pause_state.resume_at_frame();
             let server_time_ms = server_time_ms.ok_or(RoomError::RoomNotReady)?;
             let scheduled_start = self.begin_v5_pause_resume(resume_at_frame, server_time_ms);
             return Ok(SessionResumeOutcome::ResumedV5 { scheduled_start });

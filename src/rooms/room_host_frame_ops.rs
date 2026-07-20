@@ -53,7 +53,14 @@ impl NetplayRoom {
         open: HostFrameOpen,
         server_time_ms: u64,
     ) -> Result<HostFrameOpenOutcome, RoomError> {
-        self.validate_host_frame_open(connection_id, &open)?;
+        self.validate_host_frame_sender(connection_id)?;
+
+        if open.room_epoch != self.room_epoch || open.session_epoch != self.session_epoch {
+            return Ok(self
+                .current_v5_release()
+                .map(HostFrameOpenOutcome::Duplicate)
+                .unwrap_or(HostFrameOpenOutcome::IgnoredTransitionBoundary));
+        }
 
         if self.status == RoomStatus::RepairingState {
             return Ok(HostFrameOpenOutcome::IgnoredTransitionBoundary);
@@ -69,6 +76,9 @@ impl NetplayRoom {
             .as_ref()
             .is_some_and(|pause| open.frame > pause.pause_at_frame())
         {
+            return Ok(HostFrameOpenOutcome::IgnoredTransitionBoundary);
+        }
+        if self.status == RoomStatus::StartScheduled && open.frame > self.next_release_frame {
             return Ok(HostFrameOpenOutcome::IgnoredTransitionBoundary);
         }
         if open.frame > self.next_release_frame || !self.host_input_covers(open.frame) {
@@ -89,7 +99,7 @@ impl NetplayRoom {
             }
             self.enter_v5_playing();
         } else if self.status != RoomStatus::Playing {
-            return Err(RoomError::NotPlaying);
+            return Ok(HostFrameOpenOutcome::IgnoredTransitionBoundary);
         }
 
         Ok(HostFrameOpenOutcome::Released(
@@ -112,19 +122,9 @@ impl NetplayRoom {
         Some(self.release_v5_host_frame(frame))
     }
 
-    fn validate_host_frame_open(
-        &self,
-        connection_id: ConnectionId,
-        open: &HostFrameOpen,
-    ) -> Result<(), RoomError> {
+    fn validate_host_frame_sender(&self, connection_id: ConnectionId) -> Result<(), RoomError> {
         if !self.uses_strict_controller_input() {
             return Err(RoomError::InvalidPayload);
-        }
-        if open.room_epoch != self.room_epoch {
-            return Err(RoomError::StaleRoomEpoch);
-        }
-        if open.session_epoch != self.session_epoch {
-            return Err(RoomError::StaleSessionEpoch);
         }
         let owned = self
             .player_index_for_input_connection(connection_id)

@@ -2,6 +2,11 @@
 
 FROM rust:1.95-bookworm AS builder
 
+ARG SB_NETPLAY_BUILD_SHA=unknown
+ARG SB_NETPLAY_IMAGE_IDENTITY=local
+ENV SB_NETPLAY_BUILD_SHA=${SB_NETPLAY_BUILD_SHA}
+ENV SB_NETPLAY_IMAGE_IDENTITY=${SB_NETPLAY_IMAGE_IDENTITY}
+
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
@@ -9,7 +14,14 @@ RUN cargo build --release --locked
 
 FROM debian:bookworm-slim AS runtime
 
-LABEL org.opencontainers.image.source="https://github.com/ccollier86/sn-netplay-serv"
+ARG SB_NETPLAY_BUILD_SHA=unknown
+ARG SB_NETPLAY_IMAGE_IDENTITY=local
+ENV SB_NETPLAY_BUILD_SHA=${SB_NETPLAY_BUILD_SHA}
+ENV SB_NETPLAY_IMAGE_IDENTITY=${SB_NETPLAY_IMAGE_IDENTITY}
+
+LABEL org.opencontainers.image.source="https://github.com/ccollier86/sn-netplay-serv" \
+      org.opencontainers.image.revision="${SB_NETPLAY_BUILD_SHA}" \
+      org.opencontainers.image.ref.name="${SB_NETPLAY_IMAGE_IDENTITY}"
 
 RUN useradd --create-home --shell /usr/sbin/nologin shadowboy \
     && apt-get update \

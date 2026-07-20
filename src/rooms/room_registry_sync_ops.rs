@@ -122,9 +122,14 @@ impl InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
 
-        stored_room
-            .room
-            .accept_snapshot_chunk(connection_id, &chunk, SnapshotLimits::default())?;
+        let accepted = stored_room.room.accept_snapshot_chunk(
+            connection_id,
+            &chunk,
+            SnapshotLimits::default(),
+        )?;
+        if !accepted {
+            return Ok(());
+        }
         let now = self.clock.now();
         stored_room.emit_snapshot_chunk(now, connection_id, chunk);
         self.record_recent_events(stored_room.debug_events(1));
@@ -144,11 +149,14 @@ impl InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
 
-        stored_room.room.accept_snapshot_complete(
+        let accepted = stored_room.room.accept_snapshot_complete(
             connection_id,
             &manifest,
             SnapshotLimits::default(),
         )?;
+        if !accepted {
+            return Ok(());
+        }
         let now = self.clock.now();
         stored_room.emit_snapshot_complete(now, connection_id, manifest);
         self.record_recent_events(stored_room.debug_events(1));
@@ -214,14 +222,17 @@ impl InMemoryRoomRegistry {
             .get_mut(invite_code.normalized())
             .ok_or(RoomError::NotFound)?;
 
-        let (receiver, download_grant) = stored_room
+        let Some((receiver, download_grant)) = stored_room
             .room
             .accept_snapshot_file_relay_upload_complete(
                 connection_id,
                 &transfer_id,
                 &manifest,
                 SnapshotLimits::default(),
-            )?;
+            )?
+        else {
+            return Ok(());
+        };
         let now = self.clock.now();
         stored_room.emit_snapshot_file_relay_download_ready(now, receiver, download_grant);
         self.record_recent_events(stored_room.debug_events(1));

@@ -5,6 +5,9 @@ use crate::protocol::descriptor_validation::validate_sha256;
 use crate::rooms::PlayerIndex;
 use serde::{Deserialize, Serialize};
 
+/// Canonical start-of-frame cadence for authoritative SNES checkpoints.
+pub const AUTHORITATIVE_STATE_HASH_INTERVAL_FRAMES: u64 = 600;
+
 /// Client report for one deterministic emulator state hash.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

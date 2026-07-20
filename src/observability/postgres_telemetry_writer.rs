@@ -27,9 +27,12 @@ const INSERT_SAMPLE_SQL: &str = "\
      accepted_input_frame, frame_delta, round_trip_ms, jitter_ms, prediction_frames, \
      stall_count, catch_up_frames, late_input_frames, audio_underruns, input_resend_frames, \
      input_nacks, replayed_frames, suppressed_audio_frames, suppressed_video_frames, \
-     audio_queue_depth_frames, audio_catch_up_events, audio_trimmed_frames) \
+     audio_queue_depth_frames, audio_catch_up_events, audio_trimmed_frames, \
+     audio_rebuffer_events, audio_max_consecutive_missing_frames, audio_queue_min_frames, \
+     audio_queue_max_frames) \
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, \
-            $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)";
+            $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, \
+            $31, $32, $33, $34)";
 
 const INSERT_LOBBY_EVENT_SQL: &str = "\
     INSERT INTO {table} \
@@ -233,6 +236,22 @@ async fn write_performance_samples(
             .map(i32::try_from)
             .transpose()?;
         let audio_trimmed_frames = sample.audio_trimmed_frames.map(i32::try_from).transpose()?;
+        let audio_rebuffer_events = sample
+            .audio_rebuffer_events
+            .map(i32::try_from)
+            .transpose()?;
+        let audio_max_consecutive_missing_frames = sample
+            .audio_max_consecutive_missing_frames
+            .map(i32::try_from)
+            .transpose()?;
+        let audio_queue_min_frames = sample
+            .audio_queue_min_frames
+            .map(i32::try_from)
+            .transpose()?;
+        let audio_queue_max_frames = sample
+            .audio_queue_max_frames
+            .map(i32::try_from)
+            .transpose()?;
         let room_id = sample.room_id.as_uuid();
         let player_index = i16::from(sample.player_index);
 
@@ -270,6 +289,10 @@ async fn write_performance_samples(
                     &audio_queue_depth_frames,
                     &audio_catch_up_events,
                     &audio_trimmed_frames,
+                    &audio_rebuffer_events,
+                    &audio_max_consecutive_missing_frames,
+                    &audio_queue_min_frames,
+                    &audio_queue_max_frames,
                 ],
             )
             .await?;

@@ -49,6 +49,35 @@ impl NetplayRoom {
         self.input_delay_policy.mark_changed(now);
     }
 
+    /// Applies the complete two-path protocol-v5 delay before start scheduling.
+    pub(super) fn apply_initial_v5_input_delay(&mut self, now: Instant) {
+        if !self.uses_strict_controller_input() {
+            return;
+        }
+
+        let nominal_frame_rate = self
+            .compatibility
+            .values()
+            .find_map(|fingerprint| fingerprint.valid_determinism_v5())
+            .map(|profile| {
+                (
+                    profile.nominal_frame_rate_numerator,
+                    profile.nominal_frame_rate_denominator,
+                )
+            });
+        let Some(decision) = self.input_delay_policy.initial_v5_decision(
+            self.session.controller.input_delay_frames,
+            &self.players,
+            nominal_frame_rate,
+            now,
+        ) else {
+            return;
+        };
+
+        self.session.controller.input_delay_frames = decision.input_delay_frames;
+        self.input_delay_policy.mark_changed(now);
+    }
+
     /// Runtime delay changes are intentionally disabled for active rooms.
     pub(super) fn maybe_schedule_adaptive_input_delay(
         &mut self,

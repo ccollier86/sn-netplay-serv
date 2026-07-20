@@ -76,6 +76,10 @@ pub struct SampleRow {
     pub audio_queue_depth_frames: Option<u32>,
     pub audio_catch_up_events: Option<u32>,
     pub audio_trimmed_frames: Option<u32>,
+    pub audio_rebuffer_events: Option<u32>,
+    pub audio_max_consecutive_missing_frames: Option<u32>,
+    pub audio_queue_min_frames: Option<u32>,
+    pub audio_queue_max_frames: Option<u32>,
 }
 
 /// Analytics database facade used by CLI commands.
@@ -193,7 +197,11 @@ impl AnalyticsDb {
              COALESCE(suppressed_video_frames::text, ''), \
              COALESCE(audio_queue_depth_frames::text, ''), \
              COALESCE(audio_catch_up_events::text, ''), \
-             COALESCE(audio_trimmed_frames::text, '') \
+             COALESCE(audio_trimmed_frames::text, ''), \
+             COALESCE(audio_rebuffer_events::text, ''), \
+             COALESCE(audio_max_consecutive_missing_frames::text, ''), \
+             COALESCE(audio_queue_min_frames::text, ''), \
+             COALESCE(audio_queue_max_frames::text, '') \
              FROM {} WHERE {} ORDER BY timestamp_ms ASC, player_index ASC",
             quote_identifier(&self.tables.performance_samples),
             session_filter(sessions),
@@ -397,6 +405,22 @@ fn sample_row(row: tokio_postgres::SimpleQueryRow) -> Result<SampleRow, Analytic
         audio_trimmed_frames: parse_optional_u32(
             required_cell(&row, 29, "audio_trimmed_frames")?,
             "audio_trimmed_frames",
+        )?,
+        audio_rebuffer_events: parse_optional_u32(
+            required_cell(&row, 30, "audio_rebuffer_events")?,
+            "audio_rebuffer_events",
+        )?,
+        audio_max_consecutive_missing_frames: parse_optional_u32(
+            required_cell(&row, 31, "audio_max_consecutive_missing_frames")?,
+            "audio_max_consecutive_missing_frames",
+        )?,
+        audio_queue_min_frames: parse_optional_u32(
+            required_cell(&row, 32, "audio_queue_min_frames")?,
+            "audio_queue_min_frames",
+        )?,
+        audio_queue_max_frames: parse_optional_u32(
+            required_cell(&row, 33, "audio_queue_max_frames")?,
+            "audio_queue_max_frames",
         )?,
     })
 }

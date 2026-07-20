@@ -11,7 +11,10 @@ import app.shadowboy.netplay.sdk.protocol.ServerFrameRelease
 import app.shadowboy.netplay.sdk.protocol.SessionPauseReason
 import app.shadowboy.netplay.sdk.protocol.SessionPauseState
 import app.shadowboy.netplay.sdk.protocol.SessionPauseView
+import app.shadowboy.netplay.sdk.protocol.SnapshotManifest
 import app.shadowboy.netplay.sdk.protocol.StateHashMismatchView
+import app.shadowboy.netplay.sdk.protocol.StateRecoveryPhase
+import app.shadowboy.netplay.sdk.protocol.StateRecoveryView
 import app.shadowboy.netplay.sdk.protocol.roomJson
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -131,6 +134,98 @@ class RoomStateMachineTest {
         )
 
         assertNull(started.resync)
+    }
+
+    @Test
+    fun `v5 recovery hydrates and resets runtime only once per recovery id`() {
+        val stateMachine = RoomStateMachine()
+        val preparing = recovery(StateRecoveryPhase.Preparing)
+        val preparingRoom = room(
+            status = "repairingState",
+            eventSeq = 1,
+            roomEpoch = 2,
+            sessionEpoch = 3,
+        ).copy(
+            protocol = room(
+                status = "repairingState",
+                eventSeq = 1,
+                roomEpoch = 2,
+                sessionEpoch = 3,
+            ).protocol.copy(protocolVersion = 5),
+            stateRecovery = preparing,
+        )
+
+        val hydrated = stateMachine.apply(
+            ServerMessage.RoomJoined(
+                eventSeq = 1,
+                roomEpoch = 2,
+                sessionEpoch = 3,
+                yourPlayerIndex = 0,
+                resumeToken = "token",
+                inputSocketToken = "input-token",
+                room = preparingRoom,
+            ),
+        )
+
+        assertEquals(preparing, hydrated.stateRecovery)
+        assertNull(hydrated.resync)
+        assertTrue(hydrated.runtimeResetRequired)
+        assertEquals(NetplayEffectivePauseReason.StateResync, stateMachine.effectivePauseReason())
+
+        stateMachine.acknowledgeRuntimeReset()
+        stateMachine.apply(
+            ServerMessage.StateRecoveryPrepare(
+                eventSeq = 2,
+                roomEpoch = 2,
+                sessionEpoch = 3,
+                recovery = preparing,
+                room = preparingRoom.copy(eventSeq = 2),
+            ),
+        )
+        assertFalse(stateMachine.state.runtimeResetRequired)
+
+        val manifest = SnapshotManifest(
+            snapshotId = "recovery-7",
+            repairFrame = 600,
+            totalBytes = 4,
+            sha256 = "c".repeat(64),
+        )
+        val committed = recovery(StateRecoveryPhase.Committed, manifest)
+        val committedRoom = preparingRoom.copy(
+            eventSeq = 3,
+            sessionEpoch = 4,
+            status = RoomStatus.CheckingCompatibility,
+            stateRecovery = committed,
+        )
+        stateMachine.apply(
+            ServerMessage.StateRecoveryCommitted(
+                eventSeq = 3,
+                roomEpoch = 2,
+                sessionEpoch = 4,
+                recovery = committed,
+                room = committedRoom,
+            ),
+        )
+
+        assertEquals(committed, stateMachine.state.stateRecovery)
+        assertFalse(stateMachine.state.runtimeResetRequired)
+
+        stateMachine.apply(
+            ServerMessage.StartSession(
+                eventSeq = 4,
+                roomEpoch = 2,
+                sessionEpoch = 4,
+                startFrame = 600,
+                room = committedRoom.copy(eventSeq = 4, status = RoomStatus.StartScheduled),
+            ),
+        )
+        assertEquals(committed, stateMachine.state.stateRecovery)
+
+        stateMachine.markStateRecoveryFrameExecuted(2, 4, 601)
+        assertEquals(committed, stateMachine.state.stateRecovery)
+        stateMachine.markStateRecoveryFrameExecuted(2, 4, 600)
+        assertNull(stateMachine.state.stateRecovery)
+        assertNull(stateMachine.state.room?.stateRecovery)
     }
 
     @Test
@@ -313,6 +408,25 @@ class RoomStateMachineTest {
                 roomEpoch = roomEpoch,
                 sessionEpoch = sessionEpoch,
             ),
+        )
+
+    private fun recovery(
+        phase: StateRecoveryPhase,
+        manifest: SnapshotManifest? = null,
+    ) =
+        StateRecoveryView(
+            recoveryId = 7,
+            phase = phase,
+            repairFrame = 600,
+            mismatch = StateHashMismatchView(
+                frame = 600,
+                repairFrame = 600,
+                hashes = listOf(
+                    PlayerStateHashView(playerIndex = 0, sha256 = "a".repeat(64)),
+                    PlayerStateHashView(playerIndex = 1, sha256 = "b".repeat(64)),
+                ),
+            ),
+            pinnedSnapshot = manifest,
         )
 
 }

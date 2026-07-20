@@ -275,11 +275,17 @@ public enum class RoomStatus {
     @SerialName("ready")
     Ready,
 
+    @SerialName("startScheduled")
+    StartScheduled,
+
     @SerialName("playing")
     Playing,
 
     @SerialName("paused")
     Paused,
+
+    @SerialName("repairingState")
+    RepairingState,
 
     @SerialName("recovering")
     Recovering,

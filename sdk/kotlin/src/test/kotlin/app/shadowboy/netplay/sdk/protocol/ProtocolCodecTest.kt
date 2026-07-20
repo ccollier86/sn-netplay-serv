@@ -23,6 +23,10 @@ class ProtocolCodecTest {
                     roundTripMs = 44,
                     jitterMs = 3,
                     stallCount = 1,
+                    audioRebufferEvents = 2,
+                    audioMaxConsecutiveMissingFrames = 24,
+                    audioQueueMinFrames = 0,
+                    audioQueueMaxFrames = 8,
                 ),
             ),
         )
@@ -34,6 +38,15 @@ class ProtocolCodecTest {
         assertEquals("44", json["network"]?.jsonObject?.get("roundTripMs")?.jsonPrimitive?.content)
         assertEquals("3", json["network"]?.jsonObject?.get("jitterMs")?.jsonPrimitive?.content)
         assertEquals("1", json["network"]?.jsonObject?.get("stallCount")?.jsonPrimitive?.content)
+        assertEquals("2", json["network"]?.jsonObject?.get("audioRebufferEvents")?.jsonPrimitive?.content)
+        assertEquals(
+            "24",
+            json["network"]
+                ?.jsonObject
+                ?.get("audioMaxConsecutiveMissingFrames")
+                ?.jsonPrimitive
+                ?.content,
+        )
     }
 
     @Test
@@ -100,6 +113,64 @@ class ProtocolCodecTest {
         assertEquals(240, changed.change.effectiveFrame)
         assertEquals(4, changed.change.inputDelayFrames)
         assertEquals(InputDelayChangeReason.NetworkPressure, changed.change.reason)
+    }
+
+    @Test
+    fun `round trips explicit v5 state recovery payloads`() {
+        val recoveryJson =
+            """
+            {
+              "recoveryId": 7,
+              "phase": "preparing",
+              "repairFrame": 600,
+              "mismatch": {
+                "frame": 600,
+                "repairFrame": 600,
+                "hashes": [
+                  {"playerIndex": 0, "sha256": "${"a".repeat(64)}"},
+                  {"playerIndex": 1, "sha256": "${"b".repeat(64)}"}
+                ],
+                "nearbyMatches": []
+              }
+            }
+            """.trimIndent()
+        val message = NetplayJson.decodeServerMessage(
+            """
+            {
+              "type": "stateRecoveryPrepare",
+              "eventSeq": 16,
+              "roomEpoch": 6,
+              "sessionEpoch": 8,
+              "recovery": $recoveryJson,
+              "room": ${roomJson(
+                status = "repairingState",
+                protocolVersion = 5,
+                stateRecoveryJson = recoveryJson,
+              )}
+            }
+            """.trimIndent(),
+        )
+
+        val preparing = assertIs<ServerMessage.StateRecoveryPrepare>(message)
+        assertEquals(7, preparing.recovery.recoveryId)
+        assertEquals(StateRecoveryPhase.Preparing, preparing.room.stateRecovery?.phase)
+
+        val manifest = SnapshotManifest(
+            snapshotId = "recovery-7",
+            repairFrame = 600,
+            totalBytes = 4,
+            sha256 = "c".repeat(64),
+        )
+        val payload = NetplayJson.encodeClientMessage(
+            ClientMessage.StateRecoveryPinned(
+                roomEpoch = 6,
+                sessionEpoch = 8,
+                pin = StateRecoveryPin(recoveryId = 7, manifest = manifest),
+            ),
+        )
+        val json = NetplayJson.format.parseToJsonElement(payload).jsonObject
+        assertEquals("stateRecoveryPinned", json.string("type"))
+        assertEquals("7", json["pin"]?.jsonObject?.get("recoveryId")?.jsonPrimitive?.content)
     }
 
     @Test
@@ -220,6 +291,8 @@ fun roomJson(
     eventSeq: Long = 12,
     roomEpoch: Long = 4,
     sessionEpoch: Long = 7,
+    protocolVersion: Int = 4,
+    stateRecoveryJson: String? = null,
 ): String =
     """
     {
@@ -229,12 +302,13 @@ fun roomJson(
       "sessionEpoch": $sessionEpoch,
       "inviteCode": "ABCD-EF",
       "protocol": {
-        "protocolVersion": 4,
+        "protocolVersion": $protocolVersion,
         "minSupportedProtocolVersion": 4
       },
       "session": ${NetplayJson.format.encodeToString(NetplaySessionDescriptor.serializer(), testSessionDescriptor())},
       "maxPlayers": 2,
       "pause": null,
+      "stateRecovery": ${stateRecoveryJson ?: "null"},
       "status": "$status",
       "players": [
         {

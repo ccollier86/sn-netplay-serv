@@ -496,12 +496,16 @@ pub async fn move_link_pair_to_syncing(host: &mut SmokeClient, guest: &mut Smoke
 }
 
 pub fn snapshot_payload(bytes: &[u8]) -> (Value, Value) {
+    snapshot_payload_at(bytes, 0)
+}
+
+pub fn snapshot_payload_at(bytes: &[u8], repair_frame: u64) -> (Value, Value) {
     (
         json!({
             "type": "snapshotChunk",
             "chunk": {
                 "snapshotId": "snapshot-1",
-                "repairFrame": 0,
+                "repairFrame": repair_frame,
                 "index": 0,
                 "bytes": bytes
             }
@@ -510,7 +514,7 @@ pub fn snapshot_payload(bytes: &[u8]) -> (Value, Value) {
             "type": "snapshotComplete",
             "manifest": {
                 "snapshotId": "snapshot-1",
-                "repairFrame": 0,
+                "repairFrame": repair_frame,
                 "totalBytes": bytes.len(),
                 "sha256": format!("{:x}", Sha256::digest(bytes))
             }

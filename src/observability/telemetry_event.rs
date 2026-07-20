@@ -15,7 +15,7 @@ pub enum NetplayTelemetryRecord {
     /// Sanitized persistent lobby event.
     LobbyEvent(NetplayLobbyTelemetryEvent),
     /// Sanitized heartbeat/runtime sample.
-    PerformanceSample(NetplayPerformanceSample),
+    PerformanceSample(Box<NetplayPerformanceSample>),
 }
 
 /// Append-only event row written to analytics storage.
@@ -123,6 +123,10 @@ pub struct NetplayPerformanceSample {
     pub audio_queue_depth_frames: Option<u32>,
     pub audio_catch_up_events: Option<u32>,
     pub audio_trimmed_frames: Option<u32>,
+    pub audio_rebuffer_events: Option<u32>,
+    pub audio_max_consecutive_missing_frames: Option<u32>,
+    pub audio_queue_min_frames: Option<u32>,
+    pub audio_queue_max_frames: Option<u32>,
 }
 
 impl From<RoomPerformanceSample> for NetplayPerformanceSample {
@@ -163,6 +167,10 @@ impl From<RoomPerformanceSample> for NetplayPerformanceSample {
             audio_queue_depth_frames: network.audio_queue_depth_frames,
             audio_catch_up_events: network.audio_catch_up_events,
             audio_trimmed_frames: network.audio_trimmed_frames,
+            audio_rebuffer_events: network.audio_rebuffer_events,
+            audio_max_consecutive_missing_frames: network.audio_max_consecutive_missing_frames,
+            audio_queue_min_frames: network.audio_queue_min_frames,
+            audio_queue_max_frames: network.audio_queue_max_frames,
         }
     }
 }

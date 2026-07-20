@@ -54,7 +54,44 @@ pub struct ClientNetworkQualityReport {
     /// Audio frames trimmed since the previous health report.
     #[serde(default)]
     pub audio_trimmed_frames: Option<u32>,
+    /// Sustained audio recovery-prefill events since the previous health report.
+    #[serde(default)]
+    pub audio_rebuffer_events: Option<u32>,
+    /// Maximum consecutive missing audio frames observed since the previous report.
+    #[serde(default)]
+    pub audio_max_consecutive_missing_frames: Option<u32>,
+    /// Minimum queued audio depth observed since the previous health report.
+    #[serde(default)]
+    pub audio_queue_min_frames: Option<u32>,
+    /// Maximum queued audio depth observed since the previous health report.
+    #[serde(default)]
+    pub audio_queue_max_frames: Option<u32>,
     /// Latest clock-sync uncertainty estimate in milliseconds.
     #[serde(default)]
     pub clock_uncertainty_ms: Option<u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClientNetworkQualityReport;
+    use serde_json::json;
+
+    #[test]
+    fn sustained_audio_health_uses_optional_camel_case_fields() {
+        let report = ClientNetworkQualityReport {
+            audio_underruns: Some(3),
+            audio_rebuffer_events: Some(1),
+            audio_max_consecutive_missing_frames: Some(24),
+            audio_queue_min_frames: Some(0),
+            audio_queue_max_frames: Some(8),
+            ..ClientNetworkQualityReport::default()
+        };
+        let value = serde_json::to_value(report).expect("serialize health report");
+
+        assert_eq!(value["audioUnderruns"], json!(3));
+        assert_eq!(value["audioRebufferEvents"], json!(1));
+        assert_eq!(value["audioMaxConsecutiveMissingFrames"], json!(24));
+        assert_eq!(value["audioQueueMinFrames"], json!(0));
+        assert_eq!(value["audioQueueMaxFrames"], json!(8));
+    }
 }

@@ -16,6 +16,7 @@ pub struct SnapshotTransferState {
     next_chunk_index: u32,
     received_bytes: u64,
     hasher: Sha256,
+    accepted_chunk_digests: Vec<[u8; 32]>,
 }
 
 impl SnapshotTransferState {
@@ -27,6 +28,7 @@ impl SnapshotTransferState {
             next_chunk_index: 0,
             received_bytes: 0,
             hasher: Sha256::new(),
+            accepted_chunk_digests: Vec::new(),
         }
     }
 
@@ -35,7 +37,7 @@ impl SnapshotTransferState {
         &mut self,
         chunk: &SnapshotChunk,
         limits: SnapshotLimits,
-    ) -> Result<(), RoomError> {
+    ) -> Result<bool, RoomError> {
         chunk
             .validate(limits)
             .map_err(|_| RoomError::SnapshotInvalid)?;
@@ -50,6 +52,16 @@ impl SnapshotTransferState {
             _ => return Err(RoomError::SnapshotInvalid),
         }
 
+        if chunk.index < self.next_chunk_index {
+            let index = usize::try_from(chunk.index).map_err(|_| RoomError::SnapshotInvalid)?;
+            let digest: [u8; 32] = Sha256::digest(&chunk.bytes).into();
+            return self
+                .accepted_chunk_digests
+                .get(index)
+                .is_some_and(|accepted| accepted == &digest)
+                .then_some(false)
+                .ok_or(RoomError::SnapshotInvalid);
+        }
         if chunk.index != self.next_chunk_index {
             return Err(RoomError::SnapshotInvalid);
         }
@@ -64,13 +76,33 @@ impl SnapshotTransferState {
         }
 
         self.hasher.update(&chunk.bytes);
+        self.accepted_chunk_digests
+            .push(Sha256::digest(&chunk.bytes).into());
         self.received_bytes = next_total;
         self.next_chunk_index = self
             .next_chunk_index
             .checked_add(1)
             .ok_or(RoomError::SnapshotInvalid)?;
 
-        Ok(())
+        Ok(true)
+    }
+
+    /// Returns whether a completed transfer already accepted this exact chunk.
+    pub fn is_duplicate_chunk(&self, chunk: &SnapshotChunk) -> bool {
+        if self.snapshot_id.as_deref() != Some(chunk.snapshot_id.as_str())
+            || self.repair_frame != Some(chunk.repair_frame)
+            || chunk.index >= self.next_chunk_index
+        {
+            return false;
+        }
+
+        let Ok(index) = usize::try_from(chunk.index) else {
+            return false;
+        };
+        let digest: [u8; 32] = Sha256::digest(&chunk.bytes).into();
+        self.accepted_chunk_digests
+            .get(index)
+            .is_some_and(|accepted| accepted == &digest)
     }
 
     /// Validates the completion manifest against bytes relayed so far.
