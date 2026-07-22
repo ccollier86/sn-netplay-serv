@@ -39,7 +39,7 @@ async fn lobby_voice_exposes_shared_metadata_and_private_host_grant() {
             .voice
             .as_ref()
             .and_then(|voice| voice.server_url.as_deref()),
-        Some("wss://voice.shadowboy.app")
+        Some("wss://livekit.shadowboy.app")
     );
     assert_eq!(
         join.voice.as_ref().map(|voice| voice.token.as_str()),
@@ -103,7 +103,7 @@ async fn lobby_voice_token_refresh_updates_requesting_player_grant() {
 }
 
 #[tokio::test]
-async fn lobby_voice_retries_two_player_contract_when_broker_rejects_full_lobby_limit() {
+async fn lobby_voice_fails_closed_when_broker_rejects_full_lobby_limit() {
     let broker = MockVoiceBroker::limited_to(2);
     let requests = broker.requests.clone();
     let registry = registry_with_voice(broker);
@@ -115,18 +115,18 @@ async fn lobby_voice_retries_two_player_contract_when_broker_rejects_full_lobby_
 
     assert_eq!(
         join.lobby.voice.as_ref().map(|voice| voice.status),
-        Some(RoomVoiceStatus::Available)
+        Some(RoomVoiceStatus::Unavailable)
     );
     assert_eq!(
         join.lobby
             .voice
             .as_ref()
             .map(|voice| voice.max_participants),
-        Some(2)
+        Some(0)
     );
     assert_eq!(
         requests.lock().expect("voice requests").as_slice(),
-        [MAX_LOBBY_PLAYERS, 2]
+        [MAX_LOBBY_PLAYERS]
     );
 }
 
@@ -356,7 +356,7 @@ impl VoiceBroker for MockVoiceBroker {
             room: VoiceBrokerRoomView {
                 voice_room_id: "lobby-voice-room-1".to_string(),
                 livekit_room_name: "sb-lobby-voice-room-1".to_string(),
-                server_url: "wss://voice.shadowboy.app".to_string(),
+                server_url: "wss://livekit.shadowboy.app".to_string(),
                 netplay_room_id: request.netplay_room_id,
                 netplay_invite_code: request.netplay_invite_code,
                 room_epoch: request.room_epoch,

@@ -221,7 +221,7 @@ mod tests {
                 room: VoiceBrokerRoomView {
                     voice_room_id: "voice-1".to_string(),
                     livekit_room_name: "sb-voice-1".to_string(),
-                    server_url: "wss://voice.shadowboy.app".to_string(),
+                    server_url: "wss://livekit.shadowboy.app".to_string(),
                     netplay_room_id: "room-1".to_string(),
                     netplay_invite_code: "AB23-CD".to_string(),
                     room_epoch: 1,

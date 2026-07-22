@@ -104,7 +104,7 @@ describe("TypeScript netplay protocol codec", () => {
           mode: "pushToTalk",
           participantIdentity: "player-2",
           provider: "livekit",
-          serverUrl: "wss://voice.shadowboy.app",
+          serverUrl: "wss://livekit.shadowboy.app",
           token: "fresh-token",
           voiceRoomId: "voice-room-1",
         },

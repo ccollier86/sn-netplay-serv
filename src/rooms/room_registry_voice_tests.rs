@@ -45,7 +45,7 @@ async fn voice_enabled_room_exposes_shared_metadata_without_token() {
         view.voice
             .as_ref()
             .and_then(|voice| voice.server_url.as_deref()),
-        Some("wss://voice.shadowboy.app")
+        Some("wss://livekit.shadowboy.app")
     );
 
     let json = serde_json::to_string(&view).expect("room view json");
@@ -307,7 +307,7 @@ impl VoiceBroker for MockVoiceBroker {
             room: VoiceBrokerRoomView {
                 voice_room_id: "voice-room-1".to_string(),
                 livekit_room_name: "sb-voice-room-1".to_string(),
-                server_url: "wss://voice.shadowboy.app".to_string(),
+                server_url: "wss://livekit.shadowboy.app".to_string(),
                 netplay_room_id: request.netplay_room_id,
                 netplay_invite_code: request.netplay_invite_code,
                 room_epoch: request.room_epoch,

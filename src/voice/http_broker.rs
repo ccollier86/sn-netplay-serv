@@ -10,6 +10,7 @@ use crate::voice::{
 };
 use reqwest::Url;
 use std::time::Duration;
+use url::Host;
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -90,10 +91,13 @@ impl VoiceBroker for HttpVoiceBroker {
             ));
         }
 
-        response
+        let response = response
             .json::<CreateVoiceRoomBrokerResponse>()
             .await
-            .map_err(|_| VoiceBrokerError::InvalidResponse)
+            .map_err(|_| VoiceBrokerError::InvalidResponse)?;
+        validate_public_livekit_url(&response.room.server_url)?;
+
+        Ok(response)
     }
 
     async fn issue_token(
@@ -182,10 +186,40 @@ fn parse_base_url(value: &str) -> Result<Url, VoiceBrokerError> {
     Ok(url)
 }
 
+fn validate_public_livekit_url(value: &str) -> Result<(), VoiceBrokerError> {
+    let url = Url::parse(value).map_err(|_| VoiceBrokerError::InvalidResponse)?;
+    let host = url
+        .host_str()
+        .ok_or(VoiceBrokerError::InvalidResponse)?
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    let loopback = match url.host() {
+        Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    };
+    let secure_websocket = url.scheme() == "wss";
+    let loopback_websocket = url.scheme() == "ws" && loopback;
+
+    if (!secure_websocket && !loopback_websocket)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.path(), "" | "/")
+        || host == "voice.shadowboy.app"
+    {
+        return Err(VoiceBrokerError::InvalidResponse);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::HttpVoiceBroker;
-    use crate::voice::VoiceBroker;
+    use super::{HttpVoiceBroker, validate_public_livekit_url};
+    use crate::voice::{VoiceBroker, VoiceBrokerError};
     use std::time::Duration;
 
     #[test]
@@ -212,5 +246,32 @@ mod tests {
                 .as_str(),
             "https://voice.shadowboy.app/v1/voice/rooms/room-id/participants/lobby%2Fplayer-2"
         );
+    }
+
+    #[test]
+    fn accepts_secure_livekit_and_loopback_websocket_urls() {
+        assert!(validate_public_livekit_url("wss://livekit.shadowboy.app").is_ok());
+        assert!(validate_public_livekit_url("ws://127.0.0.1:7880").is_ok());
+        assert!(validate_public_livekit_url("ws://[::1]:7880").is_ok());
+    }
+
+    #[test]
+    fn rejects_broker_and_non_websocket_urls() {
+        assert!(matches!(
+            validate_public_livekit_url("wss://voice.shadowboy.app"),
+            Err(VoiceBrokerError::InvalidResponse)
+        ));
+        assert!(matches!(
+            validate_public_livekit_url("https://livekit.shadowboy.app"),
+            Err(VoiceBrokerError::InvalidResponse)
+        ));
+        assert!(matches!(
+            validate_public_livekit_url("ws://livekit.shadowboy.app"),
+            Err(VoiceBrokerError::InvalidResponse)
+        ));
+        assert!(matches!(
+            validate_public_livekit_url("wss://livekit.shadowboy.app/rtc"),
+            Err(VoiceBrokerError::InvalidResponse)
+        ));
     }
 }

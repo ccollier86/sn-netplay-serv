@@ -197,7 +197,7 @@ class ProtocolCodecTest {
                 "provider": "livekit",
                 "voiceRoomId": "voice-room-1",
                 "livekitRoomName": "sb-voice-room-1",
-                "serverUrl": "wss://voice.shadowboy.app",
+                "serverUrl": "wss://livekit.shadowboy.app",
                 "participantIdentity": "player-2",
                 "token": "fresh-token",
                 "expiresAt": "2026-05-23T21:00:00Z",

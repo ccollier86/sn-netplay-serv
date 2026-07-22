@@ -48,7 +48,7 @@ function roomWithVoice(options: Parameters<typeof roomView>[0]) {
       maxParticipants: 2,
       mode: "voiceActivation",
       provider: "livekit",
-      serverUrl: "wss://voice.shadowboy.app",
+      serverUrl: "wss://livekit.shadowboy.app",
       status: "available",
       voiceRoomId: "voice-room-1",
     },
@@ -62,7 +62,7 @@ function voiceGrant(token: string) {
     mode: "voiceActivation",
     participantIdentity: "player-1",
     provider: "livekit",
-    serverUrl: "wss://voice.shadowboy.app",
+    serverUrl: "wss://livekit.shadowboy.app",
     token,
     voiceRoomId: "voice-room-1",
   } as const;

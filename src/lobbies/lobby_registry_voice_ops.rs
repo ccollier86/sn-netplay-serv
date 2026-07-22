@@ -17,8 +17,6 @@ use crate::voice::{
 use std::collections::HashMap;
 use tracing::warn;
 
-const LEGACY_LOBBY_VOICE_MAX_PARTICIPANTS: u8 = 2;
-
 impl InMemoryLobbyRegistry {
     /// Creates broker voice state for a lobby when the host requested it.
     pub(super) async fn create_voice_state_for_lobby(
@@ -62,32 +60,9 @@ impl InMemoryLobbyRegistry {
         lobby: &Lobby,
         mode: NetplayVoiceMode,
     ) -> Result<CreateVoiceRoomBrokerResponse, VoiceBrokerError> {
-        match self
-            .voice_broker
+        self.voice_broker
             .create_room(create_lobby_voice_request(lobby, mode, MAX_LOBBY_PLAYERS))
             .await
-        {
-            Ok(response) => Ok(response),
-            Err(VoiceBrokerError::UnexpectedStatus(400))
-                if MAX_LOBBY_PLAYERS > LEGACY_LOBBY_VOICE_MAX_PARTICIPANTS =>
-            {
-                warn!(
-                    lobby_id = %lobby.lobby_id(),
-                    invite_code = %lobby.invite_code().display(),
-                    requested_max_participants = MAX_LOBBY_PLAYERS,
-                    fallback_max_participants = LEGACY_LOBBY_VOICE_MAX_PARTICIPANTS,
-                    "voice broker rejected full lobby participant limit; retrying legacy lobby voice contract"
-                );
-                self.voice_broker
-                    .create_room(create_lobby_voice_request(
-                        lobby,
-                        mode,
-                        LEGACY_LOBBY_VOICE_MAX_PARTICIPANTS,
-                    ))
-                    .await
-            }
-            Err(error) => Err(error),
-        }
     }
 
     /// Refreshes a private lobby voice token for one connected player.
