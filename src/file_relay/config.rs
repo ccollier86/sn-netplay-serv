@@ -27,15 +27,24 @@ pub struct FileRelayConfig {
 impl FileRelayConfig {
     /// Reads file relay configuration from process environment variables.
     pub fn from_env() -> Result<Self, ConfigError> {
-        let broker_url = optional_env("SB_NETPLAY_FILE_RELAY_URL")?;
-        let broker_token = optional_env("SB_NETPLAY_FILE_RELAY_TOKEN")?;
+        Self::from_lookup(env::var)
+    }
+
+    fn from_lookup(
+        mut lookup: impl FnMut(&'static str) -> Result<String, env::VarError>,
+    ) -> Result<Self, ConfigError> {
+        let broker_url = optional_env(&mut lookup, "SB_NETPLAY_FILE_RELAY_URL")?;
+        let broker_token = optional_env(&mut lookup, "SB_NETPLAY_FILE_RELAY_TOKEN")?;
         let request_timeout =
-            optional_duration_millis_env("SB_NETPLAY_FILE_RELAY_TIMEOUT_MS", 2500)?;
-        let temporary_roms_enabled = optional_bool_env("SB_NETPLAY_ROM_RELAY_ENABLED", false)?;
-        let direct_roms_enabled = optional_bool_env("SB_NETPLAY_DIRECT_ROM_RELAY_ENABLED", false)?;
+            optional_duration_millis_env(&mut lookup, "SB_NETPLAY_FILE_RELAY_TIMEOUT_MS", 2500)?;
+        let temporary_roms_enabled =
+            optional_bool_env(&mut lookup, "SB_NETPLAY_ROM_RELAY_ENABLED", false)?;
+        let direct_roms_enabled =
+            optional_bool_env(&mut lookup, "SB_NETPLAY_DIRECT_ROM_RELAY_ENABLED", false)?;
         let temporary_rom_max_bytes =
-            optional_u64_env("SB_NETPLAY_ROM_RELAY_MAX_BYTES", 104_857_600)?;
+            optional_u64_env(&mut lookup, "SB_NETPLAY_ROM_RELAY_MAX_BYTES", 104_857_600)?;
         let direct_rom_allowed_systems = optional_csv_env(
+            &mut lookup,
             "SB_NETPLAY_DIRECT_ROM_RELAY_ALLOWED_SYSTEMS",
             &[
                 "gb",
@@ -51,8 +60,11 @@ impl FileRelayConfig {
                 "game-gear",
             ],
         )?;
-        let save_states_enabled =
-            optional_bool_env("SB_NETPLAY_FILE_RELAY_SAVE_STATES_ENABLED", true)?;
+        let save_states_enabled = optional_bool_env(
+            &mut lookup,
+            "SB_NETPLAY_FILE_RELAY_SAVE_STATES_ENABLED",
+            true,
+        )?;
 
         let broker = match (broker_url, broker_token) {
             (None, None) => FileRelayBrokerConfig::Disabled,
@@ -116,16 +128,23 @@ impl fmt::Debug for HttpFileRelayBrokerConfig {
     }
 }
 
-fn optional_env(name: &'static str) -> Result<Option<String>, ConfigError> {
-    match env::var(name) {
+fn optional_env(
+    lookup: &mut impl FnMut(&'static str) -> Result<String, env::VarError>,
+    name: &'static str,
+) -> Result<Option<String>, ConfigError> {
+    match lookup(name) {
         Ok(value) if !value.trim().is_empty() => Ok(Some(value.trim().to_string())),
         Ok(_) => Err(ConfigError::EmptyEnv(name)),
         Err(_) => Ok(None),
     }
 }
 
-fn optional_bool_env(name: &'static str, default: bool) -> Result<bool, ConfigError> {
-    match env::var(name) {
+fn optional_bool_env(
+    lookup: &mut impl FnMut(&'static str) -> Result<String, env::VarError>,
+    name: &'static str,
+    default: bool,
+) -> Result<bool, ConfigError> {
+    match lookup(name) {
         Ok(value) if !value.trim().is_empty() => match value.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => Ok(true),
             "0" | "false" | "no" | "off" => Ok(false),
@@ -137,10 +156,11 @@ fn optional_bool_env(name: &'static str, default: bool) -> Result<bool, ConfigEr
 }
 
 fn optional_duration_millis_env(
+    lookup: &mut impl FnMut(&'static str) -> Result<String, env::VarError>,
     name: &'static str,
     default_millis: u64,
 ) -> Result<Duration, ConfigError> {
-    match env::var(name) {
+    match lookup(name) {
         Ok(value) if !value.trim().is_empty() => value
             .trim()
             .parse::<u64>()
@@ -151,8 +171,12 @@ fn optional_duration_millis_env(
     }
 }
 
-fn optional_u64_env(name: &'static str, default: u64) -> Result<u64, ConfigError> {
-    match env::var(name) {
+fn optional_u64_env(
+    lookup: &mut impl FnMut(&'static str) -> Result<String, env::VarError>,
+    name: &'static str,
+    default: u64,
+) -> Result<u64, ConfigError> {
+    match lookup(name) {
         Ok(value) if !value.trim().is_empty() => value
             .trim()
             .parse::<u64>()
@@ -162,8 +186,12 @@ fn optional_u64_env(name: &'static str, default: u64) -> Result<u64, ConfigError
     }
 }
 
-fn optional_csv_env(name: &'static str, default: &[&str]) -> Result<Vec<String>, ConfigError> {
-    match env::var(name) {
+fn optional_csv_env(
+    lookup: &mut impl FnMut(&'static str) -> Result<String, env::VarError>,
+    name: &'static str,
+    default: &[&str],
+) -> Result<Vec<String>, ConfigError> {
+    match lookup(name) {
         Ok(value) if !value.trim().is_empty() => {
             let values = value
                 .split(',')
@@ -177,5 +205,90 @@ fn optional_csv_env(name: &'static str, default: &[&str]) -> Result<Vec<String>,
         }
         Ok(_) => Err(ConfigError::EmptyEnv(name)),
         Err(_) => Ok(default.iter().map(|value| value.to_string()).collect()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FileRelayBrokerConfig, FileRelayConfig};
+    use crate::config::ConfigError;
+    use std::collections::BTreeMap;
+    use std::env;
+    use std::time::Duration;
+
+    const DEFAULT_ALLOWED_SYSTEMS: [&str; 11] = [
+        "gb",
+        "gbc",
+        "gameboy",
+        "gameboy-color",
+        "gba",
+        "nes",
+        "snes",
+        "genesis",
+        "sms",
+        "master-system",
+        "game-gear",
+    ];
+
+    #[test]
+    fn omitted_file_relay_environment_disables_broker_and_uses_defaults() {
+        let config = parse(&[]).expect("omitted optional file-relay environment");
+
+        assert_eq!(config.broker, FileRelayBrokerConfig::Disabled);
+        assert_defaults(&config);
+    }
+
+    #[test]
+    fn url_and_token_are_the_minimum_enabled_environment() {
+        let config = parse(&[
+            ("SB_NETPLAY_FILE_RELAY_URL", "https://relay.shadowboy.test"),
+            ("SB_NETPLAY_FILE_RELAY_TOKEN", "test-service-token"),
+        ])
+        .expect("minimum enabled file-relay environment");
+
+        let FileRelayBrokerConfig::Http(broker) = &config.broker else {
+            panic!("minimum enabled environment must select the HTTP broker");
+        };
+        assert_eq!(broker.base_url, "https://relay.shadowboy.test");
+        assert_eq!(broker.bearer_token, "test-service-token");
+        assert_eq!(broker.request_timeout, Duration::from_millis(2_500));
+        assert_defaults(&config);
+    }
+
+    #[test]
+    fn one_sided_broker_environment_is_rejected() {
+        assert!(matches!(
+            parse(&[("SB_NETPLAY_FILE_RELAY_URL", "https://relay.shadowboy.test")]),
+            Err(ConfigError::MissingEnv("SB_NETPLAY_FILE_RELAY_TOKEN"))
+        ));
+    }
+
+    #[test]
+    fn explicit_blank_optional_value_is_rejected() {
+        assert!(matches!(
+            parse(&[("SB_NETPLAY_ROM_RELAY_ENABLED", "")]),
+            Err(ConfigError::EmptyEnv("SB_NETPLAY_ROM_RELAY_ENABLED"))
+        ));
+    }
+
+    fn parse(values: &[(&'static str, &str)]) -> Result<FileRelayConfig, ConfigError> {
+        let values = values.iter().copied().collect::<BTreeMap<_, _>>();
+        FileRelayConfig::from_lookup(|name| {
+            values
+                .get(name)
+                .map(|value| (*value).to_string())
+                .ok_or(env::VarError::NotPresent)
+        })
+    }
+
+    fn assert_defaults(config: &FileRelayConfig) {
+        assert!(!config.temporary_roms_enabled);
+        assert!(!config.direct_roms_enabled);
+        assert_eq!(config.temporary_rom_max_bytes, 104_857_600);
+        assert_eq!(
+            config.direct_rom_allowed_systems,
+            DEFAULT_ALLOWED_SYSTEMS.map(str::to_string).to_vec()
+        );
+        assert!(config.save_states_enabled);
     }
 }

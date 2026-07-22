@@ -60,6 +60,14 @@ SB_NETPLAY_TELEMETRY_FLUSH_MS=1000
 SB_NETPLAY_VOICE_BROKER_URL=https://voice.shadowboy.app
 SB_NETPLAY_VOICE_BROKER_TOKEN=<same value as SB_WEBRTC_RELAY_TOKEN>
 SB_NETPLAY_VOICE_BROKER_TIMEOUT_MS=2500
+SB_NETPLAY_FILE_RELAY_URL=https://relay.shadowboy.app
+SB_NETPLAY_FILE_RELAY_TOKEN=<same value as the sb-file-relay-serv service token>
+SB_NETPLAY_FILE_RELAY_TIMEOUT_MS=2500
+SB_NETPLAY_FILE_RELAY_SAVE_STATES_ENABLED=true
+SB_NETPLAY_ROM_RELAY_ENABLED=false
+SB_NETPLAY_DIRECT_ROM_RELAY_ENABLED=false
+SB_NETPLAY_ROM_RELAY_MAX_BYTES=104857600
+SB_NETPLAY_DIRECT_ROM_RELAY_ALLOWED_SYSTEMS=gb,gbc,gameboy,gameboy-color,gba,nes,snes,genesis,sms,master-system,game-gear
 ```
 
 Store these values in Coolify's environment/secret UI, not in git.
@@ -74,6 +82,32 @@ raise every platform minimum before the corresponding clients ship.
 `SB_NETPLAY_POSTGRES_URL` is optional for gameplay but recommended for long-term
 diagnostics. When present, the server checks and installs the analytics schema
 at startup and logs whether Postgres telemetry is ready.
+
+`SB_NETPLAY_FILE_RELAY_URL` and `SB_NETPLAY_FILE_RELAY_TOKEN` attach the
+existing `sb-file-relay-serv` deployment. The feature flags decide which
+lobby transfer kinds may request tickets from that service; they do not create
+another relay or move payload bytes through the netplay process.
+
+The URL and token are an optional pair: set both to enable the existing relay,
+or omit both to disable relay-backed transfers. They are the minimum file-relay
+environment needed to enable it. The timeout, feature flags, maximum size, and
+direct-ROM allowlist may be omitted; `FileRelayConfig` supplies the documented
+defaults shown above. The Compose file passes these variables through without
+turning an omitted optional value into an empty string.
+
+The normal Rust suite remains Docker-free. Before changing this deployment
+contract, run its explicit render gate as well:
+
+```bash
+scripts/with-project-env.sh cargo test \
+  --test coolify_compose_contract \
+  docker_compose_render_preserves_optional_file_relay_environment \
+  -- --ignored --exact --nocapture
+```
+
+This gate requires the Docker CLI with the Compose v2 plugin. It runs only
+`docker compose config` against an isolated empty environment fixture, has a
+15-second subprocess timeout, and neither starts containers nor deploys.
 
 Use `coolify.env.local` as the paste source on this machine. It is ignored by
 git. `coolify.env.example` is the tracked template.
