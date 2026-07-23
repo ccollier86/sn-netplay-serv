@@ -15,6 +15,7 @@ mod lobby_event;
 mod lobby_expiration_task;
 mod lobby_game;
 mod lobby_launch;
+mod lobby_link_cable;
 mod lobby_player;
 mod lobby_player_removal;
 mod lobby_registry_trait;
@@ -48,6 +49,11 @@ pub use lobby_expiration_task::spawn_lobby_expiration_task;
 pub use lobby_game::{LobbyGameCandidate, LobbyGameSelectionView};
 pub use lobby_launch::{
     LobbyGameLaunchStatus, LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView,
+};
+pub use lobby_link_cable::{
+    LOBBY_LINK_CABLE_CONTRACT_VERSION, LobbyLinkCableClientCapabilities, LobbyLinkCableLaunchState,
+    LobbyLinkCablePlayerSlotView, LobbyLinkCableView, LobbyLinkProtocolFamily,
+    LobbyMultiplayerExtension, LobbyMultiplayerSessionKind, MAX_LINK_CABLE_LOBBY_PLAYERS,
 };
 pub use lobby_player::{
     LobbyPlayerOccupancy, LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerSlotView, LobbyPlayerStatus,

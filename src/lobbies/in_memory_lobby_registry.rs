@@ -8,11 +8,12 @@ use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, Lobby, LobbyActivityKind, LobbyChatMessageView,
     LobbyCreateRequest, LobbyDebugEvent, LobbyDebugEventLog, LobbyDebugEventSink, LobbyError,
     LobbyEventReceiver, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin,
-    LobbyPlayerRemovalReason, LobbyReconnectRequest, LobbyRegistry, LobbyRegistrySnapshot,
-    LobbyReturnReason, LobbyReturnRequest, LobbyRomRelayLimits, LobbyRomRelayTransferIntent,
-    LobbyServerCapabilities, LobbyStartupStateRelayLimits, LobbyStartupStateRelayTransferIntent,
-    LobbyView, MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink, PublicLobbyEventReceiver,
-    PublicLobbySummary, ReconnectLobbyPlayerRequest, StoredLobby,
+    LobbyLinkCableLaunchState, LobbyLinkProtocolFamily, LobbyPlayerRemovalReason,
+    LobbyReconnectRequest, LobbyRegistry, LobbyRegistrySnapshot, LobbyReturnReason,
+    LobbyReturnRequest, LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyServerCapabilities,
+    LobbyStartupStateRelayLimits, LobbyStartupStateRelayTransferIntent, LobbyView,
+    MAX_LOBBY_PLAYERS, NoopLobbyDebugEventSink, PublicLobbyEventReceiver, PublicLobbySummary,
+    ReconnectLobbyPlayerRequest, StoredLobby,
 };
 use crate::protocol::{LobbyFileRelayGrantPair, LobbyStartupStateTransferMetadata};
 use crate::rooms::{
@@ -478,6 +479,65 @@ impl LobbyRegistry for InMemoryLobbyRegistry {
         lobby.emit_state_changed();
         self.record_lobby_event(lobby, "lobbyGameSelected", "host selected game".to_string());
         self.emit_public_lobbies_changed();
+
+        Ok(lobby.view())
+    }
+
+    async fn select_lobby_link_cable_game(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        game: LobbyGameCandidate,
+        protocol_family: LobbyLinkProtocolFamily,
+        room_invite_code: Option<InviteCode>,
+    ) -> Result<LobbyView, LobbyError> {
+        let mut lobbies = self.lobbies.write().await;
+        let lobby = lobbies
+            .get_mut(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+        lobby.lobby.select_link_cable_game(
+            connection_id,
+            game,
+            protocol_family,
+            room_invite_code,
+            crate::rooms::current_timestamp_ms(),
+        )?;
+        lobby.emit_state_changed();
+        self.record_lobby_event(
+            lobby,
+            "lobbyLinkGameSelected",
+            "player selected compatible link game".to_string(),
+        );
+        self.emit_public_lobbies_changed();
+
+        Ok(lobby.view())
+    }
+
+    async fn set_lobby_link_cable_launch_state(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        selection_generation: u64,
+        state: LobbyLinkCableLaunchState,
+        room_invite_code: Option<InviteCode>,
+    ) -> Result<LobbyView, LobbyError> {
+        let mut lobbies = self.lobbies.write().await;
+        let lobby = lobbies
+            .get_mut(invite_code.normalized())
+            .ok_or(LobbyError::NotFound)?;
+        lobby.lobby.set_link_cable_launch_state(
+            connection_id,
+            selection_generation,
+            state,
+            room_invite_code,
+            crate::rooms::current_timestamp_ms(),
+        )?;
+        lobby.emit_state_changed();
+        self.record_lobby_event(
+            lobby,
+            "lobbyLinkLaunchStateChanged",
+            format!("player link launch state set status={state:?}"),
+        );
 
         Ok(lobby.view())
     }

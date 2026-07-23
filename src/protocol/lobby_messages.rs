@@ -5,7 +5,8 @@
 
 use crate::lobbies::{
     LobbyActivityKind, LobbyChatMessageView, LobbyGameCandidate, LobbyGameReadinessStatus,
-    LobbyPlayerRemovalReason, LobbyReturnReason, LobbyReturnedView, LobbyView,
+    LobbyLinkCableLaunchState, LobbyLinkProtocolFamily, LobbyPlayerRemovalReason,
+    LobbyReturnReason, LobbyReturnedView, LobbyView,
 };
 use crate::protocol::{LobbyFileRelayGrant, LobbyStartupStateTransferMetadata};
 use crate::rooms::PlayerVoiceJoinGrant;
@@ -13,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Client-to-relay lobby WebSocket message.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -28,6 +29,30 @@ pub enum LobbyClientMessage {
         lobby_epoch: u64,
         /// Proposed game details.
         game: LobbyGameCandidate,
+    },
+    /// Selects this player's game for a capability-gated link-cable lobby.
+    SelectLinkCableGame {
+        /// Lobby epoch observed by the client.
+        lobby_epoch: u64,
+        /// Player-local game details. Link peers may select different ROMs.
+        game: LobbyGameCandidate,
+        /// Frozen GB/GBC or GBA link protocol family.
+        protocol_family: LobbyLinkProtocolFamily,
+        /// Existing direct link-room invite, supplied by the host when ready.
+        #[serde(default)]
+        room_invite_code: Option<String>,
+    },
+    /// Reports this player's independent link-cable launch/runtime state.
+    SetLinkCableLaunchState {
+        /// Lobby epoch observed by the client.
+        lobby_epoch: u64,
+        /// Current generation of this player's selected game.
+        selection_generation: u64,
+        /// Independent local launch/runtime state.
+        state: LobbyLinkCableLaunchState,
+        /// Existing direct link-room invite, supplied by the host when ready.
+        #[serde(default)]
+        room_invite_code: Option<String>,
     },
     /// Client reports whether it can launch the selected game.
     SetGameReadiness {
@@ -295,6 +320,45 @@ mod tests {
                 player_index: 1,
             }
         ));
+
+        let message = serde_json::from_value::<LobbyClientMessage>(json!({
+            "type": "selectLinkCableGame",
+            "lobbyEpoch": 8,
+            "game": {
+                "title": "Pokemon Emerald",
+                "systemId": "gba",
+                "coreId": "mgba"
+            },
+            "protocolFamily": "gbaMultiV1",
+            "roomInviteCode": "EF45-GH"
+        }))
+        .expect("select link game");
+        assert!(matches!(
+            message,
+            LobbyClientMessage::SelectLinkCableGame {
+                lobby_epoch: 8,
+                protocol_family: LobbyLinkProtocolFamily::GbaMultiV1,
+                room_invite_code: Some(room_invite_code),
+                ..
+            } if room_invite_code == "EF45-GH"
+        ));
+
+        let message = serde_json::from_value::<LobbyClientMessage>(json!({
+            "type": "setLinkCableLaunchState",
+            "lobbyEpoch": 9,
+            "selectionGeneration": 2,
+            "state": "runtimeAttached"
+        }))
+        .expect("set link launch state");
+        assert!(matches!(
+            message,
+            LobbyClientMessage::SetLinkCableLaunchState {
+                lobby_epoch: 9,
+                selection_generation: 2,
+                state: LobbyLinkCableLaunchState::RuntimeAttached,
+                room_invite_code: None,
+            }
+        ));
     }
 
     #[test]
@@ -321,6 +385,7 @@ mod tests {
                 game_readiness: Vec::new(),
                 pending_launch: None,
                 voice: None,
+                multiplayer_extension: None,
             },
         };
 
@@ -372,6 +437,7 @@ mod tests {
             game_readiness: Vec::new(),
             pending_launch: None,
             voice: None,
+            multiplayer_extension: None,
         };
         let removal_payload = serde_json::to_value(LobbyServerMessage::PlayerRemoved {
             event_seq: 5,

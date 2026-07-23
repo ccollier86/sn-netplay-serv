@@ -8,8 +8,9 @@ use crate::http::client_identity::request_rate_limit_key;
 use crate::http::errors::HttpError;
 use crate::http::services::AppServices;
 use crate::lobbies::{
-    CreateLobbyParams, JoinLobbyParams, LobbyClientCapabilities, LobbyJoin, LobbyView,
-    MAX_LOBBY_PLAYERS, PublicLobbySummary,
+    CreateLobbyParams, JoinLobbyParams, LobbyClientCapabilities, LobbyJoin,
+    LobbyLinkCableClientCapabilities, LobbyLinkProtocolFamily, LobbyView, MAX_LOBBY_PLAYERS,
+    PublicLobbySummary,
 };
 use crate::protocol::{NetplayClientKind, validate_client_protocol_version};
 use crate::rate_limit::RateLimitAction;
@@ -118,7 +119,9 @@ pub async fn lobby_status(
     let invite_code = InviteCode::parse(invite_code)?;
     let lobby = services.lobbies.lobby_view(invite_code).await?;
 
-    Ok(Json(LobbyStatusResponse { lobby }))
+    Ok(Json(LobbyStatusResponse {
+        lobby: unauthenticated_lobby_status_view(lobby),
+    }))
 }
 
 /// Returns public lobby summaries for signed-in desktop clients.
@@ -212,7 +215,7 @@ pub async fn websocket_lobby(
         .validate_exact(netplay_client_kind(license.client_kind), protocol_version)?;
     let invite_code = InviteCode::parse(&query.invite_code)?;
     let reconnect = reconnect_query(&query)?;
-    let capabilities = lobby_capabilities(&query, license.client_kind);
+    let capabilities = lobby_capabilities(&query, license.client_kind)?;
     let join_request = WebSocketLobbyJoinRequest {
         invite_code,
         display_name: query.display_name,
@@ -355,6 +358,14 @@ pub struct WebSocketLobbyQuery {
     #[serde(default)]
     supports_lobby_player_removed_event: Option<bool>,
     #[serde(default)]
+    link_cable_contract_version: Option<u16>,
+    #[serde(default)]
+    link_cable_runtime_profile: Option<String>,
+    #[serde(default)]
+    link_cable_core_build_id: Option<String>,
+    #[serde(default)]
+    link_cable_protocol_families: Option<String>,
+    #[serde(default)]
     player_index: Option<u8>,
     #[serde(default)]
     lobby_epoch: Option<u64>,
@@ -399,10 +410,10 @@ fn reconnect_query(query: &WebSocketLobbyQuery) -> Result<Option<LobbyReconnectQ
 fn lobby_capabilities(
     query: &WebSocketLobbyQuery,
     client_kind: crate::auth::ClientKind,
-) -> LobbyClientCapabilities {
+) -> Result<LobbyClientCapabilities, HttpError> {
     let defaults_to_rich_desktop = client_kind == crate::auth::ClientKind::Desktop;
 
-    LobbyClientCapabilities {
+    Ok(LobbyClientCapabilities {
         supports_lobby: true,
         supports_temporary_session_rom_relay: query
             .supports_temporary_session_rom_relay
@@ -418,5 +429,198 @@ fn lobby_capabilities(
         supports_lobby_player_removed_event: query
             .supports_lobby_player_removed_event
             .unwrap_or(false),
+        link_cable: link_cable_capabilities(query)?,
+    })
+}
+
+fn link_cable_capabilities(
+    query: &WebSocketLobbyQuery,
+) -> Result<Option<LobbyLinkCableClientCapabilities>, HttpError> {
+    let supplied_fields = [
+        query.link_cable_contract_version.is_some(),
+        query.link_cable_runtime_profile.is_some(),
+        query.link_cable_core_build_id.is_some(),
+        query.link_cable_protocol_families.is_some(),
+    ];
+    if supplied_fields.iter().all(|supplied| !supplied) {
+        return Ok(None);
+    }
+    if supplied_fields.iter().any(|supplied| !supplied) {
+        return Err(invalid_link_cable_capability());
+    }
+
+    let runtime_profile = query
+        .link_cable_runtime_profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(invalid_link_cable_capability)?;
+    let core_build_id = query
+        .link_cable_core_build_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(invalid_link_cable_capability)?;
+    let raw_families = query
+        .link_cable_protocol_families
+        .as_deref()
+        .ok_or_else(invalid_link_cable_capability)?;
+    let mut protocol_families = Vec::new();
+    for raw_family in raw_families.split(',') {
+        let family = match raw_family.trim() {
+            "gbSerialV1" => LobbyLinkProtocolFamily::GbSerialV1,
+            "gbaMultiV1" => LobbyLinkProtocolFamily::GbaMultiV1,
+            _ => return Err(invalid_link_cable_capability()),
+        };
+        if !protocol_families.contains(&family) {
+            protocol_families.push(family);
+        }
+    }
+    if protocol_families.is_empty() {
+        return Err(invalid_link_cable_capability());
+    }
+
+    Ok(Some(LobbyLinkCableClientCapabilities {
+        contract_version: query
+            .link_cable_contract_version
+            .ok_or_else(invalid_link_cable_capability)?,
+        runtime_profile: runtime_profile.to_string(),
+        core_build_id: core_build_id.to_string(),
+        protocol_families,
+    }))
+}
+
+fn invalid_link_cable_capability() -> HttpError {
+    HttpError::InvalidRequest {
+        code: "invalidLinkCableCapability",
+        message: "Link-cable lobby capability fields are incomplete or invalid.",
+    }
+}
+
+fn unauthenticated_lobby_status_view(mut lobby: LobbyView) -> LobbyView {
+    lobby.multiplayer_extension = None;
+    lobby
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_link_capability_is_absent_for_legacy_queries() {
+        let capabilities =
+            lobby_capabilities(&query(), crate::auth::ClientKind::Android).expect("capabilities");
+
+        assert!(capabilities.link_cable.is_none());
+    }
+
+    #[test]
+    fn websocket_link_capability_parses_the_complete_kotlin_query_contract() {
+        let mut query = query();
+        query.link_cable_contract_version = Some(1);
+        query.link_cable_runtime_profile = Some("mgba-link-runtime-v1".to_string());
+        query.link_cable_core_build_id = Some("android-mgba-link-v1".to_string());
+        query.link_cable_protocol_families = Some("gbSerialV1,gbaMultiV1".to_string());
+
+        let link = lobby_capabilities(&query, crate::auth::ClientKind::Android)
+            .expect("capabilities")
+            .link_cable
+            .expect("link capability");
+
+        assert_eq!(link.contract_version, 1);
+        assert_eq!(link.runtime_profile, "mgba-link-runtime-v1");
+        assert_eq!(link.core_build_id, "android-mgba-link-v1");
+        assert_eq!(
+            link.protocol_families,
+            vec![
+                LobbyLinkProtocolFamily::GbSerialV1,
+                LobbyLinkProtocolFamily::GbaMultiV1,
+            ],
+        );
+    }
+
+    #[test]
+    fn websocket_link_capability_fails_closed_when_partial_or_unknown() {
+        let mut partial = query();
+        partial.link_cable_contract_version = Some(1);
+        assert!(matches!(
+            lobby_capabilities(&partial, crate::auth::ClientKind::Android),
+            Err(HttpError::InvalidRequest {
+                code: "invalidLinkCableCapability",
+                ..
+            })
+        ));
+
+        let mut unknown = query();
+        unknown.link_cable_contract_version = Some(1);
+        unknown.link_cable_runtime_profile = Some("mgba-link-runtime-v1".to_string());
+        unknown.link_cable_core_build_id = Some("android-mgba-link-v1".to_string());
+        unknown.link_cable_protocol_families = Some("futureFamily".to_string());
+        assert!(matches!(
+            lobby_capabilities(&unknown, crate::auth::ClientKind::Android),
+            Err(HttpError::InvalidRequest {
+                code: "invalidLinkCableCapability",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn unauthenticated_lobby_status_strips_specialized_room_invite_extension() {
+        let view = LobbyView {
+            lobby_id: crate::rooms::RoomId::new(),
+            event_seq: 4,
+            lobby_epoch: 3,
+            invite_code: "AB23-CD".to_string(),
+            created_at_ms: 1,
+            updated_at_ms: 2,
+            last_meaningful_activity_at_ms: 2,
+            status: crate::lobbies::LobbyStatus::GameSelected,
+            visibility: crate::lobbies::LobbyVisibility::Private,
+            capabilities: crate::lobbies::LobbyServerCapabilities::current(2, false, false),
+            players: Vec::new(),
+            selected_game: None,
+            game_readiness: Vec::new(),
+            pending_launch: None,
+            voice: None,
+            multiplayer_extension: Some(crate::lobbies::LobbyMultiplayerExtension {
+                session_kind: crate::lobbies::LobbyMultiplayerSessionKind::LinkCable,
+                generation: 1,
+                link_cable: Some(crate::lobbies::LobbyLinkCableView {
+                    protocol_family: LobbyLinkProtocolFamily::GbaMultiV1,
+                    max_players: 2,
+                    room_invite_code: Some("EF45-GH".to_string()),
+                    cable_epoch: None,
+                    players: Vec::new(),
+                }),
+            }),
+        };
+
+        let projected = unauthenticated_lobby_status_view(view);
+
+        assert!(projected.multiplayer_extension.is_none());
+        let payload = serde_json::to_value(projected).expect("status serializes");
+        assert!(payload.get("multiplayerExtension").is_none());
+    }
+
+    fn query() -> WebSocketLobbyQuery {
+        WebSocketLobbyQuery {
+            invite_code: "AB23-CD".to_string(),
+            protocol_version: Some(crate::protocol::NETPLAY_PROTOCOL_VERSION),
+            display_name: None,
+            supports_temporary_session_rom_relay: None,
+            supports_lobby_voice: None,
+            supports_multi_game_lobby: None,
+            supports_lobby_returned_event: None,
+            supports_lobby_gameplay_started: None,
+            supports_lobby_player_removed_event: None,
+            link_cable_contract_version: None,
+            link_cable_runtime_profile: None,
+            link_cable_core_build_id: None,
+            link_cable_protocol_families: None,
+            player_index: None,
+            lobby_epoch: None,
+            resume_token: None,
+        }
     }
 }

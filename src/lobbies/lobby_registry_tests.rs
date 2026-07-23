@@ -4,9 +4,11 @@ use crate::auth::{ClientKind, VerifiedLicense};
 use crate::lobbies::{
     CreateLobbyParams, InMemoryLobbyRegistry, JoinLobbyParams, LobbyActivityKind,
     LobbyClientCapabilities, LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameLaunchStatus,
-    LobbyGameReadinessStatus, LobbyPlayerRemovalReason, LobbyPlayerRole, LobbyPlayerStatus,
-    LobbyRegistry, LobbyReturnReason, LobbyServerCapabilities, LobbyStatus, LobbyVisibility,
-    MAX_LOBBY_PLAYERS, PublicLobbyEventReceiver, ReconnectLobbyPlayerRequest,
+    LobbyGameReadinessStatus, LobbyLinkCableClientCapabilities, LobbyLinkCableLaunchState,
+    LobbyLinkProtocolFamily, LobbyMultiplayerSessionKind, LobbyPlayerRemovalReason,
+    LobbyPlayerRole, LobbyPlayerStatus, LobbyRegistry, LobbyReturnReason, LobbyServerCapabilities,
+    LobbyStatus, LobbyView, LobbyVisibility, MAX_LOBBY_PLAYERS, PublicLobbyEventReceiver,
+    ReconnectLobbyPlayerRequest,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex, ResumeToken, ResumeTokenGenerator,
@@ -654,6 +656,556 @@ async fn host_can_select_game_and_broadcast_lobby_state() {
         "Starlight Ruins"
     );
     assert!(matches!(event, LobbyEvent::LobbyStateChanged(_)));
+}
+
+#[tokio::test]
+async fn link_lobby_accepts_different_player_roms_and_independent_launch_order() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_link_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_link_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_link_params(),
+            guest_connection,
+        )
+        .await
+        .expect("guest connected");
+
+    let host_view = registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            host_connection,
+            link_game("Host GBA", "gba", 'a'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            Some(InviteCode::parse("EF45-GH").expect("room invite")),
+        )
+        .await
+        .expect("host selected");
+    let host_link = host_view
+        .multiplayer_extension
+        .as_ref()
+        .and_then(|extension| extension.link_cable.as_ref())
+        .expect("link extension");
+    assert_eq!(host_view.capabilities.max_players, 2);
+    assert_eq!(host_link.max_players, 2);
+    assert_eq!(host_link.players[0].selection_generation, 1);
+    assert_eq!(
+        host_link.players[0]
+            .selected_game
+            .as_ref()
+            .unwrap()
+            .content_sha256,
+        Some("a".repeat(64))
+    );
+
+    let guest_view = registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            guest_connection,
+            link_game("Guest GBA", "gba", 'b'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            None,
+        )
+        .await
+        .expect("guest selected");
+    let extension = guest_view.multiplayer_extension.expect("extension");
+    assert_eq!(
+        extension.session_kind,
+        LobbyMultiplayerSessionKind::LinkCable
+    );
+    let link = extension.link_cable.expect("link");
+    assert_eq!(
+        link.players[0].selected_game.as_ref().unwrap().title,
+        "Host GBA"
+    );
+    assert_eq!(
+        link.players[1].selected_game.as_ref().unwrap().title,
+        "Guest GBA"
+    );
+    assert_ne!(
+        link.players[0]
+            .selected_game
+            .as_ref()
+            .unwrap()
+            .content_sha256,
+        link.players[1]
+            .selected_game
+            .as_ref()
+            .unwrap()
+            .content_sha256,
+    );
+
+    let guest_launch = registry
+        .set_lobby_link_cable_launch_state(
+            invite.clone(),
+            guest_connection,
+            link.players[1].selection_generation,
+            LobbyLinkCableLaunchState::Launching,
+            None,
+        )
+        .await
+        .expect("guest launched first");
+    let guest_link = guest_launch
+        .multiplayer_extension
+        .as_ref()
+        .and_then(|extension| extension.link_cable.as_ref())
+        .expect("link");
+    assert_eq!(
+        guest_link.players[1].launch_state,
+        LobbyLinkCableLaunchState::Launching,
+    );
+    assert_eq!(
+        guest_link.players[0].launch_state,
+        LobbyLinkCableLaunchState::NotLaunched,
+    );
+
+    let host_launch = registry
+        .set_lobby_link_cable_launch_state(
+            invite,
+            host_connection,
+            guest_link.players[0].selection_generation,
+            LobbyLinkCableLaunchState::Launching,
+            Some(InviteCode::parse("EF45-GH").expect("room invite")),
+        )
+        .await
+        .expect("host launched independently");
+    let host_link = host_launch
+        .multiplayer_extension
+        .as_ref()
+        .and_then(|extension| extension.link_cable.as_ref())
+        .expect("link");
+    assert_eq!(
+        host_link.players[0].launch_state,
+        LobbyLinkCableLaunchState::Launching,
+    );
+    assert_eq!(
+        host_link.players[1].launch_state,
+        LobbyLinkCableLaunchState::Launching,
+    );
+    assert!(host_launch.pending_launch.is_none());
+    assert!(host_launch.game_readiness.is_empty());
+}
+
+#[tokio::test]
+async fn rotating_link_room_invalidates_every_occupied_player_launch_generation() {
+    let (registry, invite, host_connection, guest_connection, _, selected) =
+        selected_link_lobby().await;
+    let before = selected.multiplayer_extension.as_ref().expect("extension");
+    let before_link = before.link_cable.as_ref().expect("link");
+    let before_host_generation = before_link.players[0].selection_generation;
+    let before_guest_generation = before_link.players[1].selection_generation;
+
+    registry
+        .set_lobby_link_cable_launch_state(
+            invite.clone(),
+            host_connection,
+            before_host_generation,
+            LobbyLinkCableLaunchState::RuntimeAttached,
+            None,
+        )
+        .await
+        .expect("host attached");
+    registry
+        .set_lobby_link_cable_launch_state(
+            invite.clone(),
+            guest_connection,
+            before_guest_generation,
+            LobbyLinkCableLaunchState::RuntimeAttached,
+            None,
+        )
+        .await
+        .expect("guest attached");
+
+    let rotated = registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            host_connection,
+            link_game("Host GBA", "gba", 'a'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            Some(InviteCode::parse("JK67-LM").expect("new room invite")),
+        )
+        .await
+        .expect("room rotated");
+    let rotated_extension = rotated.multiplayer_extension.as_ref().expect("extension");
+    let rotated_link = rotated_extension.link_cable.as_ref().expect("link");
+
+    assert!(rotated_extension.generation > before.generation);
+    assert!(rotated_link.players[0].selection_generation > before_host_generation);
+    assert!(rotated_link.players[1].selection_generation > before_guest_generation);
+    assert!(
+        rotated_link
+            .players
+            .iter()
+            .all(|player| player.launch_state == LobbyLinkCableLaunchState::NotLaunched)
+    );
+
+    let stale_guest_update = registry
+        .set_lobby_link_cable_launch_state(
+            invite,
+            guest_connection,
+            before_guest_generation,
+            LobbyLinkCableLaunchState::RuntimeAttached,
+            None,
+        )
+        .await
+        .expect_err("old room generation must not update new room state");
+    assert!(matches!(
+        stale_guest_update,
+        LobbyError::StaleLinkCableSelection
+    ));
+}
+
+#[tokio::test]
+async fn intentional_link_guest_leave_clears_route_and_interrupts_remaining_player() {
+    let (registry, invite, host_connection, guest_connection, _, selected) =
+        selected_link_lobby().await;
+    let selected_extension = selected.multiplayer_extension.as_ref().expect("extension");
+    let selected_link = selected_extension.link_cable.as_ref().expect("link");
+    let host_generation = selected_link.players[0].selection_generation;
+    let guest_generation = selected_link.players[1].selection_generation;
+
+    registry
+        .set_lobby_link_cable_launch_state(
+            invite.clone(),
+            host_connection,
+            host_generation,
+            LobbyLinkCableLaunchState::RuntimeAttached,
+            None,
+        )
+        .await
+        .expect("host attached");
+    registry
+        .set_lobby_link_cable_launch_state(
+            invite.clone(),
+            guest_connection,
+            guest_generation,
+            LobbyLinkCableLaunchState::RuntimeAttached,
+            None,
+        )
+        .await
+        .expect("guest attached");
+
+    let left = registry
+        .leave_lobby(invite.clone(), guest_connection)
+        .await
+        .expect("guest left intentionally");
+    let left_extension = left.multiplayer_extension.as_ref().expect("extension");
+    let left_link = left_extension.link_cable.as_ref().expect("link");
+
+    assert!(left_extension.generation > selected_extension.generation);
+    assert!(left_link.room_invite_code.is_none());
+    assert!(left_link.cable_epoch.is_none());
+    assert!(left_link.players[0].selection_generation > host_generation);
+    assert_eq!(
+        left_link.players[0].launch_state,
+        LobbyLinkCableLaunchState::Interrupted
+    );
+    assert!(left_link.players[1].selected_game.is_none());
+    assert_eq!(
+        left_link.players[1].launch_state,
+        LobbyLinkCableLaunchState::Stopped
+    );
+
+    let replacement_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("replacement"),
+            join_link_params(),
+            replacement_connection,
+        )
+        .await
+        .expect("replacement joined");
+    let replacement_selection = registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            replacement_connection,
+            link_game("Replacement GBA", "gba", 'c'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            None,
+        )
+        .await
+        .expect("replacement selected");
+    let replacement_generation = replacement_selection
+        .multiplayer_extension
+        .as_ref()
+        .and_then(|extension| extension.link_cable.as_ref())
+        .expect("link")
+        .players[1]
+        .selection_generation;
+    let no_stale_route = registry
+        .set_lobby_link_cable_launch_state(
+            invite,
+            replacement_connection,
+            replacement_generation,
+            LobbyLinkCableLaunchState::Launching,
+            None,
+        )
+        .await
+        .expect_err("host must publish a fresh direct room");
+    assert!(matches!(no_stale_route, LobbyError::GameLaunchNotReady));
+}
+
+#[tokio::test]
+async fn removing_link_guest_uses_the_same_terminal_route_reset() {
+    let (registry, invite, host_connection, _, _, selected) = selected_link_lobby().await;
+    let selected_extension = selected.multiplayer_extension.as_ref().expect("extension");
+    let selected_link = selected_extension.link_cable.as_ref().expect("link");
+
+    let removed = registry
+        .remove_lobby_player(
+            invite,
+            host_connection,
+            selected.lobby_epoch,
+            PlayerIndex::TWO,
+        )
+        .await
+        .expect("guest removed");
+    let removed_extension = removed.multiplayer_extension.as_ref().expect("extension");
+    let removed_link = removed_extension.link_cable.as_ref().expect("link");
+
+    assert!(removed_extension.generation > selected_extension.generation);
+    assert!(removed_link.room_invite_code.is_none());
+    assert!(
+        removed_link.players[0].selection_generation
+            > selected_link.players[0].selection_generation
+    );
+    assert_eq!(
+        removed_link.players[0].launch_state,
+        LobbyLinkCableLaunchState::Interrupted
+    );
+}
+
+#[tokio::test]
+async fn ordinary_link_disconnect_and_reconnect_preserve_route_and_player_selections() {
+    let (registry, invite, _, guest_connection, guest_resume_token, selected) =
+        selected_link_lobby().await;
+    let selected_extension = selected.multiplayer_extension.as_ref().expect("extension");
+    let selected_link = selected_extension.link_cable.as_ref().expect("link");
+
+    let disconnected = registry
+        .disconnect_lobby(invite.clone(), guest_connection)
+        .await
+        .expect("guest disconnected");
+    let disconnected_extension = disconnected
+        .multiplayer_extension
+        .as_ref()
+        .expect("extension");
+    let disconnected_link = disconnected_extension.link_cable.as_ref().expect("link");
+
+    assert_eq!(
+        disconnected_extension.generation,
+        selected_extension.generation
+    );
+    assert_eq!(
+        disconnected_link.room_invite_code,
+        selected_link.room_invite_code
+    );
+    assert_eq!(
+        disconnected_link.players[1].selected_game,
+        selected_link.players[1].selected_game
+    );
+    assert_eq!(
+        disconnected_link.players[1].selection_generation,
+        selected_link.players[1].selection_generation
+    );
+
+    let reconnected = registry
+        .reconnect_lobby_player(ReconnectLobbyPlayerRequest {
+            invite_code: invite,
+            player: license("guest"),
+            params: join_link_params(),
+            player_index: PlayerIndex::TWO,
+            lobby_epoch: selected.lobby_epoch,
+            resume_token: guest_resume_token,
+            connection_id: ConnectionId::new(),
+        })
+        .await
+        .expect("guest reconnected");
+    let reconnected_link = reconnected
+        .lobby
+        .multiplayer_extension
+        .as_ref()
+        .and_then(|extension| extension.link_cable.as_ref())
+        .expect("link");
+
+    assert_eq!(
+        reconnected_link.room_invite_code,
+        selected_link.room_invite_code
+    );
+    assert_eq!(
+        reconnected_link.players[1].selected_game,
+        selected_link.players[1].selected_game
+    );
+}
+
+#[tokio::test]
+async fn gb_and_gbc_share_one_link_family_but_gba_does_not() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_link_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_link_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_link_params(),
+            guest_connection,
+        )
+        .await
+        .expect("guest connected");
+    registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            host_connection,
+            link_game("Red", "gb", 'a'),
+            LobbyLinkProtocolFamily::GbSerialV1,
+            Some(InviteCode::parse("EF45-GH").expect("room invite")),
+        )
+        .await
+        .expect("host selected GB");
+    registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            guest_connection,
+            link_game("Crystal", "gbc", 'b'),
+            LobbyLinkProtocolFamily::GbSerialV1,
+            None,
+        )
+        .await
+        .expect("guest selected GBC");
+
+    let mismatch = registry
+        .select_lobby_link_cable_game(
+            invite,
+            guest_connection,
+            link_game("Emerald", "gba", 'c'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            None,
+        )
+        .await
+        .expect_err("GBA cannot join a GB/GBC link family");
+    assert!(matches!(mismatch, LobbyError::LinkCableFamilyMismatch));
+}
+
+#[tokio::test]
+async fn link_resolution_rejects_legacy_or_third_players_without_changing_controller_capacity() {
+    let link_registry = registry();
+    let host_join = link_registry
+        .create_lobby(license("host"), create_link_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    let legacy_connection = ConnectionId::new();
+    link_registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_link_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    link_registry
+        .connect_lobby(
+            invite.clone(),
+            license("legacy"),
+            join_params(),
+            legacy_connection,
+        )
+        .await
+        .expect("legacy guest connected before resolution");
+    let unsupported = link_registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            host_connection,
+            link_game("Host GBA", "gba", 'a'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            Some(InviteCode::parse("EF45-GH").expect("room invite")),
+        )
+        .await
+        .expect_err("legacy guest blocks link resolution");
+    assert!(matches!(
+        unsupported,
+        LobbyError::LinkCableCapabilityRequired
+    ));
+    link_registry
+        .leave_lobby(invite.clone(), legacy_connection)
+        .await
+        .expect("legacy guest left");
+    link_registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            host_connection,
+            link_game("Host GBA", "gba", 'a'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            Some(InviteCode::parse("EF45-GH").expect("room invite")),
+        )
+        .await
+        .expect("link resolved");
+    link_registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_link_params(),
+            ConnectionId::new(),
+        )
+        .await
+        .expect("second link player joined");
+    let third = link_registry
+        .connect_lobby(
+            invite,
+            license("third"),
+            join_link_params(),
+            ConnectionId::new(),
+        )
+        .await
+        .expect_err("link lobby stays two-player");
+    assert!(matches!(third, LobbyError::LobbyFull));
+
+    let controller_registry = registry();
+    let controller = controller_registry
+        .create_lobby(license("controller-host"), create_params())
+        .await
+        .expect("controller created");
+    let controller_invite =
+        InviteCode::parse(controller.lobby.invite_code).expect("controller invite");
+    for subject in ["controller-2", "controller-3", "controller-4"] {
+        controller_registry
+            .join_lobby(controller_invite.clone(), license(subject), join_params())
+            .await
+            .expect("controller capacity unchanged");
+    }
 }
 
 #[tokio::test]
@@ -1440,6 +1992,114 @@ fn join_v2_params() -> JoinLobbyParams {
         display_name: None,
         capabilities: v2_lobby_capabilities(),
     }
+}
+
+fn create_link_params() -> CreateLobbyParams {
+    CreateLobbyParams {
+        display_name: Some("Host".to_string()),
+        capabilities: link_lobby_capabilities(),
+        initial_game: None,
+        voice: None,
+        visibility: LobbyVisibility::Private,
+    }
+}
+
+fn join_link_params() -> JoinLobbyParams {
+    JoinLobbyParams {
+        display_name: None,
+        capabilities: link_lobby_capabilities(),
+    }
+}
+
+fn link_lobby_capabilities() -> LobbyClientCapabilities {
+    LobbyClientCapabilities {
+        link_cable: Some(LobbyLinkCableClientCapabilities {
+            contract_version: 1,
+            runtime_profile: "mgba-link-runtime-v1".to_string(),
+            core_build_id: "android-mgba-link-v1".to_string(),
+            protocol_families: vec![
+                LobbyLinkProtocolFamily::GbSerialV1,
+                LobbyLinkProtocolFamily::GbaMultiV1,
+            ],
+        }),
+        ..LobbyClientCapabilities::desktop_default()
+    }
+}
+
+fn link_game(title: &str, system_id: &str, hash_byte: char) -> LobbyGameCandidate {
+    LobbyGameCandidate {
+        title: title.to_string(),
+        system_id: system_id.to_string(),
+        core_id: "mgba".to_string(),
+        content_sha256: Some(hash_byte.to_string().repeat(64)),
+        rom_size_bytes: Some(1024),
+        start_state_label: None,
+    }
+}
+
+async fn selected_link_lobby() -> (
+    InMemoryLobbyRegistry,
+    InviteCode,
+    ConnectionId,
+    ConnectionId,
+    String,
+    LobbyView,
+) {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_link_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_link_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    let guest_join = registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_link_params(),
+            guest_connection,
+        )
+        .await
+        .expect("guest connected");
+    registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            host_connection,
+            link_game("Host GBA", "gba", 'a'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            Some(InviteCode::parse("EF45-GH").expect("room invite")),
+        )
+        .await
+        .expect("host selected");
+    let selected = registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            guest_connection,
+            link_game("Guest GBA", "gba", 'b'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            None,
+        )
+        .await
+        .expect("guest selected");
+
+    (
+        registry,
+        invite,
+        host_connection,
+        guest_connection,
+        guest_join.resume_token,
+        selected,
+    )
 }
 
 fn v2_lobby_capabilities() -> LobbyClientCapabilities {

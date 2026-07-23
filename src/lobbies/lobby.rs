@@ -5,10 +5,14 @@
 
 use crate::auth::VerifiedLicense;
 use crate::lobbies::{
-    LobbyActivityKind, LobbyClientCapabilities, LobbyError, LobbyGameCandidate,
-    LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView, LobbyGameSelectionView,
-    LobbyPlayerOccupancy, LobbyPlayerRemoval, LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerStatus,
-    LobbyReturnOutcome, LobbyReturnRequest, LobbyReturnedView, LobbyServerCapabilities, LobbyView,
+    LOBBY_LINK_CABLE_CONTRACT_VERSION, LobbyActivityKind, LobbyClientCapabilities, LobbyError,
+    LobbyGameCandidate, LobbyGameLaunchView, LobbyGameReadinessStatus, LobbyGameReadinessView,
+    LobbyGameSelectionView, LobbyLinkCableClientCapabilities, LobbyLinkCableLaunchState,
+    LobbyLinkCablePlayerSlotView, LobbyLinkCableView, LobbyLinkProtocolFamily,
+    LobbyMultiplayerExtension, LobbyMultiplayerSessionKind, LobbyPlayerOccupancy,
+    LobbyPlayerRemoval, LobbyPlayerRole, LobbyPlayerSlot, LobbyPlayerStatus, LobbyReturnOutcome,
+    LobbyReturnRequest, LobbyReturnedView, LobbyServerCapabilities, LobbyView,
+    MAX_LINK_CABLE_LOBBY_PLAYERS,
 };
 use crate::rooms::{
     ConnectionId, InviteCode, PlayerIndex, ResumeTokenHash, RoomId, RoomVoiceState,
@@ -60,6 +64,7 @@ pub struct Lobby {
     selected_game: Option<LobbyGameSelectionView>,
     game_readiness: Vec<LobbyGameReadinessView>,
     pending_launch: Option<LobbyGameLaunchView>,
+    multiplayer_extension: Option<LobbyMultiplayerExtension>,
     last_return: Option<LobbyReturnedView>,
     pub(crate) voice: Option<RoomVoiceState>,
 }
@@ -144,6 +149,7 @@ impl Lobby {
             selected_game,
             game_readiness: Vec::new(),
             pending_launch: None,
+            multiplayer_extension: None,
             last_return: None,
             voice: None,
         }
@@ -161,6 +167,13 @@ impl Lobby {
     ) -> Result<PlayerIndex, LobbyError> {
         if self.status == LobbyStatus::Closed {
             return Err(LobbyError::LobbyClosed);
+        }
+        if self.multiplayer_extension.is_some() {
+            self.require_link_capability(&capabilities)?;
+            let is_existing_player = self.players.iter().any(|slot| slot.belongs_to(license));
+            if !is_existing_player && self.occupied_player_count() >= MAX_LINK_CABLE_LOBBY_PLAYERS {
+                return Err(LobbyError::LobbyFull);
+            }
         }
 
         if let Some(slot) = self
@@ -211,6 +224,9 @@ impl Lobby {
         }
         if request.lobby_epoch > self.lobby_epoch {
             return Err(LobbyError::StaleLobbyEpoch);
+        }
+        if self.multiplayer_extension.is_some() {
+            self.require_link_capability(&request.capabilities)?;
         }
         let resume_token_hash = hash_resume_token(request.resume_token);
         let slot = self
@@ -273,6 +289,7 @@ impl Lobby {
         }
         self.game_readiness
             .retain(|readiness| readiness.player_index != player_index.zero_based());
+        self.clear_link_player(player_index, now_ms);
         self.pending_launch = None;
         self.status = if self.selected_game.is_some() {
             LobbyStatus::GameSelected
@@ -326,6 +343,7 @@ impl Lobby {
         }
         self.game_readiness
             .retain(|readiness| readiness.player_index != target_player_index.zero_based());
+        self.clear_link_player(target_player_index, now_ms);
         self.status = if self.selected_game.is_some() {
             LobbyStatus::GameSelected
         } else {
@@ -348,6 +366,9 @@ impl Lobby {
         game: LobbyGameCandidate,
         now_ms: u128,
     ) -> Result<LobbyGameSelectionView, LobbyError> {
+        if self.multiplayer_extension.is_some() {
+            return Err(LobbyError::ControllerOperationUnavailableInLinkMode);
+        }
         let player_index = self.player_index_for_connection(connection_id)?;
         let slot = self
             .slot(player_index)
@@ -368,6 +389,186 @@ impl Lobby {
         Ok(proposal)
     }
 
+    /// Selects or replaces one player's local game in a link-cable lobby.
+    pub fn select_link_cable_game(
+        &mut self,
+        connection_id: ConnectionId,
+        game: LobbyGameCandidate,
+        protocol_family: LobbyLinkProtocolFamily,
+        room_invite_code: Option<InviteCode>,
+        now_ms: u128,
+    ) -> Result<LobbyLinkCablePlayerSlotView, LobbyError> {
+        validate_game_candidate(&game)?;
+        if link_protocol_family_for_game(&game) != Some(protocol_family) {
+            return Err(LobbyError::LinkCableFamilyMismatch);
+        }
+        let player_index = self.player_index_for_connection(connection_id)?;
+        if player_index.zero_based() >= MAX_LINK_CABLE_LOBBY_PLAYERS {
+            return Err(LobbyError::LobbyFull);
+        }
+        let (player_role, player_capabilities) = self
+            .slot(player_index)
+            .map(|player| (player.role, player.capabilities.clone()))
+            .ok_or(LobbyError::UnknownConnection)?;
+        let occupied_player_indexes = self
+            .players
+            .iter()
+            .filter(|player| player.subject_key.is_some())
+            .map(|player| player.player_index.zero_based())
+            .collect::<Vec<_>>();
+        if self.multiplayer_extension.is_some() {
+            self.require_link_capability(&player_capabilities)?;
+        } else {
+            require_standalone_link_capability(&player_capabilities, protocol_family)?;
+        }
+
+        let mut extension = match self.multiplayer_extension.clone() {
+            Some(extension) => {
+                let link = extension
+                    .link_cable
+                    .as_ref()
+                    .ok_or(LobbyError::ControllerOperationUnavailableInLinkMode)?;
+                if extension.session_kind != LobbyMultiplayerSessionKind::LinkCable
+                    || link.protocol_family != protocol_family
+                {
+                    return Err(LobbyError::LinkCableFamilyMismatch);
+                }
+                extension
+            }
+            None => {
+                if player_role != LobbyPlayerRole::Host {
+                    return Err(LobbyError::HostOnly);
+                }
+                if self.occupied_player_count() > MAX_LINK_CABLE_LOBBY_PLAYERS {
+                    return Err(LobbyError::LobbyFull);
+                }
+                self.require_all_occupied_players_support_link(protocol_family)?;
+                let room_invite_code = room_invite_code
+                    .as_ref()
+                    .ok_or(LobbyError::InvalidPayload)?
+                    .display();
+                LobbyMultiplayerExtension {
+                    session_kind: LobbyMultiplayerSessionKind::LinkCable,
+                    generation: 1,
+                    link_cable: Some(LobbyLinkCableView {
+                        protocol_family,
+                        max_players: MAX_LINK_CABLE_LOBBY_PLAYERS,
+                        room_invite_code: Some(room_invite_code),
+                        cable_epoch: None,
+                        players: initial_link_player_slots(now_ms),
+                    }),
+                }
+            }
+        };
+
+        let link = extension
+            .link_cable
+            .as_mut()
+            .ok_or(LobbyError::ControllerOperationUnavailableInLinkMode)?;
+        if let Some(room_invite_code) = room_invite_code {
+            let normalized_invite = room_invite_code.display();
+            if player_role == LobbyPlayerRole::Host {
+                if link.room_invite_code.as_deref() != Some(normalized_invite.as_str()) {
+                    extension.generation = extension
+                        .generation
+                        .checked_add(1)
+                        .ok_or(LobbyError::InvalidPayload)?;
+                    link.room_invite_code = Some(normalized_invite);
+                    link.cable_epoch = None;
+                    for slot in &mut link.players {
+                        if occupied_player_indexes.contains(&slot.player_index) {
+                            slot.selection_generation = slot
+                                .selection_generation
+                                .checked_add(1)
+                                .ok_or(LobbyError::InvalidPayload)?;
+                        }
+                        slot.launch_state = LobbyLinkCableLaunchState::NotLaunched;
+                        slot.updated_at_ms = now_ms;
+                    }
+                }
+            } else if link.room_invite_code.as_deref() != Some(normalized_invite.as_str()) {
+                return Err(LobbyError::InvalidPayload);
+            }
+        }
+
+        let selected_slot = link
+            .players
+            .iter_mut()
+            .find(|slot| slot.player_index == player_index.zero_based())
+            .ok_or(LobbyError::PlayerSlotUnavailable)?;
+        selected_slot.selection_generation = selected_slot
+            .selection_generation
+            .checked_add(1)
+            .ok_or(LobbyError::InvalidPayload)?;
+        selected_slot.selected_game = Some(game.clone());
+        selected_slot.launch_state = LobbyLinkCableLaunchState::NotLaunched;
+        selected_slot.updated_at_ms = now_ms;
+        let selected_slot = selected_slot.clone();
+
+        if player_role == LobbyPlayerRole::Host {
+            self.selected_game = Some(LobbyGameSelectionView::new(game, player_index, now_ms));
+        }
+        self.multiplayer_extension = Some(extension);
+        self.game_readiness.clear();
+        self.pending_launch = None;
+        self.last_return = None;
+        self.status = LobbyStatus::GameSelected;
+        self.bump_with_activity(now_ms);
+
+        Ok(selected_slot)
+    }
+
+    /// Updates one player's independent link-cable launch/runtime state.
+    pub fn set_link_cable_launch_state(
+        &mut self,
+        connection_id: ConnectionId,
+        selection_generation: u64,
+        state: LobbyLinkCableLaunchState,
+        room_invite_code: Option<InviteCode>,
+        now_ms: u128,
+    ) -> Result<LobbyLinkCablePlayerSlotView, LobbyError> {
+        let player_index = self.player_index_for_connection(connection_id)?;
+        self.slot(player_index)
+            .ok_or(LobbyError::UnknownConnection)?;
+        let extension = self
+            .multiplayer_extension
+            .as_mut()
+            .ok_or(LobbyError::ControllerOperationUnavailableInLinkMode)?;
+        if extension.session_kind != LobbyMultiplayerSessionKind::LinkCable {
+            return Err(LobbyError::ControllerOperationUnavailableInLinkMode);
+        }
+        let link = extension
+            .link_cable
+            .as_mut()
+            .ok_or(LobbyError::ControllerOperationUnavailableInLinkMode)?;
+        if let Some(room_invite_code) = room_invite_code {
+            let normalized_invite = room_invite_code.display();
+            if link.room_invite_code.as_deref() != Some(normalized_invite.as_str()) {
+                return Err(LobbyError::InvalidPayload);
+            }
+        }
+        if link.room_invite_code.is_none() {
+            return Err(LobbyError::GameLaunchNotReady);
+        }
+        let selected_slot = link
+            .players
+            .iter_mut()
+            .find(|slot| slot.player_index == player_index.zero_based())
+            .ok_or(LobbyError::PlayerSlotUnavailable)?;
+        if selected_slot.selection_generation != selection_generation {
+            return Err(LobbyError::StaleLinkCableSelection);
+        }
+        if selected_slot.selected_game.is_none() {
+            return Err(LobbyError::GameLaunchNotReady);
+        }
+        selected_slot.launch_state = state;
+        selected_slot.updated_at_ms = now_ms;
+        let selected_slot = selected_slot.clone();
+        self.bump_with_activity(now_ms);
+
+        Ok(selected_slot)
+    }
+
     /// Records this player's readiness for the selected game proposal.
     pub fn set_game_readiness(
         &mut self,
@@ -377,6 +578,9 @@ impl Lobby {
         detail: Option<String>,
         now_ms: u128,
     ) -> Result<LobbyGameReadinessView, LobbyError> {
+        if self.multiplayer_extension.is_some() {
+            return Err(LobbyError::ControllerOperationUnavailableInLinkMode);
+        }
         let player_index = self.player_index_for_connection(connection_id)?;
         self.require_selected_proposal(proposal_id)?;
         let readiness =
@@ -405,6 +609,9 @@ impl Lobby {
         proposal_id: uuid::Uuid,
         now_ms: u128,
     ) -> Result<LobbyGameLaunchView, LobbyError> {
+        if self.multiplayer_extension.is_some() {
+            return Err(LobbyError::ControllerOperationUnavailableInLinkMode);
+        }
         let player_index = self.player_index_for_connection(connection_id)?;
         let slot = self
             .slot(player_index)
@@ -434,6 +641,9 @@ impl Lobby {
         room_invite_code: InviteCode,
         now_ms: u128,
     ) -> Result<LobbyGameLaunchView, LobbyError> {
+        if self.multiplayer_extension.is_some() {
+            return Err(LobbyError::ControllerOperationUnavailableInLinkMode);
+        }
         let player_index = self.player_index_for_connection(connection_id)?;
         let slot = self
             .slot(player_index)
@@ -466,6 +676,9 @@ impl Lobby {
         proposal_id: uuid::Uuid,
         now_ms: u128,
     ) -> Result<bool, LobbyError> {
+        if self.multiplayer_extension.is_some() {
+            return Err(LobbyError::ControllerOperationUnavailableInLinkMode);
+        }
         let player_index = self.player_index_for_connection(connection_id)?;
         let Some(slot) = self.slot(player_index) else {
             return Err(LobbyError::UnknownConnection);
@@ -510,6 +723,9 @@ impl Lobby {
         &mut self,
         request: LobbyReturnRequest,
     ) -> Result<LobbyReturnOutcome, LobbyError> {
+        if self.multiplayer_extension.is_some() {
+            return Err(LobbyError::ControllerOperationUnavailableInLinkMode);
+        }
         self.player_index_for_connection(request.connection_id)?;
         self.require_selected_proposal(request.proposal_id)?;
         if request.lobby_epoch != self.lobby_epoch {
@@ -560,6 +776,16 @@ impl Lobby {
     /// Returns the current lobby epoch.
     pub fn lobby_epoch(&self) -> u64 {
         self.lobby_epoch
+    }
+
+    /// Returns whether this lobby resolved to per-player link-cable play.
+    pub(super) fn is_link_cable_mode(&self) -> bool {
+        self.multiplayer_extension
+            .as_ref()
+            .is_some_and(|extension| {
+                extension.session_kind == LobbyMultiplayerSessionKind::LinkCable
+                    && extension.link_cable.is_some()
+            })
     }
 
     /// Records transport-confirmed activity that should retain this lobby.
@@ -624,7 +850,10 @@ impl Lobby {
     }
 
     /// Returns the immutable lobby view for API clients.
-    pub fn view(&self, capabilities: LobbyServerCapabilities) -> LobbyView {
+    pub fn view(&self, mut capabilities: LobbyServerCapabilities) -> LobbyView {
+        if self.multiplayer_extension.is_some() {
+            capabilities.max_players = MAX_LINK_CABLE_LOBBY_PLAYERS;
+        }
         LobbyView {
             lobby_id: self.lobby_id,
             event_seq: self.event_seq,
@@ -641,6 +870,7 @@ impl Lobby {
             game_readiness: self.game_readiness.clone(),
             pending_launch: self.pending_launch.clone(),
             voice: self.voice.as_ref().map(RoomVoiceState::view),
+            multiplayer_extension: self.multiplayer_extension.clone(),
         }
     }
 
@@ -653,6 +883,91 @@ impl Lobby {
     fn bump_with_activity(&mut self, now_ms: u128) {
         self.bump(now_ms);
         self.mark_meaningful_activity(now_ms);
+    }
+
+    fn occupied_player_count(&self) -> u8 {
+        self.players
+            .iter()
+            .filter(|slot| slot.subject_key.is_some())
+            .count()
+            .try_into()
+            .unwrap_or(MAX_LOBBY_PLAYERS)
+    }
+
+    fn require_link_capability(
+        &self,
+        candidate: &LobbyClientCapabilities,
+    ) -> Result<(), LobbyError> {
+        let link = self
+            .multiplayer_extension
+            .as_ref()
+            .and_then(|extension| extension.link_cable.as_ref())
+            .ok_or(LobbyError::ControllerOperationUnavailableInLinkMode)?;
+        let host_capability = self
+            .players
+            .first()
+            .and_then(|slot| slot.capabilities.link_cable.as_ref())
+            .ok_or(LobbyError::LinkCableCapabilityRequired)?;
+        require_matching_link_capability(candidate, link.protocol_family, host_capability)
+    }
+
+    fn require_all_occupied_players_support_link(
+        &self,
+        protocol_family: LobbyLinkProtocolFamily,
+    ) -> Result<(), LobbyError> {
+        let host_capability = self
+            .players
+            .first()
+            .and_then(|slot| slot.capabilities.link_cable.as_ref())
+            .ok_or(LobbyError::LinkCableCapabilityRequired)?;
+        require_standalone_link_capability(&self.players[0].capabilities, protocol_family)?;
+        for player in self
+            .players
+            .iter()
+            .filter(|slot| slot.subject_key.is_some())
+        {
+            require_matching_link_capability(
+                &player.capabilities,
+                protocol_family,
+                host_capability,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn clear_link_player(&mut self, player_index: PlayerIndex, now_ms: u128) {
+        let occupied_player_indexes = self
+            .players
+            .iter()
+            .filter(|player| player.subject_key.is_some())
+            .map(|player| player.player_index.zero_based())
+            .collect::<Vec<_>>();
+        let Some(extension) = self.multiplayer_extension.as_mut() else {
+            return;
+        };
+        let Some(link) = extension.link_cable.as_mut() else {
+            return;
+        };
+
+        extension.generation = extension.generation.saturating_add(1);
+        link.room_invite_code = None;
+        link.cable_epoch = None;
+        for slot in &mut link.players {
+            if slot.player_index == player_index.zero_based() {
+                slot.selection_generation = slot.selection_generation.saturating_add(1);
+                slot.selected_game = None;
+                slot.launch_state = LobbyLinkCableLaunchState::Stopped;
+                slot.updated_at_ms = now_ms;
+            } else if occupied_player_indexes.contains(&slot.player_index) {
+                slot.selection_generation = slot.selection_generation.saturating_add(1);
+                slot.launch_state = if slot.selected_game.is_some() {
+                    LobbyLinkCableLaunchState::Interrupted
+                } else {
+                    LobbyLinkCableLaunchState::NotLaunched
+                };
+                slot.updated_at_ms = now_ms;
+            }
+        }
     }
 
     pub(super) fn mark_meaningful_activity(&mut self, now_ms: u128) {
@@ -732,6 +1047,69 @@ impl Lobby {
         (returned.proposal_id == proposal_id)
             .then(|| LobbyReturnOutcome::already_applied(returned.clone()))
     }
+}
+
+fn initial_link_player_slots(now_ms: u128) -> Vec<LobbyLinkCablePlayerSlotView> {
+    (0..MAX_LINK_CABLE_LOBBY_PLAYERS)
+        .map(|player_index| LobbyLinkCablePlayerSlotView {
+            player_index,
+            cable_slot: player_index,
+            selection_generation: 0,
+            selected_game: None,
+            launch_state: LobbyLinkCableLaunchState::NotLaunched,
+            updated_at_ms: now_ms,
+        })
+        .collect()
+}
+
+fn link_protocol_family_for_game(game: &LobbyGameCandidate) -> Option<LobbyLinkProtocolFamily> {
+    if !game.core_id.trim().eq_ignore_ascii_case("mgba") {
+        return None;
+    }
+    match game.system_id.trim().to_ascii_lowercase().as_str() {
+        "gb" | "gbc" => Some(LobbyLinkProtocolFamily::GbSerialV1),
+        "gba" => Some(LobbyLinkProtocolFamily::GbaMultiV1),
+        _ => None,
+    }
+}
+
+fn require_standalone_link_capability(
+    candidate: &LobbyClientCapabilities,
+    protocol_family: LobbyLinkProtocolFamily,
+) -> Result<(), LobbyError> {
+    let link = candidate
+        .link_cable
+        .as_ref()
+        .ok_or(LobbyError::LinkCableCapabilityRequired)?;
+    if link.contract_version != LOBBY_LINK_CABLE_CONTRACT_VERSION
+        || link.runtime_profile.trim().is_empty()
+        || link.core_build_id.trim().is_empty()
+        || !link.protocol_families.contains(&protocol_family)
+    {
+        return Err(LobbyError::LinkCableCapabilityRequired);
+    }
+    Ok(())
+}
+
+fn require_matching_link_capability(
+    candidate: &LobbyClientCapabilities,
+    protocol_family: LobbyLinkProtocolFamily,
+    required: &LobbyLinkCableClientCapabilities,
+) -> Result<(), LobbyError> {
+    require_standalone_link_capability(candidate, protocol_family)?;
+    let candidate = candidate
+        .link_cable
+        .as_ref()
+        .ok_or(LobbyError::LinkCableCapabilityRequired)?;
+    if required.contract_version != LOBBY_LINK_CABLE_CONTRACT_VERSION
+        || !required.protocol_families.contains(&protocol_family)
+        || candidate.contract_version != required.contract_version
+        || candidate.runtime_profile != required.runtime_profile
+        || candidate.core_build_id != required.core_build_id
+    {
+        return Err(LobbyError::LinkCableCapabilityRequired);
+    }
+    Ok(())
 }
 
 fn validate_game_candidate(game: &LobbyGameCandidate) -> Result<(), LobbyError> {

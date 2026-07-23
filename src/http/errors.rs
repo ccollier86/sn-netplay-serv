@@ -211,6 +211,26 @@ impl IntoResponse for HttpError {
                 "lobbyPlayersNotReady",
                 "Players are not ready yet.",
             ),
+            Self::Lobby(LobbyError::LinkCableCapabilityRequired) => (
+                StatusCode::CONFLICT,
+                "linkCableLobbyCapabilityRequired",
+                "Every player must support this Game Boy multiplayer mode.",
+            ),
+            Self::Lobby(LobbyError::LinkCableFamilyMismatch) => (
+                StatusCode::CONFLICT,
+                "linkCableLobbyFamilyMismatch",
+                "Choose a game from the Game Boy family selected for this lobby.",
+            ),
+            Self::Lobby(LobbyError::StaleLinkCableSelection) => (
+                StatusCode::CONFLICT,
+                "staleLinkCableSelection",
+                "Your selected link-cable game changed; refresh and retry.",
+            ),
+            Self::Lobby(LobbyError::ControllerOperationUnavailableInLinkMode) => (
+                StatusCode::CONFLICT,
+                "controllerOperationUnavailableInLinkMode",
+                "This lobby is using Game Boy link-cable multiplayer.",
+            ),
             Self::Lobby(LobbyError::GameLaunchNotReady) => (
                 StatusCode::CONFLICT,
                 "lobbyGameLaunchNotReady",

@@ -98,6 +98,22 @@ fn lobby_error_message(error: LobbyError) -> LobbyServerMessage {
         LobbyError::PlayersNotReady => {
             lobby_static_error("lobbyPlayersNotReady", "Players are not ready yet.")
         }
+        LobbyError::LinkCableCapabilityRequired => lobby_static_error(
+            "linkCableLobbyCapabilityRequired",
+            "Every player must support this Game Boy multiplayer mode.",
+        ),
+        LobbyError::LinkCableFamilyMismatch => lobby_static_error(
+            "linkCableLobbyFamilyMismatch",
+            "Choose a game from the Game Boy family selected for this lobby.",
+        ),
+        LobbyError::StaleLinkCableSelection => lobby_static_error(
+            "staleLinkCableSelection",
+            "Your selected link-cable game changed; refresh and retry.",
+        ),
+        LobbyError::ControllerOperationUnavailableInLinkMode => lobby_static_error(
+            "controllerOperationUnavailableInLinkMode",
+            "This lobby is using Game Boy link-cable multiplayer.",
+        ),
         LobbyError::GameLaunchNotReady => lobby_static_error(
             "lobbyGameLaunchNotReady",
             "Gameplay launch is not ready yet.",

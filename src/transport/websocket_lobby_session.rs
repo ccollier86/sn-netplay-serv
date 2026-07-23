@@ -5,11 +5,14 @@
 
 use crate::http::AppServices;
 use crate::lobbies::{
-    JoinLobbyParams, LobbyClientCapabilities, LobbyEvent, LobbyGameLaunchStatus, LobbyView,
-    MAX_LOBBY_PLAYERS, ReconnectLobbyPlayerRequest,
+    JoinLobbyParams, LOBBY_LINK_CABLE_CONTRACT_VERSION, LobbyClientCapabilities, LobbyError,
+    LobbyEvent, LobbyGameLaunchStatus, LobbyLinkProtocolFamily, LobbyView,
+    MAX_LINK_CABLE_LOBBY_PLAYERS, MAX_LOBBY_PLAYERS, ReconnectLobbyPlayerRequest,
 };
-use crate::protocol::{LobbyClientMessage, LobbyServerMessage};
-use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
+use crate::protocol::{
+    LobbyClientMessage, LobbyServerMessage, NetplaySessionDescriptor, NetplaySessionMode,
+};
+use crate::rooms::{ConnectionId, InviteCode, PlayerIndex, RoomStatus};
 use crate::transport::WebSocketLobbyJoinRequest;
 use crate::transport::websocket_lobby_outbound::{
     LobbySocketSender, send_lobby_error, send_lobby_server_message, send_lobby_static_error,
@@ -235,6 +238,95 @@ async fn handle_lobby_message(
                 services
                     .lobbies
                     .select_lobby_game(invite_code.clone(), connection_id, game)
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
+        LobbyClientMessage::SelectLinkCableGame {
+            lobby_epoch,
+            game,
+            protocol_family,
+            room_invite_code,
+        } => {
+            apply_lobby_result(
+                sender,
+                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
+            )
+            .await?;
+            if !services.link_cable_rollout.is_enabled() {
+                return send_lobby_static_error(
+                    sender,
+                    "linkCableUnavailable",
+                    "Game Boy multiplayer is not available on this server.",
+                )
+                .await;
+            }
+            let room_invite_code = match room_invite_code.map(InviteCode::parse).transpose() {
+                Ok(room_invite_code) => room_invite_code,
+                Err(_) => {
+                    return send_lobby_error(sender, crate::lobbies::LobbyError::InvalidPayload)
+                        .await;
+                }
+            };
+            if let Some(room_invite_code) = room_invite_code.as_ref() {
+                apply_lobby_result(
+                    sender,
+                    validate_link_cable_room_invite(
+                        services,
+                        invite_code,
+                        room_invite_code,
+                        protocol_family,
+                    )
+                    .await,
+                )
+                .await?;
+            }
+            apply_lobby_result(
+                sender,
+                services
+                    .lobbies
+                    .select_lobby_link_cable_game(
+                        invite_code.clone(),
+                        connection_id,
+                        game,
+                        protocol_family,
+                        room_invite_code,
+                    )
+                    .await
+                    .map(|_| ()),
+            )
+            .await
+        }
+        LobbyClientMessage::SetLinkCableLaunchState {
+            lobby_epoch,
+            selection_generation,
+            state,
+            room_invite_code,
+        } => {
+            apply_lobby_result(
+                sender,
+                validate_lobby_epoch(services, invite_code, lobby_epoch).await,
+            )
+            .await?;
+            let room_invite_code = match room_invite_code.map(InviteCode::parse).transpose() {
+                Ok(room_invite_code) => room_invite_code,
+                Err(_) => {
+                    return send_lobby_error(sender, crate::lobbies::LobbyError::InvalidPayload)
+                        .await;
+                }
+            };
+            apply_lobby_result(
+                sender,
+                services
+                    .lobbies
+                    .set_lobby_link_cable_launch_state(
+                        invite_code.clone(),
+                        connection_id,
+                        selection_generation,
+                        state,
+                        room_invite_code,
+                    )
                     .await
                     .map(|_| ()),
             )
@@ -562,6 +654,76 @@ async fn validate_lobby_epoch(
     Ok(())
 }
 
+async fn validate_link_cable_room_invite(
+    services: &AppServices,
+    lobby_invite_code: &InviteCode,
+    room_invite_code: &InviteCode,
+    protocol_family: LobbyLinkProtocolFamily,
+) -> Result<(), LobbyError> {
+    let lobby = services
+        .lobbies
+        .lobby_view(lobby_invite_code.clone())
+        .await?;
+    let host_link_capability = lobby
+        .players
+        .first()
+        .and_then(|player| player.capabilities.link_cable.as_ref())
+        .filter(|capability| {
+            capability.contract_version == LOBBY_LINK_CABLE_CONTRACT_VERSION
+                && capability.protocol_families.contains(&protocol_family)
+        })
+        .ok_or(LobbyError::LinkCableCapabilityRequired)?;
+    let room = services
+        .rooms
+        .room_view(room_invite_code.clone())
+        .await
+        .map_err(|_| LobbyError::InvalidPayload)?;
+
+    validate_link_cable_room_descriptor(
+        room.status,
+        room.max_players,
+        &room.session,
+        protocol_family,
+        &host_link_capability.runtime_profile,
+    )
+}
+
+fn validate_link_cable_room_descriptor(
+    room_status: RoomStatus,
+    room_max_players: u8,
+    session: &NetplaySessionDescriptor,
+    protocol_family: LobbyLinkProtocolFamily,
+    expected_runtime_profile: &str,
+) -> Result<(), LobbyError> {
+    let (expected_system_family, expected_link_protocol) = match protocol_family {
+        LobbyLinkProtocolFamily::GbSerialV1 => ("gb", "gb-serial-v1"),
+        LobbyLinkProtocolFamily::GbaMultiV1 => ("gba", "gba-sio-multi-v1"),
+    };
+    let game_system_matches = match protocol_family {
+        LobbyLinkProtocolFamily::GbSerialV1 => {
+            matches!(session.game.system_id.as_str(), "gb" | "gbc")
+        }
+        LobbyLinkProtocolFamily::GbaMultiV1 => session.game.system_id == "gba",
+    };
+    let valid = room_status == RoomStatus::WaitingForGuest
+        && room_max_players == MAX_LINK_CABLE_LOBBY_PLAYERS
+        && session.mode == NetplaySessionMode::LinkCable
+        && session.core.core_id == "mgba"
+        && game_system_matches
+        && session.link.as_ref().is_some_and(|link| {
+            link.max_players == MAX_LINK_CABLE_LOBBY_PLAYERS
+                && link.system_family == expected_system_family
+                && link.link_protocol == expected_link_protocol
+                && link.runtime_profile == expected_runtime_profile
+        });
+
+    if valid {
+        Ok(())
+    } else {
+        Err(LobbyError::InvalidPayload)
+    }
+}
+
 async fn apply_lobby_result(
     sender: &mut LobbySocketSender,
     result: Result<(), crate::lobbies::LobbyError>,
@@ -703,6 +865,9 @@ fn lobby_view_for_client(
     mut lobby: LobbyView,
     capabilities: &LobbyClientCapabilities,
 ) -> LobbyView {
+    if capabilities.link_cable.is_none() {
+        lobby.multiplayer_extension = None;
+    }
     if !capabilities.supports_lobby_gameplay_started
         && let Some(launch) = lobby.pending_launch.as_mut()
     {
@@ -720,10 +885,91 @@ fn lobby_view_for_client(
 mod tests {
     use super::*;
     use crate::lobbies::{
-        LobbyGameLaunchView, LobbyServerCapabilities, LobbyStatus, LobbyVisibility,
-        MAX_LOBBY_PLAYERS,
+        LobbyGameLaunchView, LobbyLinkCableClientCapabilities, LobbyLinkCableLaunchState,
+        LobbyLinkCablePlayerSlotView, LobbyLinkCableView, LobbyLinkProtocolFamily,
+        LobbyMultiplayerExtension, LobbyMultiplayerSessionKind, LobbyServerCapabilities,
+        LobbyStatus, LobbyVisibility, MAX_LOBBY_PLAYERS,
     };
     use crate::rooms::{PlayerIndex, RoomId};
+    use serde_json::json;
+
+    #[test]
+    fn link_lobby_room_descriptor_requires_open_exact_mgba_provider_mapping() {
+        let gba = link_session("gba", "gba", "gba-sio-multi-v1");
+        validate_link_cable_room_descriptor(
+            RoomStatus::WaitingForGuest,
+            2,
+            &gba,
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            "mgba-link-runtime-v1",
+        )
+        .expect("exact GBA room accepted");
+
+        let gbc = link_session("gbc", "gb", "gb-serial-v1");
+        validate_link_cable_room_descriptor(
+            RoomStatus::WaitingForGuest,
+            2,
+            &gbc,
+            LobbyLinkProtocolFamily::GbSerialV1,
+            "mgba-link-runtime-v1",
+        )
+        .expect("exact GB/GBC room accepted");
+
+        assert!(
+            validate_link_cable_room_descriptor(
+                RoomStatus::Playing,
+                2,
+                &gba,
+                LobbyLinkProtocolFamily::GbaMultiV1,
+                "mgba-link-runtime-v1",
+            )
+            .is_err()
+        );
+        assert!(
+            validate_link_cable_room_descriptor(
+                RoomStatus::WaitingForGuest,
+                4,
+                &gba,
+                LobbyLinkProtocolFamily::GbaMultiV1,
+                "mgba-link-runtime-v1",
+            )
+            .is_err()
+        );
+        assert!(
+            validate_link_cable_room_descriptor(
+                RoomStatus::WaitingForGuest,
+                2,
+                &gba,
+                LobbyLinkProtocolFamily::GbaMultiV1,
+                "other-runtime",
+            )
+            .is_err()
+        );
+        assert!(
+            validate_link_cable_room_descriptor(
+                RoomStatus::WaitingForGuest,
+                2,
+                &gba,
+                LobbyLinkProtocolFamily::GbSerialV1,
+                "mgba-link-runtime-v1",
+            )
+            .is_err()
+        );
+
+        let mut controller = gba.clone();
+        controller.mode = NetplaySessionMode::ControllerNetplay;
+        controller.link = None;
+        assert!(
+            validate_link_cable_room_descriptor(
+                RoomStatus::WaitingForGuest,
+                2,
+                &controller,
+                LobbyLinkProtocolFamily::GbaMultiV1,
+                "mgba-link-runtime-v1",
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn lobby_view_for_legacy_client_downgrades_playing_launch_status() {
@@ -745,12 +991,53 @@ mod tests {
                 supports_lobby_returned_event: true,
                 supports_lobby_gameplay_started: true,
                 supports_lobby_player_removed_event: true,
+                link_cable: None,
             },
         );
         let modern_launch = modern.pending_launch.expect("modern launch");
         assert_eq!(modern_launch.status, LobbyGameLaunchStatus::Playing);
         assert_eq!(modern_launch.gameplay_started_at_ms, Some(150));
         assert_eq!(modern_launch.started_player_indexes, vec![0, 1]);
+    }
+
+    #[test]
+    fn lobby_view_only_exposes_link_extension_to_negotiated_clients() {
+        let mut view = lobby_view_with_playing_launch();
+        view.multiplayer_extension = Some(LobbyMultiplayerExtension {
+            session_kind: LobbyMultiplayerSessionKind::LinkCable,
+            generation: 1,
+            link_cable: Some(LobbyLinkCableView {
+                protocol_family: LobbyLinkProtocolFamily::GbaMultiV1,
+                max_players: 2,
+                room_invite_code: Some("EF45-GH".to_string()),
+                cable_epoch: None,
+                players: vec![LobbyLinkCablePlayerSlotView {
+                    player_index: 0,
+                    cable_slot: 0,
+                    selection_generation: 1,
+                    selected_game: None,
+                    launch_state: LobbyLinkCableLaunchState::NotLaunched,
+                    updated_at_ms: 100,
+                }],
+            }),
+        });
+
+        let legacy = lobby_view_for_client(view.clone(), &LobbyClientCapabilities::default());
+        assert!(legacy.multiplayer_extension.is_none());
+
+        let capable = lobby_view_for_client(
+            view,
+            &LobbyClientCapabilities {
+                link_cable: Some(LobbyLinkCableClientCapabilities {
+                    contract_version: 1,
+                    runtime_profile: "mgba-link-runtime-v1".to_string(),
+                    core_build_id: "android-mgba-link-v1".to_string(),
+                    protocol_families: vec![LobbyLinkProtocolFamily::GbaMultiV1],
+                }),
+                ..LobbyClientCapabilities::default()
+            },
+        );
+        assert!(capable.multiplayer_extension.is_some());
     }
 
     fn lobby_view_with_playing_launch() -> LobbyView {
@@ -779,6 +1066,34 @@ mod tests {
                 started_player_indexes: vec![0, 1],
             }),
             voice: None,
+            multiplayer_extension: None,
         }
+    }
+
+    fn link_session(
+        game_system: &str,
+        system_family: &str,
+        link_protocol: &str,
+    ) -> NetplaySessionDescriptor {
+        serde_json::from_value(json!({
+            "mode": "linkCable",
+            "game": {
+                "systemId": game_system,
+                "title": "Link Game",
+                "romSha256": "a".repeat(64),
+                "contentKey": "link-game"
+            },
+            "core": {
+                "coreId": "mgba"
+            },
+            "link": {
+                "systemFamily": system_family,
+                "linkProtocol": link_protocol,
+                "runtimeProfile": "mgba-link-runtime-v1",
+                "maxPlayers": 2,
+                "transport": "relay"
+            }
+        }))
+        .expect("link session descriptor")
     }
 }

@@ -50,6 +50,18 @@ pub enum LobbyError {
     /// One or more connected players are not ready to launch.
     #[error("lobby players are not ready")]
     PlayersNotReady,
+    /// Client did not negotiate the link-cable lobby contract required by this lobby.
+    #[error("link-cable lobby capability is required")]
+    LinkCableCapabilityRequired,
+    /// Selected game does not belong to the link family resolved for this lobby.
+    #[error("link-cable game family does not match the lobby")]
+    LinkCableFamilyMismatch,
+    /// Link-cable selection changed before the requested launch-state update.
+    #[error("link-cable game selection is stale")]
+    StaleLinkCableSelection,
+    /// A controller-only lobby operation was attempted after link mode resolved.
+    #[error("controller lobby operation is unavailable in link-cable mode")]
+    ControllerOperationUnavailableInLinkMode,
     /// Gameplay cannot be marked active before the room handoff is ready.
     #[error("lobby game launch is not ready")]
     GameLaunchNotReady,

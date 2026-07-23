@@ -47,6 +47,9 @@ impl Lobby {
         mut state: LobbyStartupStateTransferMetadata,
         limits: LobbyStartupStateRelayLimits,
     ) -> Result<LobbyStartupStateRelayTransferIntent, LobbyError> {
+        if self.is_link_cable_mode() {
+            return Err(LobbyError::ControllerOperationUnavailableInLinkMode);
+        }
         let sender_player_index = self.player_index_for_connection(connection_id)?;
         let sender = self
             .slot(sender_player_index)

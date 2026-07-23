@@ -119,6 +119,7 @@ fn capabilities() -> LobbyClientCapabilities {
         supports_lobby_gameplay_started: true,
         supports_lobby_player_removed_event: true,
         supports_temporary_session_rom_relay: true,
+        link_cable: None,
     }
 }
 

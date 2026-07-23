@@ -7,9 +7,10 @@ use crate::auth::VerifiedLicense;
 use crate::lobbies::{
     CreateLobbyParams, JoinLobbyParams, LobbyActivityKind, LobbyChatMessageView, LobbyDebugEvent,
     LobbyError, LobbyEvent, LobbyGameCandidate, LobbyGameReadinessStatus, LobbyJoin,
-    LobbyRegistrySnapshot, LobbyReturnReason, LobbyRomRelayLimits, LobbyRomRelayTransferIntent,
-    LobbyStartupStateRelayLimits, LobbyStartupStateRelayTransferIntent, LobbyView,
-    LobbyVoiceTokenRefresh, PublicLobbySummary, ReconnectLobbyPlayerRequest,
+    LobbyLinkCableLaunchState, LobbyLinkProtocolFamily, LobbyRegistrySnapshot, LobbyReturnReason,
+    LobbyRomRelayLimits, LobbyRomRelayTransferIntent, LobbyStartupStateRelayLimits,
+    LobbyStartupStateRelayTransferIntent, LobbyView, LobbyVoiceTokenRefresh, PublicLobbySummary,
+    ReconnectLobbyPlayerRequest,
 };
 use crate::protocol::{LobbyFileRelayGrantPair, LobbyStartupStateTransferMetadata};
 use crate::rooms::{ConnectionId, InviteCode, PlayerIndex};
@@ -89,6 +90,26 @@ pub trait LobbyRegistry: Send + Sync {
         invite_code: InviteCode,
         connection_id: ConnectionId,
         game: LobbyGameCandidate,
+    ) -> Result<LobbyView, LobbyError>;
+
+    /// Selects one player's compatible local game for a link-cable lobby.
+    async fn select_lobby_link_cable_game(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        game: LobbyGameCandidate,
+        protocol_family: LobbyLinkProtocolFamily,
+        room_invite_code: Option<InviteCode>,
+    ) -> Result<LobbyView, LobbyError>;
+
+    /// Updates one player's independent link-cable launch/runtime state.
+    async fn set_lobby_link_cable_launch_state(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+        selection_generation: u64,
+        state: LobbyLinkCableLaunchState,
+        room_invite_code: Option<InviteCode>,
     ) -> Result<LobbyView, LobbyError>;
 
     /// Records local readiness for the selected game proposal.

@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::lobbies::LobbyLinkCableClientCapabilities;
+
 /// Capabilities one connected client reports for lobby behavior.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +32,9 @@ pub struct LobbyClientCapabilities {
     /// Client can receive the terminal `playerRemoved` event.
     #[serde(default)]
     pub supports_lobby_player_removed_event: bool,
+    /// Optional normal-lobby link-cable contract supported by this client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_cable: Option<LobbyLinkCableClientCapabilities>,
 }
 
 impl LobbyClientCapabilities {
@@ -43,6 +48,7 @@ impl LobbyClientCapabilities {
             supports_lobby_returned_event: false,
             supports_lobby_gameplay_started: false,
             supports_lobby_player_removed_event: false,
+            link_cable: None,
         }
     }
 }

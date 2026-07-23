@@ -4,8 +4,8 @@
 //! resume tokens or internal authenticated subject keys.
 
 use crate::lobbies::{
-    LobbyGameLaunchView, LobbyGameReadinessView, LobbyGameSelectionView, LobbyPlayerSlotView,
-    LobbyPlayerStatus, LobbyServerCapabilities, LobbyStatus, LobbyVisibility,
+    LobbyGameLaunchView, LobbyGameReadinessView, LobbyGameSelectionView, LobbyMultiplayerExtension,
+    LobbyPlayerSlotView, LobbyPlayerStatus, LobbyServerCapabilities, LobbyStatus, LobbyVisibility,
 };
 use crate::rooms::{RoomId, RoomVoiceView};
 use serde::Serialize;
@@ -50,6 +50,9 @@ pub struct LobbyView {
     /// Lobby-scoped voice room metadata safe to broadcast.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voice: Option<RoomVoiceView>,
+    /// Capability-gated specialized multiplayer state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multiplayer_extension: Option<LobbyMultiplayerExtension>,
 }
 
 /// Publicly listable lobby summary. This deliberately exposes less than `LobbyView`.
