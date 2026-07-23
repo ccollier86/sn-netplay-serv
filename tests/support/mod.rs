@@ -9,7 +9,8 @@ use sb_netplay_serv::auth::{
 };
 use sb_netplay_serv::file_relay::DisabledFileRelayBroker;
 use sb_netplay_serv::http::{
-    AdminAuthorizer, AppServiceDependencies, AppServices, FileRelayPolicy, build_router,
+    AdminAuthorizer, AppServiceDependencies, AppServices, FileRelayPolicy, LinkCableRolloutPolicy,
+    build_router,
 };
 use sb_netplay_serv::lobbies::InMemoryLobbyRegistry;
 use sb_netplay_serv::observability::{InMemoryMetrics, MetricsRecorder, MetricsSnapshot};
@@ -562,6 +563,7 @@ fn test_services(
         })),
         metrics,
         protocol_rollout: sb_netplay_serv::protocol::NetplayProtocolRolloutPolicy::default(),
+        link_cable_rollout: LinkCableRolloutPolicy::new(true),
         admin_authorizer: AdminAuthorizer::new(None),
         trust_proxy_headers: false,
     })

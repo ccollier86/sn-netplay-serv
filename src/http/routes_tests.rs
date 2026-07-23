@@ -8,7 +8,7 @@ use crate::auth::{
     AuthError, ClientKind, LicenseAuthority, ProtectedClientAuthProof, VerifiedLicense,
 };
 use crate::file_relay::DisabledFileRelayBroker;
-use crate::http::services::{AppServices, FileRelayPolicy};
+use crate::http::services::{AppServices, FileRelayPolicy, LinkCableRolloutPolicy};
 use crate::http::{AdminAuthorizer, AppServiceDependencies};
 use crate::limits::MAX_CREATE_ROOM_BODY_BYTES;
 use crate::lobbies::InMemoryLobbyRegistry;
@@ -411,7 +411,48 @@ async fn join_lobby_assigns_second_player_and_status_hides_resume_token() {
 }
 
 #[tokio::test]
-async fn create_room_accepts_link_cable_descriptor() {
+async fn create_room_accepts_link_cable_descriptor_when_provider_rollout_is_enabled() {
+    let mut body = create_room_value();
+    body["session"]["mode"] = json!("linkCable");
+    body["session"]["link"] = json!({
+        "systemFamily": "gba",
+        "linkProtocol": "gba-link-cable-v1",
+        "runtimeProfile": "mgba-link-runtime-v1",
+        "maxPlayers": 2,
+        "transport": "relay"
+    });
+    body["session"]["game"]["systemId"] = json!("gba");
+    body["session"]["core"]["coreId"] = json!("mgba");
+
+    let response = link_cable_app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/rooms")
+                .header("authorization", "Bearer valid")
+                .header("x-client-kind", "android")
+                .header("x-installation-id", "android-install-1")
+                .body(Body::from(body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let value = serde_json::from_slice::<Value>(&body).expect("json");
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value["room"]["session"]["mode"], "linkCable");
+    assert_eq!(
+        value["room"]["session"]["link"]["runtimeProfile"],
+        "mgba-link-runtime-v1"
+    );
+}
+
+#[tokio::test]
+async fn create_room_rejects_link_cable_descriptor_when_provider_rollout_is_disabled() {
     let mut body = create_room_value();
     body["session"]["mode"] = json!("linkCable");
     body["session"]["link"] = json!({
@@ -443,12 +484,8 @@ async fn create_room_accepts_link_cable_descriptor() {
         .expect("body");
     let value = serde_json::from_slice::<Value>(&body).expect("json");
 
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(value["room"]["session"]["mode"], "linkCable");
-    assert_eq!(
-        value["room"]["session"]["link"]["runtimeProfile"],
-        "mgba-link-runtime-v1"
-    );
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(value["code"], "linkCableUnavailable");
 }
 
 #[tokio::test]
@@ -630,6 +667,17 @@ fn app() -> axum::Router {
 }
 
 fn limited_app(create_room_per_minute: u32) -> axum::Router {
+    app_with_rollout(create_room_per_minute, LinkCableRolloutPolicy::default())
+}
+
+fn link_cable_app() -> axum::Router {
+    app_with_rollout(12, LinkCableRolloutPolicy::new(true))
+}
+
+fn app_with_rollout(
+    create_room_per_minute: u32,
+    link_cable_rollout: LinkCableRolloutPolicy,
+) -> axum::Router {
     let services = AppServices::new(AppServiceDependencies {
         license_authority: Arc::new(FakeLicenseAuthority),
         rooms: Arc::new(InMemoryRoomRegistry::new(Arc::new(
@@ -653,6 +701,7 @@ fn limited_app(create_room_per_minute: u32) -> axum::Router {
         })),
         metrics: Arc::new(InMemoryMetrics::new()),
         protocol_rollout: crate::protocol::NetplayProtocolRolloutPolicy::default(),
+        link_cable_rollout,
         admin_authorizer: AdminAuthorizer::new(Some("admin-token".to_string())),
         trust_proxy_headers: false,
     });

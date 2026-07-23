@@ -4,8 +4,8 @@
 //! room lifecycle model.
 
 use crate::protocol::{
-    InputFrame, InputFrameLimits, NetplaySessionMode, ScheduledSessionStart, SessionPauseReason,
-    SessionPauseState, SessionPauseView,
+    InputFrame, InputFrameLimits, ScheduledSessionStart, SessionPauseReason, SessionPauseState,
+    SessionPauseView,
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, NetplayRoom, PlayerIndex, PlayerRuntimeState, PlayerStatus,
@@ -51,7 +51,7 @@ impl NetplayRoom {
         inputs: &[InputFrameCursor],
         limits: InputFrameLimits,
     ) -> Result<Vec<InputFrameAcceptance>, RoomError> {
-        if self.session.mode != NetplaySessionMode::ControllerNetplay {
+        if !self.is_controller_netplay() {
             return Err(RoomError::NotPlaying);
         }
 
@@ -110,6 +110,10 @@ impl NetplayRoom {
         reason: SessionPauseReason,
         local_frame: u64,
     ) -> Result<SessionPauseView, RoomError> {
+        if !self.is_controller_netplay() {
+            return Err(RoomError::NotPlaying);
+        }
+
         if self.status != RoomStatus::Playing && self.status != RoomStatus::Paused {
             return Err(RoomError::NotPlaying);
         }
@@ -196,6 +200,10 @@ impl NetplayRoom {
         paused_at_frame: u64,
         server_time_ms: Option<u64>,
     ) -> Result<SessionPauseReachedOutcome, RoomError> {
+        if !self.is_controller_netplay() {
+            return Err(RoomError::NotPlaying);
+        }
+
         let strict_resume = self.uses_strict_controller_input();
         let player_index = self
             .player_index_for_connection(connection_id)
@@ -335,6 +343,10 @@ impl NetplayRoom {
         sequence: u64,
         server_time_ms: Option<u64>,
     ) -> Result<SessionResumeOutcome, RoomError> {
+        if !self.is_controller_netplay() {
+            return Err(RoomError::NotPlaying);
+        }
+
         let strict_resume = self.uses_strict_controller_input();
         let player_index = self
             .player_index_for_connection(connection_id)

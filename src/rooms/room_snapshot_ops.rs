@@ -4,8 +4,8 @@
 //! the main room model stays focused on lifecycle and slot coordination.
 
 use crate::protocol::{
-    NetplaySessionMode, SnapshotChunk, SnapshotFileRelayGrant, SnapshotFileRelayGrantPair,
-    SnapshotLimits, SnapshotManifest,
+    SnapshotChunk, SnapshotFileRelayGrant, SnapshotFileRelayGrantPair, SnapshotLimits,
+    SnapshotManifest,
 };
 use crate::rooms::{
     ConnectionId, NetplayRoom, PlayerRole, RoomError, RoomStatus, SnapshotFileRelayTransferIntent,
@@ -215,7 +215,7 @@ impl NetplayRoom {
         &self,
         connection_id: ConnectionId,
     ) -> Result<(), RoomError> {
-        if self.session.mode != NetplaySessionMode::ControllerNetplay {
+        if !self.is_controller_netplay() {
             return Err(RoomError::RoomNotReady);
         }
 

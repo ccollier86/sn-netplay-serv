@@ -6,12 +6,13 @@
 use crate::auth::LicenseAuthority;
 use crate::file_relay::FileRelayBroker;
 use crate::http::AdminAuthorizer;
+use crate::http::errors::HttpError;
 use crate::lobbies::LobbyRegistry;
 use crate::observability::MetricsRecorder;
 use crate::protocol::NetplayProtocolRolloutPolicy;
 use crate::protocol::{
-    NetplayClientKind, NetplayRoomMode, NetplaySessionDescriptor, RomRelayCapability,
-    RomRelayCapabilityReason, RomRelayIntent,
+    NetplayClientKind, NetplayRoomMode, NetplaySessionDescriptor, NetplaySessionMode,
+    RomRelayCapability, RomRelayCapabilityReason, RomRelayIntent,
 };
 use crate::rate_limit::RateLimiter;
 use crate::rooms::RoomRegistry;
@@ -91,6 +92,39 @@ impl FileRelayPolicy {
     }
 }
 
+/// Default-off availability policy for the mGBA link-cable session provider.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LinkCableRolloutPolicy {
+    enabled: bool,
+}
+
+impl LinkCableRolloutPolicy {
+    /// Creates a provider rollout policy from server configuration.
+    pub const fn new(enabled: bool) -> Self {
+        Self { enabled }
+    }
+
+    /// Returns whether the provider is available for new sessions.
+    pub const fn is_enabled(self) -> bool {
+        self.enabled
+    }
+
+    /// Rejects link-cable sessions before they reach the room provider.
+    pub(crate) fn validate_provider_availability(
+        self,
+        session: &NetplaySessionDescriptor,
+    ) -> Result<(), HttpError> {
+        if session.mode == NetplaySessionMode::LinkCable && !self.enabled {
+            return Err(HttpError::InvalidRequest {
+                code: "linkCableUnavailable",
+                message: "Link-cable multiplayer is not available on this server.",
+            });
+        }
+
+        Ok(())
+    }
+}
+
 /// Dependencies required by HTTP routes.
 #[derive(Clone)]
 pub struct AppServices {
@@ -110,6 +144,8 @@ pub struct AppServices {
     pub metrics: Arc<dyn MetricsRecorder>,
     /// Platform-scoped netplay protocol rollout policy.
     pub protocol_rollout: NetplayProtocolRolloutPolicy,
+    /// Default-off mGBA link-cable provider rollout policy.
+    pub link_cable_rollout: LinkCableRolloutPolicy,
     /// Internal endpoint authorizer.
     pub admin_authorizer: AdminAuthorizer,
     /// Whether proxy forwarding headers are trusted for client identity.
@@ -134,6 +170,8 @@ pub struct AppServiceDependencies {
     pub metrics: Arc<dyn MetricsRecorder>,
     /// Platform-scoped netplay protocol rollout policy.
     pub protocol_rollout: NetplayProtocolRolloutPolicy,
+    /// Default-off mGBA link-cable provider rollout policy.
+    pub link_cable_rollout: LinkCableRolloutPolicy,
     /// Internal endpoint authorizer.
     pub admin_authorizer: AdminAuthorizer,
     /// Whether proxy forwarding headers are trusted for client identity.
@@ -152,6 +190,7 @@ impl AppServices {
             rate_limiter: dependencies.rate_limiter,
             metrics: dependencies.metrics,
             protocol_rollout: dependencies.protocol_rollout,
+            link_cable_rollout: dependencies.link_cable_rollout,
             admin_authorizer: dependencies.admin_authorizer,
             trust_proxy_headers: dependencies.trust_proxy_headers,
         }

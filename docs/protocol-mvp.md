@@ -106,8 +106,14 @@ Controller rooms require exact `romSha256` and compatible `stateFormat`. Host
 input delay is part of the room descriptor under `controller.inputDelayFrames`
 and must be used by guests instead of local defaults.
 
-Link-cable rooms send `mode: "linkCable"` and a platform-neutral `link`
-descriptor:
+> **Provisional and disabled:** the `mode: "linkCable"` JSON examples in this
+> document describe pre-foundation scaffolding only. They are not the final
+> SBLK contract and must not be enabled or extended in place. New link rooms
+> are rejected by default through `SB_NETPLAY_LINK_CABLE_ENABLED=false`. See
+> `docs/mgba-link-provider-foundation.md`.
+
+Provisional link-cable rooms send `mode: "linkCable"` and a platform-neutral
+`link` descriptor:
 
 ```json
 {
@@ -466,7 +472,7 @@ Validation rules:
 - Input is only accepted while the room is `playing` or inside the coordinated
   pause input-delay window.
 
-Link-cable packet:
+Provisional link-cable packet (not the final SBLK data plane):
 
 ```json
 {

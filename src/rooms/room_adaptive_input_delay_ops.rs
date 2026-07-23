@@ -35,6 +35,10 @@ impl NetplayRoom {
 
     /// Applies the relay-selected startup delay before gameplay starts.
     pub(super) fn apply_initial_adaptive_input_delay(&mut self, now: Instant) {
+        if !self.is_controller_netplay() {
+            return;
+        }
+
         let Some(decision) = self.input_delay_policy.initial_decision(
             self.session.controller.input_delay_frames,
             &self.players,

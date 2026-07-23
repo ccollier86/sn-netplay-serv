@@ -9,8 +9,25 @@ use std::time::{Duration, Instant};
 
 const COOLIFY_COMPOSE: &str = include_str!("../docker-compose.coolify.yml");
 const COOLIFY_ENV_EXAMPLE: &str = include_str!("../coolify.env.example");
+const LOCAL_ENV_EXAMPLE: &str = include_str!("../.env.example");
+const SERVER_CONFIG_SOURCE: &str = include_str!("../src/config.rs");
 const FILE_RELAY_CONFIG_SOURCE: &str = include_str!("../src/file_relay/config.rs");
 const COMPOSE_RENDER_TIMEOUT: Duration = Duration::from_secs(15);
+
+#[test]
+fn coolify_deployment_passes_through_link_cable_rollout_configuration() {
+    const NAME: &str = "SB_NETPLAY_LINK_CABLE_ENABLED";
+
+    assert!(SERVER_CONFIG_SOURCE.contains(&format!("\"{NAME}\"")));
+    assert!(
+        COOLIFY_COMPOSE
+            .lines()
+            .any(|line| line.trim() == format!("- {NAME}"))
+    );
+    for example in [COOLIFY_ENV_EXAMPLE, LOCAL_ENV_EXAMPLE] {
+        assert!(example.lines().any(|line| line == format!("{NAME}=false")));
+    }
+}
 
 #[test]
 fn coolify_deployment_passes_through_every_file_relay_configuration_variable() {

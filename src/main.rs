@@ -11,7 +11,8 @@ use sb_netplay_serv::file_relay::{
     DisabledFileRelayBroker, FileRelayBroker, FileRelayBrokerConfig, HttpFileRelayBroker,
 };
 use sb_netplay_serv::http::{
-    AdminAuthorizer, AppServiceDependencies, AppServices, FileRelayPolicy, build_router,
+    AdminAuthorizer, AppServiceDependencies, AppServices, FileRelayPolicy, LinkCableRolloutPolicy,
+    build_router,
 };
 use sb_netplay_serv::lobbies::{
     InMemoryLobbyRegistry, LobbyServerCapabilities, MAX_LOBBY_PLAYERS, spawn_lobby_expiration_task,
@@ -123,6 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_limiter,
         metrics,
         protocol_rollout: config.protocol_rollout,
+        link_cable_rollout: LinkCableRolloutPolicy::new(config.link_cable.enabled),
         admin_authorizer,
         trust_proxy_headers: config.trust_proxy_headers,
     });
@@ -138,6 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(
         bind_addr = %config.bind_addr,
         lobby_idle_seconds = config.lobby_idle.as_secs(),
+        link_cable_enabled = config.link_cable.enabled,
         "starting ShadowBoy netplay server"
     );
     axum::serve(

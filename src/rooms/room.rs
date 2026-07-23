@@ -8,11 +8,11 @@ use crate::auth::VerifiedLicense;
 use crate::limits::MVP_ROOM_CAPACITY;
 use crate::protocol::{
     ClientNetworkQualityReport, CompatibilityFingerprint, InputDelayChange, NetplayProtocolView,
-    NetplaySessionDescriptor, NetplaySessionMode, ScheduledSessionStart, StateDigestMode,
+    NetplaySessionDescriptor, ScheduledSessionStart, StateDigestMode,
 };
 use crate::rooms::{
-    AdaptiveInputDelayPolicy, ClockSyncSampleRequestState, ConnectionId, InviteCode,
-    LinkCableRoomState, PlayerIndex, PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus,
+    AdaptiveInputDelayPolicy, ClockSyncSampleRequestState, ConnectionId, GameplaySession,
+    InviteCode, PlayerIndex, PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus,
     ResumeTokenHash, RomRelayTransferState, RoomError, RoomId, RoomStatus, RoomView,
     RoomVoiceState, SessionPauseStateTracker, SnapshotFileRelayTransferState,
     SnapshotTransferState, StateRecoveryTransaction,
@@ -41,7 +41,7 @@ pub struct NetplayRoom {
     pub(super) next_clock_sync_request_id: u64,
     pub(super) last_input_frames: HashMap<PlayerIndex, u64>,
     pub(super) next_input_frames: HashMap<PlayerIndex, u64>,
-    pub(super) link_cable_state: LinkCableRoomState,
+    pub(super) gameplay_session: GameplaySession,
     pub(super) host_snapshot_completed: bool,
     pub(super) completed_snapshot_manifest: Option<crate::protocol::SnapshotManifest>,
     pub(super) next_pause_sequence: u64,
@@ -134,6 +134,8 @@ impl NetplayRoom {
             players.push(PlayerSlot::empty(index));
         }
 
+        let gameplay_session = GameplaySession::new(&session);
+
         Self {
             room_id: RoomId::new(),
             invite_code,
@@ -153,7 +155,7 @@ impl NetplayRoom {
             next_clock_sync_request_id: 1,
             last_input_frames: HashMap::new(),
             next_input_frames: HashMap::new(),
-            link_cable_state: LinkCableRoomState::default(),
+            gameplay_session,
             host_snapshot_completed: false,
             completed_snapshot_manifest: None,
             next_pause_sequence: 1,
@@ -202,11 +204,25 @@ impl NetplayRoom {
 
     /// Returns whether this room uses strict controller input and host opens.
     pub fn uses_strict_controller_input(&self) -> bool {
-        self.protocol_version >= 5 && self.session.mode == NetplaySessionMode::ControllerNetplay
+        self.protocol_version >= 5 && self.is_controller_netplay()
+    }
+
+    /// Returns whether this room owns the controller-netplay provider.
+    pub(super) fn is_controller_netplay(&self) -> bool {
+        self.gameplay_session.is_controller_netplay()
+    }
+
+    /// Returns whether this room owns the link-cable provider.
+    pub(super) fn is_link_cable(&self) -> bool {
+        self.gameplay_session.is_link_cable()
     }
 
     /// Returns the state-digest authority negotiated by this room.
     pub(crate) fn state_digest_mode(&self) -> StateDigestMode {
+        if !self.is_controller_netplay() {
+            return StateDigestMode::Disabled;
+        }
+
         if !self.uses_strict_controller_input() {
             return StateDigestMode::Authoritative;
         }
@@ -234,7 +250,7 @@ impl NetplayRoom {
         connection_id: ConnectionId,
         mut fingerprint: CompatibilityFingerprint,
     ) -> Result<(), RoomError> {
-        if self.session.mode != NetplaySessionMode::ControllerNetplay {
+        if !self.is_controller_netplay() {
             return Err(RoomError::CompatibilityMismatch);
         }
 
@@ -303,15 +319,11 @@ impl NetplayRoom {
             return Err(RoomError::RoomNotReady);
         }
 
-        if self.session.mode == NetplaySessionMode::ControllerNetplay
-            && !self.host_snapshot_completed
-        {
+        if self.is_controller_netplay() && !self.host_snapshot_completed {
             return Err(RoomError::RoomNotReady);
         }
 
-        if self.session.mode == NetplaySessionMode::ControllerNetplay
-            && !self.connected_players_have_input_sockets()
-        {
+        if self.is_controller_netplay() && !self.connected_players_have_input_sockets() {
             return Err(RoomError::RoomNotReady);
         }
 
@@ -506,7 +518,7 @@ impl NetplayRoom {
         self.ready_players.clear();
         self.last_input_frames.clear();
         self.next_input_frames.clear();
-        self.link_cable_state.reset();
+        self.gameplay_session.reset();
         self.host_snapshot_completed = false;
         self.completed_snapshot_manifest = None;
         self.pause_state = None;

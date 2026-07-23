@@ -49,6 +49,10 @@ impl NetplayRoom {
         report: StateHashReport,
         now: Instant,
     ) -> Result<StateHashEvaluation, RoomError> {
+        if !self.is_controller_netplay() {
+            return Err(RoomError::NotPlaying);
+        }
+
         if !matches!(
             self.status,
             RoomStatus::StartScheduled | RoomStatus::Playing | RoomStatus::Paused

@@ -30,6 +30,8 @@ pub struct ServerConfig {
     pub rate_limits: RateLimitPolicy,
     /// Protocol kill switch and platform-specific minimum versions.
     pub protocol_rollout: NetplayProtocolRolloutPolicy,
+    /// Default-off rollout settings for the mGBA link-cable provider.
+    pub link_cable: LinkCableRolloutConfig,
     /// In-memory room recovery and heartbeat timing.
     pub recovery: RoomRecoveryConfig,
     /// How long a lobby may remain without meaningful user or gameplay activity.
@@ -79,6 +81,7 @@ impl ServerConfig {
             optional_u16_env("SB_NETPLAY_MIN_PROTOCOL_DESKTOP", 4)?,
         )
         .map_err(|_| ConfigError::InvalidProtocolRollout)?;
+        let link_cable = LinkCableRolloutConfig::from_env()?;
         let recovery = RoomRecoveryConfig {
             runner_handoff_grace: optional_duration_seconds_env(
                 "SB_NETPLAY_RUNNER_HANDOFF_GRACE_SECONDS",
@@ -114,12 +117,38 @@ impl ServerConfig {
             trust_proxy_headers,
             rate_limits,
             protocol_rollout,
+            link_cable,
             recovery,
             lobby_idle,
             log,
             telemetry,
             voice,
             file_relay,
+        })
+    }
+}
+
+/// Default-off rollout configuration for the mGBA link-cable provider.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LinkCableRolloutConfig {
+    /// Whether clients may create link-cable sessions.
+    pub enabled: bool,
+}
+
+impl LinkCableRolloutConfig {
+    fn from_env() -> Result<Self, ConfigError> {
+        Self::from_lookup(env::var)
+    }
+
+    fn from_lookup(
+        mut lookup: impl FnMut(&'static str) -> Result<String, env::VarError>,
+    ) -> Result<Self, ConfigError> {
+        Ok(Self {
+            enabled: optional_bool_env_from_lookup(
+                &mut lookup,
+                "SB_NETPLAY_LINK_CABLE_ENABLED",
+                false,
+            )?,
         })
     }
 }
@@ -308,7 +337,15 @@ fn postgres_table_names_from_env() -> Result<PostgresTableNames, ConfigError> {
 }
 
 fn optional_bool_env(name: &'static str, default: bool) -> Result<bool, ConfigError> {
-    match env::var(name) {
+    optional_bool_env_from_lookup(&mut env::var, name, default)
+}
+
+fn optional_bool_env_from_lookup(
+    lookup: &mut impl FnMut(&'static str) -> Result<String, env::VarError>,
+    name: &'static str,
+    default: bool,
+) -> Result<bool, ConfigError> {
+    match lookup(name) {
         Ok(value) if !value.trim().is_empty() => match value.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => Ok(true),
             "0" | "false" | "no" | "off" => Ok(false),
@@ -435,4 +472,39 @@ pub enum ConfigError {
         "environment variable SB_NETPLAY_POSTGRES_URL must be postgres://user:pass@host:port/database with optional sslmode=require|prefer|disable|verify-ca|verify-full"
     )]
     InvalidPostgresDsn,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ConfigError, LinkCableRolloutConfig};
+    use std::collections::BTreeMap;
+    use std::env;
+
+    #[test]
+    fn omitted_link_cable_rollout_environment_defaults_disabled() {
+        let config =
+            parse_link_cable_rollout(&[]).expect("omitted optional link-cable rollout environment");
+
+        assert!(!config.enabled);
+    }
+
+    #[test]
+    fn explicit_true_enables_link_cable_rollout() {
+        let config = parse_link_cable_rollout(&[("SB_NETPLAY_LINK_CABLE_ENABLED", " true ")])
+            .expect("explicit link-cable rollout");
+
+        assert!(config.enabled);
+    }
+
+    fn parse_link_cable_rollout(
+        values: &[(&'static str, &str)],
+    ) -> Result<LinkCableRolloutConfig, ConfigError> {
+        let values = values.iter().copied().collect::<BTreeMap<_, _>>();
+        LinkCableRolloutConfig::from_lookup(|name| {
+            values
+                .get(name)
+                .map(|value| (*value).to_string())
+                .ok_or(env::VarError::NotPresent)
+        })
+    }
 }

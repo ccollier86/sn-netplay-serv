@@ -140,6 +140,9 @@ pub async fn create_room(
     session.host_client_kind = Some(client_kind);
     session.rom_relay = None;
     session.validate()?;
+    services
+        .link_cable_rollout
+        .validate_provider_availability(&session)?;
     session.rom_relay = services
         .file_relay_policy
         .direct_rom_relay_capability(services.file_relay.as_ref(), &session);

@@ -32,6 +32,26 @@ fn new_room_reserves_player_one_for_host() {
 }
 
 #[test]
+fn room_constructs_exactly_one_controller_provider() {
+    let room = room(ConnectionId::new());
+
+    assert!(room.is_controller_netplay());
+    assert!(!room.is_link_cable());
+    assert!(room.gameplay_session.controller_netplay().is_some());
+    assert!(room.gameplay_session.link_cable().is_none());
+}
+
+#[test]
+fn room_constructs_exactly_one_link_cable_provider() {
+    let room = link_room(ConnectionId::new());
+
+    assert!(!room.is_controller_netplay());
+    assert!(room.is_link_cable());
+    assert!(room.gameplay_session.controller_netplay().is_none());
+    assert!(room.gameplay_session.link_cable().is_some());
+}
+
+#[test]
 fn first_guest_receives_player_two() {
     let mut room = room(ConnectionId::new());
     let guest_index = room
@@ -834,6 +854,29 @@ fn link_compatibility_rejects_mismatched_system_data() {
 }
 
 #[test]
+fn rejected_link_protocol_retry_clears_stale_compatibility() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = link_room(host_connection);
+    room.join_guest(license("guest"), guest_connection)
+        .expect("guest joins");
+
+    room.set_link_cable_compatibility_for_connection(host_connection, link_compatibility(None))
+        .expect("initial host compatibility");
+
+    let mut invalid_retry = link_compatibility(None);
+    invalid_retry.protocol_version = room.protocol_version().saturating_add(1);
+    assert_eq!(
+        room.set_link_cable_compatibility_for_connection(host_connection, invalid_retry),
+        Err(RoomError::CompatibilityMismatch)
+    );
+
+    room.set_link_cable_compatibility_for_connection(guest_connection, link_compatibility(None))
+        .expect("guest compatibility alone remains pending");
+    assert_eq!(room.status(), RoomStatus::CheckingCompatibility);
+}
+
+#[test]
 fn link_packets_relay_only_after_link_room_is_playing() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
@@ -869,6 +912,116 @@ fn link_packet_cannot_spoof_player_slot() {
     );
 
     assert!(matches!(result, Err(RoomError::SlotSpoofing(_))));
+}
+
+#[test]
+fn link_room_cannot_enter_controller_coordinated_pause() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_link_room(host_connection, guest_connection);
+
+    assert_eq!(
+        room.request_session_pause(host_connection, SessionPauseReason::Menu, 10),
+        Err(RoomError::NotPlaying)
+    );
+    assert!(room.view().pause.is_none());
+    assert_eq!(room.status(), RoomStatus::Playing);
+}
+
+#[test]
+fn link_room_rejects_controller_pause_ack_and_resume() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_link_room(host_connection, guest_connection);
+
+    assert_eq!(
+        room.mark_session_pause_reached(host_connection, 1, 10),
+        Err(RoomError::NotPlaying)
+    );
+    assert_eq!(
+        room.request_session_resume(host_connection, 1),
+        Err(RoomError::NotPlaying)
+    );
+    assert_eq!(room.status(), RoomStatus::Playing);
+    assert!(room.view().pause.is_none());
+}
+
+#[test]
+fn link_room_rejects_controller_input_socket_without_mutation() {
+    let host_connection = ConnectionId::new();
+    let mut room = link_room(host_connection);
+    let before_status = room.status();
+    let before_room_epoch = room.room_epoch;
+    let before_session_epoch = room.session_epoch;
+    let before_token = room.players[0].input_socket_token_hash.clone();
+    let before_last_seen = room.players[0].last_seen_at;
+
+    assert_eq!(
+        room.attach_input_socket(
+            PlayerIndex::ONE,
+            before_room_epoch,
+            before_session_epoch,
+            "",
+            ConnectionId::new(),
+            std::time::Instant::now(),
+        ),
+        Err(RoomError::NotPlaying)
+    );
+
+    assert_eq!(room.status(), before_status);
+    assert_eq!(room.room_epoch, before_room_epoch);
+    assert_eq!(room.session_epoch, before_session_epoch);
+    assert_eq!(room.players[0].input_socket_token_hash, before_token);
+    assert_eq!(room.players[0].last_seen_at, before_last_seen);
+    assert!(room.players[0].input_connection_id.is_none());
+}
+
+#[test]
+fn link_room_rejects_controller_state_hashes() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = ready_link_room(host_connection, guest_connection);
+
+    assert_eq!(
+        room.accept_state_hash(
+            host_connection,
+            state_hash(60, "a"),
+            std::time::Instant::now(),
+        ),
+        Err(RoomError::NotPlaying)
+    );
+    assert_eq!(
+        room.state_digest_mode(),
+        crate::protocol::StateDigestMode::Disabled
+    );
+    assert_eq!(room.status(), RoomStatus::Playing);
+}
+
+#[test]
+fn link_room_never_uses_controller_scheduled_start() {
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    let mut room = compatible_link_room(host_connection, guest_connection);
+    room.players
+        .iter_mut()
+        .filter(|slot| slot.connection_id.is_some())
+        .for_each(|slot| {
+            slot.supports_scheduled_start = true;
+            slot.supports_clock_sync = true;
+        });
+
+    assert!(!room.connected_players_support_scheduled_start());
+    assert!(
+        !room
+            .mark_ready(host_connection, None, std::time::Instant::now())
+            .expect("host ready")
+    );
+    assert!(
+        room.mark_ready(guest_connection, None, std::time::Instant::now())
+            .expect("guest starts link session")
+    );
+    assert_eq!(room.status(), RoomStatus::Playing);
+    assert!(room.scheduled_start().is_none());
 }
 
 #[test]

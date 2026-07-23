@@ -9,7 +9,7 @@ use crate::rooms::{NetplayRoom, PlayerFrameCursorView, RoomFrameClockView, RoomS
 impl NetplayRoom {
     /// Releases the next relay-owned server frame if the canonical cursor allows it.
     pub(super) fn release_next_server_frame(&mut self, server_time_ms: u64) -> Option<ServerFrame> {
-        if self.uses_strict_controller_input() {
+        if !self.is_controller_netplay() || self.uses_strict_controller_input() {
             return None;
         }
         if self.status == RoomStatus::StartScheduled {

@@ -6,10 +6,10 @@
 
 use crate::protocol::{
     LinkCableCompatibility, LinkCableDescriptor, LinkCablePacket, LinkCablePacketLimits,
-    NetplaySessionMode,
 };
 use crate::rooms::{
-    ConnectionId, NetplayRoom, PlayerRuntimeState, PlayerStatus, RoomError, RoomStatus,
+    ConnectionId, LinkCableSession, NetplayRoom, PlayerRuntimeState, PlayerStatus, RoomError,
+    RoomStatus,
 };
 
 impl NetplayRoom {
@@ -31,18 +31,14 @@ impl NetplayRoom {
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
         let link = self.link_descriptor()?.clone();
+        let protocol_version = self.protocol_version();
 
-        if compatibility.protocol_version != self.protocol_version() {
-            self.ready_players.remove(&player_index);
-            self.status = RoomStatus::CheckingCompatibility;
-            self.set_player_status(player_index, PlayerStatus::CompatibilityFailed);
-            return Err(RoomError::CompatibilityMismatch);
-        }
-
-        if let Err(error) =
-            self.link_cable_state
-                .set_compatibility(player_index, &link, compatibility)
-        {
+        if let Err(error) = self.link_cable_session_mut()?.set_compatibility(
+            player_index,
+            protocol_version,
+            &link,
+            compatibility,
+        ) {
             self.ready_players.remove(&player_index);
             self.status = RoomStatus::CheckingCompatibility;
             self.set_player_status(player_index, PlayerStatus::CompatibilityFailed);
@@ -54,14 +50,14 @@ impl NetplayRoom {
         let connected_players = self.connected_player_indices();
 
         if !self
-            .link_cable_state
+            .link_cable_session()?
             .connected_players_have_compatibility(&connected_players, self.max_players)
         {
             return Ok(());
         }
 
         if !self
-            .link_cable_state
+            .link_cable_session()?
             .connected_players_are_compatible(&connected_players, self.max_players)
         {
             self.status = RoomStatus::CheckingCompatibility;
@@ -94,8 +90,7 @@ impl NetplayRoom {
         packet: &LinkCablePacket,
         limits: LinkCablePacketLimits,
     ) -> Result<(), RoomError> {
-        if self.session.mode != NetplaySessionMode::LinkCable || self.status != RoomStatus::Playing
-        {
+        if !self.is_link_cable() || self.status != RoomStatus::Playing {
             return Err(RoomError::NotPlaying);
         }
 
@@ -103,18 +98,30 @@ impl NetplayRoom {
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
 
-        self.link_cable_state
+        self.link_cable_session_mut()?
             .accept_packet(owned_index, packet, limits)
     }
 
     fn link_descriptor(&self) -> Result<&LinkCableDescriptor, RoomError> {
-        if self.session.mode != NetplaySessionMode::LinkCable {
+        if !self.is_link_cable() {
             return Err(RoomError::CompatibilityMismatch);
         }
 
         self.session
             .link
             .as_ref()
+            .ok_or(RoomError::CompatibilityMismatch)
+    }
+
+    fn link_cable_session(&self) -> Result<&LinkCableSession, RoomError> {
+        self.gameplay_session
+            .link_cable()
+            .ok_or(RoomError::CompatibilityMismatch)
+    }
+
+    fn link_cable_session_mut(&mut self) -> Result<&mut LinkCableSession, RoomError> {
+        self.gameplay_session
+            .link_cable_mut()
             .ok_or(RoomError::CompatibilityMismatch)
     }
 }

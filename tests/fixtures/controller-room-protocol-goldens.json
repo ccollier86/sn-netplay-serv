@@ -1,0 +1,753 @@
+{
+  "v4": {
+    "createRequest": {
+      "desktopProtocolVersion": 4,
+      "session": {
+        "hostAppVersion": "0.2.13",
+        "game": {
+          "systemId": "gamecube",
+          "title": "Star Fox Adventures",
+          "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "contentKey": "gamecube-star-fox-adventures-usa",
+          "region": "USA",
+          "revision": "Rev 1",
+          "discId": "GFSE01"
+        },
+        "core": {
+          "coreId": "dolphin",
+          "coreName": "Dolphin",
+          "coreVersion": "5.0-netplay",
+          "coreOptionsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    },
+    "session": {
+      "hostClientKind": "desktop",
+      "hostAppVersion": "0.2.13",
+      "roomMode": "directInvite",
+      "mode": "controllerNetplay",
+      "game": {
+        "systemId": "gamecube",
+        "title": "Star Fox Adventures",
+        "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "contentKey": "gamecube-star-fox-adventures-usa",
+        "region": "USA",
+        "revision": "Rev 1",
+        "discId": "GFSE01"
+      },
+      "core": {
+        "coreId": "dolphin",
+        "coreName": "Dolphin",
+        "coreVersion": "5.0-netplay",
+        "coreOptionsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "stateFormat": null
+      },
+      "controller": {
+        "inputDelayFrames": 3
+      },
+      "link": null,
+      "voice": null,
+      "romIdentity": null,
+      "romRelayIntent": "exactMatchOnly",
+      "romRelay": null
+    },
+    "compatibilityFingerprint": {
+      "desktopVersion": "0.2.13",
+      "protocolVersion": 4,
+      "systemId": "gamecube",
+      "coreId": "dolphin",
+      "coreBuild": "5.0-netplay",
+      "stateFormat": null,
+      "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "settingsHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "cheatsHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "systemDataHash": null,
+      "saveDataMode": "netplay",
+      "determinismV5": null
+    },
+    "clientMessages": {
+      "setCompatibilityFingerprint": {
+        "type": "setCompatibilityFingerprint",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "fingerprint": {
+          "desktopVersion": "0.2.13",
+          "protocolVersion": 4,
+          "systemId": "gamecube",
+          "coreId": "dolphin",
+          "coreBuild": "5.0-netplay",
+          "stateFormat": null,
+          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "settingsHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "cheatsHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "systemDataHash": null,
+          "saveDataMode": "netplay",
+          "determinismV5": null
+        }
+      },
+      "requestSessionPause": {
+        "type": "requestSessionPause",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "requestId": "pause-4",
+        "reason": "menu",
+        "localFrame": 120
+      },
+      "sessionPauseReached": {
+        "type": "sessionPauseReached",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "sequence": 4,
+        "pausedAtFrame": 126
+      },
+      "requestSessionResume": {
+        "type": "requestSessionResume",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "requestId": "resume-4",
+        "sequence": 4,
+        "reason": "menu"
+      }
+    },
+    "roomView": {
+      "roomId": "$anyString",
+      "eventSeq": 17,
+      "roomEpoch": 3,
+      "sessionEpoch": 5,
+      "inviteCode": "AB23-CD",
+      "protocol": {
+        "protocolVersion": 4,
+        "minSupportedProtocolVersion": 4,
+        "maxSupportedProtocolVersion": 5,
+        "roomProtocolVersion": 4
+      },
+      "session": {
+        "hostClientKind": "desktop",
+        "hostAppVersion": "0.2.13",
+        "roomMode": "directInvite",
+        "mode": "controllerNetplay",
+        "game": {
+          "systemId": "gamecube",
+          "title": "Star Fox Adventures",
+          "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "contentKey": "gamecube-star-fox-adventures-usa",
+          "region": "USA",
+          "revision": "Rev 1",
+          "discId": "GFSE01"
+        },
+        "core": {
+          "coreId": "dolphin",
+          "coreName": "Dolphin",
+          "coreVersion": "5.0-netplay",
+          "coreOptionsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "stateFormat": null
+        },
+        "controller": {
+          "inputDelayFrames": 3
+        },
+        "link": null,
+        "voice": null,
+        "romIdentity": null,
+        "romRelayIntent": "exactMatchOnly",
+        "romRelay": null
+      },
+      "voice": null,
+      "romRelay": null,
+      "maxPlayers": 2,
+      "pause": null,
+      "frameClock": {
+        "canonicalFrame": 120,
+        "releasedFrame": 119,
+        "nextReleaseFrame": 120,
+        "acceptedInputs": [
+          {
+            "playerIndex": 0,
+            "frame": 120
+          },
+          {
+            "playerIndex": 1,
+            "frame": 119
+          }
+        ],
+        "pendingInputDelayChange": null
+      },
+      "status": "playing",
+      "players": [
+        {
+          "playerIndex": 0,
+          "displayNumber": 1,
+          "role": "host",
+          "status": "playing",
+          "runtimeState": "playing",
+          "occupied": true,
+          "controlConnected": true,
+          "inputConnected": true,
+          "supportsStateFileRelay": false,
+          "supportsRomFileRelay": false,
+          "supportsScheduledStart": false,
+          "supportsClockSync": false,
+          "supportsFastInputRelay": false,
+          "lastSeenAgeMs": 21,
+          "reconnectGraceRemainingMs": null
+        },
+        {
+          "playerIndex": 1,
+          "displayNumber": 2,
+          "role": "guest",
+          "status": "playing",
+          "runtimeState": "playing",
+          "occupied": true,
+          "controlConnected": true,
+          "inputConnected": true,
+          "supportsStateFileRelay": false,
+          "supportsRomFileRelay": false,
+          "supportsScheduledStart": false,
+          "supportsClockSync": false,
+          "supportsFastInputRelay": false,
+          "lastSeenAgeMs": 34,
+          "reconnectGraceRemainingMs": null
+        }
+      ]
+    },
+    "serverMessages": {
+      "createResponse": {
+        "room": "$roomView"
+      },
+      "roomJoined": {
+        "type": "roomJoined",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "yourPlayerIndex": 1,
+        "resumeToken": "resume-token",
+        "inputSocketToken": "input-socket-token",
+        "voice": null,
+        "room": "$roomView"
+      },
+      "compatibilityRequested": {
+        "type": "compatibilityRequested",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "room": "$roomView"
+      },
+      "compatibilityAccepted": {
+        "type": "roomStateChanged",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "room": "$roomView"
+      },
+      "startSession": {
+        "type": "startSession",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "startFrame": 120,
+        "room": "$roomView"
+      },
+      "sessionPauseScheduled": {
+        "type": "sessionPauseScheduled",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "pause": {
+          "sequence": 4,
+          "state": "pausing",
+          "reason": "menu",
+          "requestedByPlayerIndex": 0,
+          "pauseAtFrame": 126,
+          "pausedAtFrame": null,
+          "acknowledgedPlayerIndexes": [],
+          "holders": [
+            {
+              "playerIndex": 0,
+              "reason": "menu"
+            }
+          ]
+        },
+        "room": "$roomView"
+      },
+      "sessionPauseUpdated": {
+        "type": "sessionPauseUpdated",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "pause": {
+          "sequence": 4,
+          "state": "paused",
+          "reason": "menu",
+          "requestedByPlayerIndex": 0,
+          "pauseAtFrame": 126,
+          "pausedAtFrame": 126,
+          "acknowledgedPlayerIndexes": [
+            0,
+            1
+          ],
+          "holders": [
+            {
+              "playerIndex": 0,
+              "reason": "menu"
+            }
+          ]
+        },
+        "room": "$roomView"
+      },
+      "sessionResumeScheduled": {
+        "type": "sessionResumeScheduled",
+        "eventSeq": 18,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "sequence": 4,
+        "resumeAtFrame": 127,
+        "room": "$roomView"
+      },
+      "recoveryStarted": {
+        "type": "recoveryStarted",
+        "eventSeq": 18,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "room": "$roomView"
+      },
+      "reconnectRoomJoined": {
+        "type": "roomJoined",
+        "eventSeq": 18,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "yourPlayerIndex": 1,
+        "resumeToken": "resume-token-next",
+        "inputSocketToken": "input-socket-token-next",
+        "voice": null,
+        "room": "$roomView"
+      },
+      "playerReconnected": {
+        "type": "playerReconnected",
+        "eventSeq": 18,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "playerIndex": 1,
+        "room": "$roomView"
+      },
+      "recoveryResyncRequired": {
+        "type": "recoveryResyncRequired",
+        "eventSeq": 19,
+        "roomEpoch": 4,
+        "sessionEpoch": 6,
+        "room": "$roomView"
+      }
+    }
+  },
+  "v5": {
+    "createRequest": {
+      "desktopProtocolVersion": 5,
+      "minimumProtocolVersion": 5,
+      "session": {
+        "hostAppVersion": "2.1.0-test",
+        "game": {
+          "systemId": "snes",
+          "title": "V5 Integration Fixture",
+          "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "contentKey": "snes-v5-integration"
+        },
+        "core": {
+          "coreId": "snes9x",
+          "coreOptionsSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stateFormat": "snes9x:snes:libretro-serialize-v1"
+        },
+        "controller": {
+          "inputDelayFrames": 3
+        },
+        "romIdentity": {
+          "system": "snes",
+          "coreId": "snes9x",
+          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sizeBytes": 1024,
+          "displayName": "V5 Integration Fixture"
+        }
+      }
+    },
+    "session": {
+      "hostClientKind": "desktop",
+      "hostAppVersion": "2.1.0-test",
+      "roomMode": "directInvite",
+      "mode": "controllerNetplay",
+      "game": {
+        "systemId": "snes",
+        "title": "V5 Integration Fixture",
+        "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "contentKey": "snes-v5-integration",
+        "region": null,
+        "revision": null,
+        "discId": null
+      },
+      "core": {
+        "coreId": "snes9x",
+        "coreName": null,
+        "coreVersion": null,
+        "coreOptionsSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stateFormat": "snes9x:snes:libretro-serialize-v1"
+      },
+      "controller": {
+        "inputDelayFrames": 3
+      },
+      "link": null,
+      "voice": null,
+      "romIdentity": {
+        "system": "snes",
+        "coreId": "snes9x",
+        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sizeBytes": 1024,
+        "displayName": "V5 Integration Fixture"
+      },
+      "romRelayIntent": "exactMatchOnly",
+      "romRelay": null
+    },
+    "compatibilityFingerprint": {
+      "desktopVersion": "2.1.0-test",
+      "protocolVersion": 5,
+      "systemId": "snes",
+      "coreId": "snes9x",
+      "coreBuild": "android-test-artifact",
+      "stateFormat": "snes9x:snes:libretro-serialize-v1",
+      "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "settingsHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "cheatsHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "systemDataHash": null,
+      "saveDataMode": "netplay",
+      "determinismV5": {
+        "netplayCoreCompatibilityId": "snes9x-2025-compat-v1",
+        "localArtifactId": "android-test-artifact",
+        "platformClass": "libretro-arm64-le-v1",
+        "coreOptionsDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "controllerProfileIds": [
+          "retropad-port-1-v1"
+        ],
+        "inputCodecId": "shadowboy-retropad-v1-le",
+        "inputPayloadSize": 10,
+        "predictorId": "shadowboy-retropad-predictor-v1",
+        "nominalFrameRateNumerator": 150247,
+        "nominalFrameRateDenominator": 2500,
+        "romSizeBytes": 1024,
+        "contentTransformationDigest": null,
+        "startupStatePolicyId": "load-start-frame-state-v1",
+        "replayOutputSuppressed": true,
+        "digestMode": "diagnostic",
+        "digestAlgorithmId": "sha256-libretro-serialize-start-frame-v1"
+      }
+    },
+    "clientMessages": {
+      "setCompatibilityFingerprint": {
+        "type": "setCompatibilityFingerprint",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "fingerprint": {
+          "desktopVersion": "2.1.0-test",
+          "protocolVersion": 5,
+          "systemId": "snes",
+          "coreId": "snes9x",
+          "coreBuild": "android-test-artifact",
+          "stateFormat": "snes9x:snes:libretro-serialize-v1",
+          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "settingsHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "cheatsHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "systemDataHash": null,
+          "saveDataMode": "netplay",
+          "determinismV5": {
+            "netplayCoreCompatibilityId": "snes9x-2025-compat-v1",
+            "localArtifactId": "android-test-artifact",
+            "platformClass": "libretro-arm64-le-v1",
+            "coreOptionsDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "controllerProfileIds": [
+              "retropad-port-1-v1"
+            ],
+            "inputCodecId": "shadowboy-retropad-v1-le",
+            "inputPayloadSize": 10,
+            "predictorId": "shadowboy-retropad-predictor-v1",
+            "nominalFrameRateNumerator": 150247,
+            "nominalFrameRateDenominator": 2500,
+            "romSizeBytes": 1024,
+            "contentTransformationDigest": null,
+            "startupStatePolicyId": "load-start-frame-state-v1",
+            "replayOutputSuppressed": true,
+            "digestMode": "diagnostic",
+            "digestAlgorithmId": "sha256-libretro-serialize-start-frame-v1"
+          }
+        }
+      },
+      "requestSessionPause": {
+        "type": "requestSessionPause",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "requestId": "pause-4",
+        "reason": "menu",
+        "localFrame": 120
+      },
+      "sessionPauseReached": {
+        "type": "sessionPauseReached",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "sequence": 4,
+        "pausedAtFrame": 126
+      },
+      "requestSessionResume": {
+        "type": "requestSessionResume",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "requestId": "resume-4",
+        "sequence": 4,
+        "reason": "menu"
+      }
+    },
+    "roomView": {
+      "roomId": "$anyString",
+      "eventSeq": 17,
+      "roomEpoch": 3,
+      "sessionEpoch": 5,
+      "inviteCode": "AB23-CD",
+      "protocol": {
+        "protocolVersion": 5,
+        "minSupportedProtocolVersion": 4,
+        "maxSupportedProtocolVersion": 5,
+        "roomProtocolVersion": 5
+      },
+      "session": {
+        "hostClientKind": "desktop",
+        "hostAppVersion": "2.1.0-test",
+        "roomMode": "directInvite",
+        "mode": "controllerNetplay",
+        "game": {
+          "systemId": "snes",
+          "title": "V5 Integration Fixture",
+          "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "contentKey": "snes-v5-integration",
+          "region": null,
+          "revision": null,
+          "discId": null
+        },
+        "core": {
+          "coreId": "snes9x",
+          "coreName": null,
+          "coreVersion": null,
+          "coreOptionsSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stateFormat": "snes9x:snes:libretro-serialize-v1"
+        },
+        "controller": {
+          "inputDelayFrames": 3
+        },
+        "link": null,
+        "voice": null,
+        "romIdentity": {
+          "system": "snes",
+          "coreId": "snes9x",
+          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sizeBytes": 1024,
+          "displayName": "V5 Integration Fixture"
+        },
+        "romRelayIntent": "exactMatchOnly",
+        "romRelay": null
+      },
+      "voice": null,
+      "romRelay": null,
+      "maxPlayers": 2,
+      "pause": null,
+      "frameClock": {
+        "canonicalFrame": 120,
+        "releasedFrame": 119,
+        "nextReleaseFrame": 120,
+        "acceptedInputs": [
+          {
+            "playerIndex": 0,
+            "frame": 120
+          },
+          {
+            "playerIndex": 1,
+            "frame": 119
+          }
+        ],
+        "pendingInputDelayChange": null
+      },
+      "status": "playing",
+      "players": [
+        {
+          "playerIndex": 0,
+          "displayNumber": 1,
+          "role": "host",
+          "status": "playing",
+          "runtimeState": "playing",
+          "occupied": true,
+          "controlConnected": true,
+          "inputConnected": true,
+          "supportsStateFileRelay": false,
+          "supportsRomFileRelay": false,
+          "supportsScheduledStart": true,
+          "supportsClockSync": true,
+          "supportsFastInputRelay": true,
+          "lastSeenAgeMs": 21,
+          "reconnectGraceRemainingMs": null
+        },
+        {
+          "playerIndex": 1,
+          "displayNumber": 2,
+          "role": "guest",
+          "status": "playing",
+          "runtimeState": "playing",
+          "occupied": true,
+          "controlConnected": true,
+          "inputConnected": true,
+          "supportsStateFileRelay": false,
+          "supportsRomFileRelay": false,
+          "supportsScheduledStart": true,
+          "supportsClockSync": true,
+          "supportsFastInputRelay": true,
+          "lastSeenAgeMs": 34,
+          "reconnectGraceRemainingMs": null
+        }
+      ]
+    },
+    "serverMessages": {
+      "createResponse": {
+        "room": "$roomView"
+      },
+      "roomJoined": {
+        "type": "roomJoined",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "yourPlayerIndex": 1,
+        "resumeToken": "resume-token",
+        "inputSocketToken": "input-socket-token",
+        "voice": null,
+        "room": "$roomView"
+      },
+      "compatibilityRequested": {
+        "type": "compatibilityRequested",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "room": "$roomView"
+      },
+      "compatibilityAccepted": {
+        "type": "roomStateChanged",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "room": "$roomView"
+      },
+      "startSession": {
+        "type": "startSession",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "startFrame": 120,
+        "scheduledStart": {
+          "roomEpoch": 3,
+          "sessionEpoch": 5,
+          "startFrame": 120,
+          "serverTimeMs": 12400,
+          "createdAtServerTimeMs": 12000,
+          "minimumStartDelayMs": 400,
+          "clockUncertaintyBudgetMs": 80
+        },
+        "room": "$roomView"
+      },
+      "sessionPauseScheduled": {
+        "type": "sessionPauseScheduled",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "pause": {
+          "sequence": 4,
+          "state": "pausing",
+          "reason": "menu",
+          "requestedByPlayerIndex": 0,
+          "pauseAtFrame": 126,
+          "pausedAtFrame": null,
+          "acknowledgedPlayerIndexes": [],
+          "holders": [
+            {
+              "playerIndex": 0,
+              "reason": "menu"
+            }
+          ]
+        },
+        "room": "$roomView"
+      },
+      "sessionPauseUpdated": {
+        "type": "sessionPauseUpdated",
+        "eventSeq": 17,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "pause": {
+          "sequence": 4,
+          "state": "paused",
+          "reason": "menu",
+          "requestedByPlayerIndex": 0,
+          "pauseAtFrame": 126,
+          "pausedAtFrame": 126,
+          "acknowledgedPlayerIndexes": [
+            0,
+            1
+          ],
+          "holders": [
+            {
+              "playerIndex": 0,
+              "reason": "menu"
+            }
+          ]
+        },
+        "room": "$roomView"
+      },
+      "sessionResumeScheduled": {
+        "type": "sessionResumeScheduled",
+        "eventSeq": 18,
+        "roomEpoch": 3,
+        "sessionEpoch": 6,
+        "sequence": 4,
+        "resumeAtFrame": 127,
+        "scheduledStart": {
+          "roomEpoch": 3,
+          "sessionEpoch": 6,
+          "startFrame": 127,
+          "serverTimeMs": 15400,
+          "createdAtServerTimeMs": 15000,
+          "minimumStartDelayMs": 400,
+          "clockUncertaintyBudgetMs": 80
+        },
+        "room": "$roomView"
+      },
+      "recoveryStarted": {
+        "type": "recoveryStarted",
+        "eventSeq": 18,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "room": "$roomView"
+      },
+      "reconnectRoomJoined": {
+        "type": "roomJoined",
+        "eventSeq": 18,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "yourPlayerIndex": 1,
+        "resumeToken": "resume-token-next",
+        "inputSocketToken": "input-socket-token-next",
+        "voice": null,
+        "room": "$roomView"
+      },
+      "playerReconnected": {
+        "type": "playerReconnected",
+        "eventSeq": 18,
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "playerIndex": 1,
+        "room": "$roomView"
+      },
+      "recoveryResyncRequired": {
+        "type": "recoveryResyncRequired",
+        "eventSeq": 19,
+        "roomEpoch": 4,
+        "sessionEpoch": 6,
+        "room": "$roomView"
+      }
+    }
+  }
+}

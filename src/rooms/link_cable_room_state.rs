@@ -28,10 +28,13 @@ impl LinkCableRoomState {
     pub fn set_compatibility(
         &mut self,
         player_index: PlayerIndex,
+        protocol_version: u16,
         link: &LinkCableDescriptor,
         compatibility: LinkCableCompatibility,
     ) -> Result<(), RoomError> {
-        if !compatibility.matches_descriptor(link) {
+        if compatibility.protocol_version != protocol_version
+            || !compatibility.matches_descriptor(link)
+        {
             self.compatibility.remove(&player_index);
             return Err(RoomError::CompatibilityMismatch);
         }
@@ -111,10 +114,20 @@ mod tests {
         let link = link_descriptor();
 
         state
-            .set_compatibility(PlayerIndex::ONE, &link, compatibility(None))
+            .set_compatibility(
+                PlayerIndex::ONE,
+                crate::protocol::NETPLAY_PROTOCOL_VERSION,
+                &link,
+                compatibility(None),
+            )
             .expect("p1 compatibility");
         state
-            .set_compatibility(PlayerIndex::TWO, &link, compatibility(None))
+            .set_compatibility(
+                PlayerIndex::TWO,
+                crate::protocol::NETPLAY_PROTOCOL_VERSION,
+                &link,
+                compatibility(None),
+            )
             .expect("p2 compatibility");
 
         assert!(state.connected_players_are_compatible(&[PlayerIndex::ONE, PlayerIndex::TWO], 2));
@@ -126,10 +139,20 @@ mod tests {
         let link = link_descriptor();
 
         state
-            .set_compatibility(PlayerIndex::ONE, &link, compatibility(Some("a")))
+            .set_compatibility(
+                PlayerIndex::ONE,
+                crate::protocol::NETPLAY_PROTOCOL_VERSION,
+                &link,
+                compatibility(Some("a")),
+            )
             .expect("p1 compatibility");
         state
-            .set_compatibility(PlayerIndex::TWO, &link, compatibility(Some("b")))
+            .set_compatibility(
+                PlayerIndex::TWO,
+                crate::protocol::NETPLAY_PROTOCOL_VERSION,
+                &link,
+                compatibility(Some("b")),
+            )
             .expect("p2 compatibility");
 
         assert!(!state.connected_players_are_compatible(&[PlayerIndex::ONE, PlayerIndex::TWO], 2));

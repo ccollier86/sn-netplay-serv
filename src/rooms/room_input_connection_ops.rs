@@ -18,6 +18,10 @@ impl NetplayRoom {
         input_connection_id: ConnectionId,
         now: Instant,
     ) -> Result<(), RoomError> {
+        if !self.is_controller_netplay() {
+            return Err(RoomError::NotPlaying);
+        }
+
         if self.status == RoomStatus::Closed {
             return Err(RoomError::RoomClosed);
         }
@@ -64,6 +68,10 @@ impl NetplayRoom {
         now: Instant,
         reconnect_grace: Duration,
     ) -> Result<bool, RoomError> {
+        if !self.is_controller_netplay() {
+            return Err(RoomError::NotPlaying);
+        }
+
         let recoverable = matches!(
             self.status,
             RoomStatus::StartScheduled

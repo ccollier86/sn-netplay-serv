@@ -70,6 +70,10 @@ impl NetplayRoom {
 
     /// Returns whether all connected players opted into scheduled start.
     pub(super) fn connected_players_support_scheduled_start(&self) -> bool {
+        if !self.is_controller_netplay() {
+            return false;
+        }
+
         let connected = self.connected_player_indices();
         connected.len() == usize::from(self.max_players)
             && connected.iter().all(|player_index| {

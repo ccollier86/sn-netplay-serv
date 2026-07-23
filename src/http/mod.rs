@@ -14,4 +14,4 @@ mod services;
 
 pub use admin_auth::AdminAuthorizer;
 pub use routes::build_router;
-pub use services::{AppServiceDependencies, AppServices, FileRelayPolicy};
+pub use services::{AppServiceDependencies, AppServices, FileRelayPolicy, LinkCableRolloutPolicy};
