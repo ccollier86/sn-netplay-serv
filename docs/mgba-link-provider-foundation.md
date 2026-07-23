@@ -55,7 +55,12 @@ GB/GBC and GBA fixtures. The server data plane now provides:
 - exact slot, epoch, sequence-from-zero, SBLK namespace/body, and timestamp
   validation before forwarding;
 - stateful GB/GBC and GBA transfer validation for mode readiness, exact
-  transfer ids, sender phases, collision prevention, and committed data;
+  transfer ids, sender phases, collision prevention, and committed data,
+  including idempotent GBA MULTI-mode snapshot refreshes during a transfer;
+- ordered terminal-abort drain: the peer's exact valid GBA or GB/GBC abort
+  frame is written before either endpoint receives the private aborted
+  lifecycle, later traffic is rejected, all residual queues/state are cleared,
+  and replug allocates a strictly newer cable epoch;
 - fail-closed protocol, disconnect, provider, and queue-overflow behavior; and
 - forwarding after the registry read lock has been released.
 

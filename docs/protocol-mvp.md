@@ -618,7 +618,14 @@ zero and must be the exact next value for the current cable epoch. Packets enter
 only the opposite endpoint's bounded queue and are never echoed to the sender.
 Malformed, spoofed, out-of-order, or overflow traffic aborts the current cable
 generation and clears both per-room queues instead of dropping a required
-event.
+event. While a GBA transfer is pending, repeated `MODE_SET` snapshots are
+accepted only when they continue to report MULTI mode; their SIOCNT, RCNT, and
+emulated-time snapshots may change. A valid GBA or GB/GBC `TRANSFER_ABORT` is
+terminal for its cable generation: no later packet is admitted, the exact abort
+frame is written to the peer first, and only then does the server clear all
+remaining packet/transaction state and publish the private `aborted` grant to
+both attached endpoints. Continuing link traffic requires reattachment and a
+strictly newer `cableEpoch`.
 
 ## Coordinated Pause
 

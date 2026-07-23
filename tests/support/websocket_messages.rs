@@ -241,6 +241,31 @@ impl SmokeClient {
         }
     }
 
+    pub async fn expect_link_packet_before_grant_status(
+        &mut self,
+        player_index: u8,
+        forbidden_status: &str,
+    ) -> Value {
+        loop {
+            let message = self.next_json().await;
+            if message["type"] == "linkCableGrantUpdated"
+                && message["grant"]["status"] == forbidden_status
+            {
+                panic!(
+                    "link grant status {forbidden_status} overtook the terminal packet: {message}"
+                );
+            }
+            if message["type"] == "error" {
+                panic!("unexpected error before terminal link packet: {message}");
+            }
+            if message["type"] == "linkCablePacket"
+                && message["packet"]["playerIndex"] == u64::from(player_index)
+            {
+                return message;
+            }
+        }
+    }
+
     pub async fn expect_no_link_packet_from(&mut self, player_index: u8) {
         let result = timeout(Duration::from_millis(200), async {
             loop {
@@ -278,6 +303,23 @@ impl SmokeClient {
     }
 
     pub async fn send_gba_mode_set(&mut self, emulated_time: u64) -> GbaSioMultiFrame {
+        self.send_gba_event(
+            GbaSioMultiEvent::ModeSet {
+                mode: 2,
+                siocnt: 0x2000,
+                rcnt: 0,
+                emulated_time,
+            },
+            emulated_time,
+        )
+        .await
+    }
+
+    pub async fn send_gba_event(
+        &mut self,
+        event: GbaSioMultiEvent,
+        envelope_emulated_time: u64,
+    ) -> GbaSioMultiFrame {
         let grant = self
             .link_grant
             .as_ref()
@@ -299,14 +341,9 @@ impl SmokeClient {
                 sender_sequence,
                 sender_slot: grant.local_slot,
             },
-            event: GbaSioMultiEvent::ModeSet {
-                mode: 2,
-                siocnt: 0x2000,
-                rcnt: 0,
-                emulated_time,
-            },
+            event,
         };
-        let payload = encode_gba_sio_multi_frame(&frame).expect("valid GBA SIO MODE_SET");
+        let payload = encode_gba_sio_multi_frame(&frame).expect("valid GBA SIO event");
         assert!(payload.len() <= usize::from(grant.maximum_event_bytes));
 
         self.send(json!({
@@ -314,7 +351,7 @@ impl SmokeClient {
             "packet": {
                 "playerIndex": grant.local_slot,
                 "sequence": sender_sequence,
-                "emulatedTime": emulated_time,
+                "emulatedTime": envelope_emulated_time,
                 "payload": payload
             }
         }))

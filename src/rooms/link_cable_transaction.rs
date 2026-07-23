@@ -17,8 +17,8 @@ pub(crate) enum LinkCableTransactionError {
     /// Both GBA endpoints had not published MULTI mode for this cable epoch.
     #[error("both GBA endpoints must publish MULTI mode before a transfer")]
     GbaMultiModeNotReady,
-    /// A GBA mode transition arrived while a transfer boundary was stalled.
-    #[error("GBA mode changed while a link transfer was pending")]
+    /// GBA left MULTI mode while a transfer boundary was stalled.
+    #[error("GBA left MULTI mode while a link transfer was pending")]
     GbaModeChangedDuringTransfer,
     /// Another transfer was already pending.
     #[error("a link cable transfer is already pending")]
@@ -165,7 +165,11 @@ impl GbaTransactionState {
     ) -> Result<(), LinkCableTransactionError> {
         match event {
             GbaSioMultiEvent::ModeSet { mode, .. } => {
-                if self.pending.is_some() {
+                // mGBA can republish SIOCNT/RCNT snapshots while one physical
+                // transfer is pending. Those snapshots are idempotent as long
+                // as the endpoint remains in MULTI mode; leaving or changing
+                // mode would invalidate the in-flight transfer.
+                if self.pending.is_some() && *mode != GBA_MULTI_MODE {
                     return Err(LinkCableTransactionError::GbaModeChangedDuringTransfer);
                 }
                 self.modes[usize::from(sender_slot)] = Some(*mode);
@@ -423,8 +427,20 @@ mod tests {
             Err(LinkCableTransactionError::NoPendingTransfer)
         );
         accept(&mut state, gba(0, start(1, 0x1111)));
+        accept(
+            &mut state,
+            gba(
+                0,
+                GbaSioMultiEvent::ModeSet {
+                    mode: 2,
+                    siocnt: 0x20f7,
+                    rcnt: 0x7fff,
+                    emulated_time: 99,
+                },
+            ),
+        );
         assert_eq!(
-            state.validate_and_apply(&gba(0, mode_set(2))),
+            state.validate_and_apply(&gba(0, mode_set(3))),
             Err(LinkCableTransactionError::GbaModeChangedDuringTransfer)
         );
         assert_eq!(

@@ -221,6 +221,7 @@ async fn handle_link_data_plane_event(
     receiver: &mut Option<LinkCableDataPlaneReceiver>,
     event: Result<LinkCableDataPlaneEvent, LinkCableDataPlaneError>,
 ) -> bool {
+    let confirms_packet_delivery = matches!(&event, Ok(LinkCableDataPlaneEvent::Packet(_)));
     let message = match event {
         Ok(LinkCableDataPlaneEvent::Packet(packet)) => ServerMessage::LinkCablePacket { packet },
         Ok(LinkCableDataPlaneEvent::Lifecycle(snapshot)) => ServerMessage::LinkCableGrantUpdated {
@@ -242,7 +243,18 @@ async fn handle_link_data_plane_event(
         }
     };
 
-    send_server_message(sender, &message).await.is_ok()
+    if send_server_message(sender, &message).await.is_err() {
+        return false;
+    }
+    if confirms_packet_delivery
+        && receiver
+            .as_mut()
+            .is_some_and(|receiver| receiver.confirm_packet_delivery().is_err())
+    {
+        return false;
+    }
+
+    true
 }
 
 fn link_data_plane_grant(snapshot: LinkCableDataPlaneSnapshot) -> LinkCableDataPlaneGrant {

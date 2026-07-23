@@ -82,7 +82,8 @@ impl fmt::Debug for LinkCableDataPlaneSnapshot {
 pub enum LinkCableDataPlaneEvent {
     /// A fully validated packet emitted by the other endpoint.
     Packet(LinkCablePacket),
-    /// A newer lifecycle state. Lifecycle always wins over buffered packets.
+    /// A newer lifecycle state. Lifecycle wins over ordinary buffered packets;
+    /// an accepted terminal ABORT is delivered first and then acknowledged.
     Lifecycle(LinkCableDataPlaneSnapshot),
 }
 
@@ -208,8 +209,18 @@ struct LinkCableDataPlaneState {
     queue_capacity: usize,
     status: LinkCableDataPlaneStatus,
     abort_reason: Option<LinkCableAbortReason>,
+    pending_terminal_abort: Option<PendingTerminalAbort>,
     lifecycle_revision: u64,
     next_attachment_generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PendingTerminalAbort {
+    cable_epoch: u64,
+    sender_slot: usize,
+    sender_sequence: u64,
+    target_slot: usize,
+    reason: LinkCableAbortReason,
 }
 
 #[derive(Clone, Copy)]
@@ -227,6 +238,7 @@ pub struct LinkCableDataPlaneReceiver {
     local_slot: PlayerIndex,
     attachment_generation: u64,
     observed_lifecycle_revision: u64,
+    pending_terminal_delivery: Option<PendingTerminalAbort>,
 }
 
 impl LinkCableDataPlaneHandle {
@@ -262,6 +274,7 @@ impl LinkCableDataPlaneHandle {
                     queue_capacity,
                     status: LinkCableDataPlaneStatus::Waiting,
                     abort_reason: None,
+                    pending_terminal_abort: None,
                     lifecycle_revision: 0,
                     next_attachment_generation: 1,
                 }),
@@ -281,6 +294,7 @@ impl LinkCableDataPlaneHandle {
         let slot = player_slot(player_index)?;
         let mut state = self.inner.lock()?;
         ensure_open(&state)?;
+        ensure_no_terminal_abort_pending(&state)?;
 
         if let Some(bound_slot) = connection_slot(&state, connection_id) {
             if bound_slot == slot {
@@ -331,6 +345,7 @@ impl LinkCableDataPlaneHandle {
         let slot = player_slot(player_index)?;
         let mut state = self.inner.lock()?;
         ensure_open(&state)?;
+        ensure_no_terminal_abort_pending(&state)?;
 
         if previous_connection_id == connection_id {
             let endpoint =
@@ -390,6 +405,7 @@ impl LinkCableDataPlaneHandle {
     ) -> Result<LinkCableAttachment, LinkCableDataPlaneError> {
         let mut state = self.inner.lock()?;
         ensure_open(&state)?;
+        ensure_no_terminal_abort_pending(&state)?;
         let slot = connection_slot(&state, connection_id)
             .ok_or(LinkCableDataPlaneError::ConnectionNotAttached)?;
         let local_slot = player_index(slot);
@@ -431,6 +447,7 @@ impl LinkCableDataPlaneHandle {
             local_slot,
             attachment_generation: endpoint.attachment_generation,
             observed_lifecycle_revision: state.lifecycle_revision,
+            pending_terminal_delivery: None,
         };
         drop(state);
         self.inner.notify_both();
@@ -462,6 +479,12 @@ impl LinkCableDataPlaneHandle {
         let slot = connection_slot(&state, connection_id)
             .ok_or(LinkCableDataPlaneError::ConnectionNotAttached)?;
         state.endpoints[slot] = None;
+        if terminal_abort_can_still_reach_target(&state, slot) {
+            let snapshot = snapshot_for(&state, player_index(slot));
+            drop(state);
+            self.inner.notifiers[1 - slot].notify_one();
+            return Ok(snapshot);
+        }
         if let Err(error) = abort_cable(&mut state, Some(LinkCableAbortReason::PeerDisconnected)) {
             drop(state);
             self.inner.notify_both();
@@ -579,6 +602,9 @@ impl LinkCableDataPlaneHandle {
         if state.status != LinkCableDataPlaneStatus::Active {
             return Err(LinkCableDataPlaneError::NotActive);
         }
+        if state.pending_terminal_abort.is_some() {
+            return Err(LinkCableDataPlaneError::NotActive);
+        }
 
         let Some(endpoint) = state.endpoints[sender_slot] else {
             return Err(LinkCableDataPlaneError::AuthenticatedSlotMismatch);
@@ -676,11 +702,21 @@ impl LinkCableDataPlaneHandle {
             );
         }
 
+        let terminal_abort_reason = terminal_abort_reason(&frame);
         state.queues[target_slot].push_back(packet);
         state.next_sender_sequences[sender_slot] = header
             .sender_sequence
             .checked_add(1)
             .expect("SBLK signed-63-bit sequence always has a u64 successor");
+        if let Some(reason) = terminal_abort_reason {
+            state.pending_terminal_abort = Some(PendingTerminalAbort {
+                cable_epoch: state.cable_epoch,
+                sender_slot,
+                sender_sequence: header.sender_sequence,
+                target_slot,
+                reason,
+            });
+        }
         drop(state);
         self.inner.notifiers[target_slot].notify_one();
         Ok(())
@@ -737,6 +773,13 @@ impl LinkCableDataPlaneReceiver {
                     return Err(LinkCableDataPlaneError::Closed);
                 }
                 if let Some(packet) = state.queues[slot].pop_front() {
+                    if state.pending_terminal_abort.is_some_and(|pending| {
+                        pending.target_slot == slot
+                            && pending.sender_slot == usize::from(packet.player_index.zero_based())
+                            && pending.sender_sequence == packet.sequence
+                    }) {
+                        self.pending_terminal_delivery = state.pending_terminal_abort;
+                    }
                     return Ok(LinkCableDataPlaneEvent::Packet(packet));
                 }
             }
@@ -746,6 +789,40 @@ impl LinkCableDataPlaneReceiver {
             // wakeup. A stale permit merely causes one harmless loop.
             self.notify.notified().await;
         }
+    }
+
+    /// Confirms that the most recently returned terminal packet was written to
+    /// the peer's private WebSocket before publishing the aborted lifecycle.
+    pub(crate) fn confirm_packet_delivery(&mut self) -> Result<(), LinkCableDataPlaneError> {
+        let Some(delivery) = self.pending_terminal_delivery.take() else {
+            return Ok(());
+        };
+        let inner = self
+            .inner
+            .upgrade()
+            .ok_or(LinkCableDataPlaneError::Closed)?;
+        let mut state = inner.lock()?;
+        let slot = player_slot(self.local_slot)?;
+        let Some(endpoint) = state.endpoints[slot] else {
+            return Err(LinkCableDataPlaneError::AttachmentReplaced);
+        };
+        if endpoint.connection_id != self.connection_id
+            || endpoint.attachment_generation != self.attachment_generation
+            || !endpoint.receiver_claimed
+        {
+            return Err(LinkCableDataPlaneError::AttachmentReplaced);
+        }
+
+        // An authoritative provider/epoch transition may have superseded this
+        // delivery while the socket write was in progress.
+        if state.pending_terminal_abort != Some(delivery) {
+            return Ok(());
+        }
+
+        abort_cable(&mut state, Some(delivery.reason))?;
+        drop(state);
+        inner.notify_both();
+        Ok(())
     }
 }
 
@@ -801,6 +878,11 @@ impl LinkCableDataPlaneInner {
         }
 
         state.endpoints[slot] = None;
+        if terminal_abort_can_still_reach_target(&state, slot) {
+            drop(state);
+            self.notifiers[1 - slot].notify_one();
+            return;
+        }
         let _ = abort_cable(&mut state, Some(LinkCableAbortReason::PeerDisconnected));
         drop(state);
         self.notify_both();
@@ -843,6 +925,25 @@ fn ensure_open(state: &LinkCableDataPlaneState) -> Result<(), LinkCableDataPlane
     }
 }
 
+fn ensure_no_terminal_abort_pending(
+    state: &LinkCableDataPlaneState,
+) -> Result<(), LinkCableDataPlaneError> {
+    if state.pending_terminal_abort.is_some() {
+        Err(LinkCableDataPlaneError::NotActive)
+    } else {
+        Ok(())
+    }
+}
+
+fn terminal_abort_can_still_reach_target(
+    state: &LinkCableDataPlaneState,
+    detached_slot: usize,
+) -> bool {
+    state
+        .pending_terminal_abort
+        .is_some_and(|pending| pending.target_slot != detached_slot)
+}
+
 fn activate_new_cable(state: &mut LinkCableDataPlaneState) -> Result<(), LinkCableDataPlaneError> {
     debug_assert!(state.cable_epoch < MAX_SIGNED_U64);
     state.cable_epoch += 1;
@@ -868,6 +969,7 @@ fn clear_packet_state(state: &mut LinkCableDataPlaneState) {
     }
     state.next_sender_sequences = [0, 0];
     state.transaction_state.reset(state.protocol);
+    state.pending_terminal_abort = None;
 }
 
 fn advance_lifecycle(state: &mut LinkCableDataPlaneState) -> Result<(), LinkCableDataPlaneError> {
@@ -913,6 +1015,19 @@ fn event_emulated_time(frame: &LinkCableWireFrame) -> Option<u64> {
             GbSerialEvent::Start { emulated_time, .. }
             | GbSerialEvent::Reply { emulated_time, .. } => Some(*emulated_time),
             GbSerialEvent::Commit { .. } | GbSerialEvent::Abort { .. } => None,
+        },
+    }
+}
+
+fn terminal_abort_reason(frame: &LinkCableWireFrame) -> Option<LinkCableAbortReason> {
+    match frame {
+        LinkCableWireFrame::GbaSioMulti(frame) => match &frame.event {
+            GbaSioMultiEvent::TransferAbort { reason, .. } => Some(*reason),
+            _ => None,
+        },
+        LinkCableWireFrame::GbSerial(frame) => match &frame.event {
+            GbSerialEvent::Abort { reason, .. } => Some(*reason),
+            _ => None,
         },
     }
 }
@@ -1234,6 +1349,392 @@ mod tests {
                 "transaction abort must clear every previously queued event"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn gba_abort_reaches_peer_before_terminal_lifecycle_and_replug_rotates_epoch() {
+        let (handle, connection_zero, connection_one, mut receiver_zero, mut receiver_one, cable) =
+            active_pair(8).await;
+
+        let mode_zero = gba_packet(
+            PlayerIndex::ONE,
+            0,
+            cable,
+            GbaSioMultiEvent::ModeSet {
+                mode: 2,
+                siocnt: 0x2000,
+                rcnt: 0,
+                emulated_time: 1,
+            },
+            1,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                mode_zero.clone(),
+            )
+            .expect("slot zero mode");
+        assert_eq!(
+            receiver_one.recv().await.expect("slot zero mode delivery"),
+            LinkCableDataPlaneEvent::Packet(mode_zero)
+        );
+
+        let mode_one = gba_packet(
+            PlayerIndex::TWO,
+            0,
+            cable,
+            GbaSioMultiEvent::ModeSet {
+                mode: 2,
+                siocnt: 0x2000,
+                rcnt: 0,
+                emulated_time: 2,
+            },
+            2,
+        );
+        handle
+            .relay(
+                connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                mode_one.clone(),
+            )
+            .expect("slot one mode");
+        assert_eq!(
+            receiver_zero.recv().await.expect("slot one mode delivery"),
+            LinkCableDataPlaneEvent::Packet(mode_one)
+        );
+
+        let start = gba_packet(
+            PlayerIndex::ONE,
+            1,
+            cable,
+            GbaSioMultiEvent::TransferStart {
+                transfer_id: 1,
+                siocnt: 0x2000,
+                parent_word: 0x1111,
+                emulated_time: 3,
+            },
+            3,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                start.clone(),
+            )
+            .expect("GBA start");
+        assert_eq!(
+            receiver_one.recv().await.expect("GBA start delivery"),
+            LinkCableDataPlaneEvent::Packet(start)
+        );
+
+        // Native mGBA can republish a changed SIOCNT/RCNT/time snapshot while
+        // the transfer is pending, provided the link remains in MULTI mode.
+        let redundant_multi_mode = gba_packet(
+            PlayerIndex::ONE,
+            2,
+            cable,
+            GbaSioMultiEvent::ModeSet {
+                mode: 2,
+                siocnt: 0x20f7,
+                rcnt: 0x7fff,
+                emulated_time: 99,
+            },
+            99,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                redundant_multi_mode,
+            )
+            .expect("idempotent MULTI mode refresh");
+
+        let abort = gba_packet(
+            PlayerIndex::TWO,
+            1,
+            cable,
+            GbaSioMultiEvent::TransferAbort {
+                transfer_id: 1,
+                reason: LinkCableAbortReason::Timeout,
+            },
+            0,
+        );
+        handle
+            .relay(
+                connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                abort.clone(),
+            )
+            .expect("accepted GBA abort");
+
+        assert_eq!(
+            handle
+                .snapshot(PlayerIndex::ONE)
+                .expect("draining snapshot")
+                .status,
+            LinkCableDataPlaneStatus::Active,
+            "terminal lifecycle must wait until the peer's socket delivery"
+        );
+        assert_eq!(
+            handle.relay(
+                connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                gba_packet(
+                    PlayerIndex::TWO,
+                    2,
+                    cable,
+                    GbaSioMultiEvent::ModeSet {
+                        mode: 2,
+                        siocnt: 0x2000,
+                        rcnt: 0,
+                        emulated_time: 100,
+                    },
+                    100,
+                ),
+            ),
+            Err(LinkCableDataPlaneError::NotActive),
+            "no later packet may enter a terminal-draining generation"
+        );
+
+        assert_eq!(
+            receiver_zero
+                .recv()
+                .await
+                .expect("exact GBA abort delivery"),
+            LinkCableDataPlaneEvent::Packet(abort)
+        );
+        assert_eq!(
+            handle
+                .snapshot(PlayerIndex::ONE)
+                .expect("unconfirmed delivery snapshot")
+                .status,
+            LinkCableDataPlaneStatus::Active
+        );
+        receiver_zero
+            .confirm_packet_delivery()
+            .expect("confirm GBA abort socket delivery");
+
+        for receiver in [&mut receiver_zero, &mut receiver_one] {
+            let lifecycle = assert_lifecycle(receiver, LinkCableDataPlaneStatus::Aborted).await;
+            assert_eq!(lifecycle.abort_reason, Some(LinkCableAbortReason::Timeout));
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), receiver.recv())
+                    .await
+                    .is_err(),
+                "terminal transition must clear every remaining packet"
+            );
+        }
+
+        handle
+            .invalidate_connection(connection_one)
+            .expect("detach aborted sender");
+        assert_eq!(
+            receiver_one.recv().await,
+            Err(LinkCableDataPlaneError::AttachmentReplaced)
+        );
+        let replacement_connection = ConnectionId::new();
+        let LinkCableAttachment {
+            receiver: _replacement_receiver,
+            snapshot: replacement,
+        } = handle
+            .attach(PlayerIndex::TWO, replacement_connection)
+            .expect("replug sender");
+        assert_eq!(replacement.status, LinkCableDataPlaneStatus::Active);
+        assert!(
+            replacement.cable_epoch > cable,
+            "replug must allocate a strictly newer cable generation"
+        );
+        assert_lifecycle(&mut receiver_zero, LinkCableDataPlaneStatus::Active).await;
+    }
+
+    #[tokio::test]
+    async fn gb_abort_survives_sender_disconnect_until_exact_peer_delivery() {
+        let (handle, connection_zero, connection_one, mut receiver_zero, mut receiver_one, cable) =
+            active_pair_for(4, LinkCableWireProtocol::GbSerialV1).await;
+        let start = gb_packet(
+            PlayerIndex::ONE,
+            0,
+            cable,
+            GbSerialEvent::Start {
+                transfer_id: 1,
+                clock_owner_slot: 0,
+                sc_control: GB_SERIAL_NORMAL_CLOCK_CONTROL,
+                owner_byte: 0xa5,
+                emulated_time: 1,
+            },
+            1,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                start.clone(),
+            )
+            .expect("GB start");
+        assert_eq!(
+            receiver_one.recv().await.expect("GB start delivery"),
+            LinkCableDataPlaneEvent::Packet(start)
+        );
+
+        let abort = gb_packet(
+            PlayerIndex::TWO,
+            0,
+            cable,
+            GbSerialEvent::Abort {
+                transfer_id: 1,
+                clock_owner_slot: 0,
+                reason: LinkCableAbortReason::ProtocolViolation,
+            },
+            0,
+        );
+        handle
+            .relay(
+                connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                abort.clone(),
+            )
+            .expect("accepted GB abort");
+        let draining = handle
+            .invalidate_connection(connection_one)
+            .expect("sender disconnect while abort drains");
+        assert_eq!(draining.status, LinkCableDataPlaneStatus::Active);
+        assert_eq!(
+            receiver_one.recv().await,
+            Err(LinkCableDataPlaneError::AttachmentReplaced)
+        );
+        assert!(matches!(
+            handle.attach(PlayerIndex::TWO, ConnectionId::new()),
+            Err(LinkCableDataPlaneError::NotActive)
+        ));
+
+        assert_eq!(
+            receiver_zero.recv().await.expect("exact GB abort delivery"),
+            LinkCableDataPlaneEvent::Packet(abort)
+        );
+        receiver_zero
+            .confirm_packet_delivery()
+            .expect("confirm GB abort socket delivery");
+        let aborted = assert_lifecycle(&mut receiver_zero, LinkCableDataPlaneStatus::Aborted).await;
+        assert_eq!(
+            aborted.abort_reason,
+            Some(LinkCableAbortReason::ProtocolViolation)
+        );
+
+        let replacement_connection = ConnectionId::new();
+        let LinkCableAttachment {
+            receiver: _replacement_receiver,
+            snapshot: replacement,
+        } = handle
+            .attach(PlayerIndex::TWO, replacement_connection)
+            .expect("replug disconnected sender");
+        assert_eq!(replacement.status, LinkCableDataPlaneStatus::Active);
+        assert!(replacement.cable_epoch > cable);
+        assert_lifecycle(&mut receiver_zero, LinkCableDataPlaneStatus::Active).await;
+    }
+
+    #[tokio::test]
+    async fn failed_terminal_packet_write_clears_pending_abort_and_requires_replug() {
+        let (handle, connection_zero, connection_one, mut receiver_zero, mut receiver_one, cable) =
+            active_pair_for(4, LinkCableWireProtocol::GbSerialV1).await;
+        let start = gb_packet(
+            PlayerIndex::ONE,
+            0,
+            cable,
+            GbSerialEvent::Start {
+                transfer_id: 1,
+                clock_owner_slot: 0,
+                sc_control: GB_SERIAL_NORMAL_CLOCK_CONTROL,
+                owner_byte: 0xa5,
+                emulated_time: 1,
+            },
+            1,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                start.clone(),
+            )
+            .expect("GB start");
+        assert_eq!(
+            receiver_one.recv().await.expect("GB start delivery"),
+            LinkCableDataPlaneEvent::Packet(start)
+        );
+
+        let abort = gb_packet(
+            PlayerIndex::TWO,
+            0,
+            cable,
+            GbSerialEvent::Abort {
+                transfer_id: 1,
+                clock_owner_slot: 0,
+                reason: LinkCableAbortReason::Timeout,
+            },
+            0,
+        );
+        handle
+            .relay(
+                connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                abort.clone(),
+            )
+            .expect("accepted GB abort");
+        assert_eq!(
+            receiver_zero
+                .recv()
+                .await
+                .expect("terminal packet selected for socket write"),
+            LinkCableDataPlaneEvent::Packet(abort)
+        );
+
+        // A failed WebSocket write exits the session without confirming the
+        // packet. Dropping that target receiver must clear the terminal drain
+        // rather than leaving the room permanently wedged.
+        drop(receiver_zero);
+        let failed_delivery =
+            assert_lifecycle(&mut receiver_one, LinkCableDataPlaneStatus::Aborted).await;
+        assert_eq!(
+            failed_delivery.abort_reason,
+            Some(LinkCableAbortReason::PeerDisconnected)
+        );
+
+        let replacement_connection = ConnectionId::new();
+        let LinkCableAttachment {
+            receiver: mut replacement_receiver,
+            snapshot: replacement,
+        } = handle
+            .attach(PlayerIndex::ONE, replacement_connection)
+            .expect("replace failed target socket");
+        assert_eq!(replacement.status, LinkCableDataPlaneStatus::Active);
+        assert!(replacement.cable_epoch > cable);
+        assert_lifecycle(&mut receiver_one, LinkCableDataPlaneStatus::Active).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), replacement_receiver.recv())
+                .await
+                .is_err(),
+            "the undelivered abort must not leak into the new cable generation"
+        );
     }
 
     #[tokio::test]

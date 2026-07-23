@@ -1,6 +1,8 @@
 mod support;
 
-use sb_netplay_serv::protocol::{GbaSioMultiEvent, GbaSioMultiFrame, decode_gba_sio_multi_frame};
+use sb_netplay_serv::protocol::{
+    GbaSioMultiEvent, GbaSioMultiFrame, LinkCableAbortReason, decode_gba_sio_multi_frame,
+};
 use serde_json::Value;
 use serde_json::json;
 use support::{SmokeClient, SmokeServer, connect_link_pair, move_link_pair_to_syncing};
@@ -31,6 +33,60 @@ async fn two_clients_start_link_room_and_exchange_link_packets() {
     guest.expect_no_link_packet_from(1).await;
     let packet = host.expect_link_packet_from(1).await;
     assert_received_mode_set(&packet, &expected);
+}
+
+#[tokio::test]
+async fn terminal_gba_abort_packet_precedes_aborted_grants_on_both_sockets() {
+    let server = SmokeServer::start().await;
+    server.create_link_room().await;
+    let (mut host, mut guest) = connect_link_pair(&server).await;
+    move_link_pair_to_syncing(&mut host, &mut guest).await;
+
+    host.send(json!({ "type": "ready" })).await;
+    guest.send(json!({ "type": "ready" })).await;
+    host.expect_type("startSession").await;
+    guest.expect_type("startSession").await;
+
+    let host_mode = host.send_gba_mode_set(16).await;
+    let packet = guest.expect_link_packet_from(0).await;
+    assert_received_gba_frame(&packet, &host_mode, 16);
+    let guest_mode = guest.send_gba_mode_set(18).await;
+    let packet = host.expect_link_packet_from(1).await;
+    assert_received_gba_frame(&packet, &guest_mode, 18);
+
+    let start = host
+        .send_gba_event(
+            GbaSioMultiEvent::TransferStart {
+                transfer_id: 1,
+                siocnt: 0x2000,
+                parent_word: 0x1234,
+                emulated_time: 20,
+            },
+            20,
+        )
+        .await;
+    let packet = guest.expect_link_packet_from(0).await;
+    assert_received_gba_frame(&packet, &start, 20);
+
+    let cable_epoch = start.header.cable_epoch;
+    let abort = guest
+        .send_gba_event(
+            GbaSioMultiEvent::TransferAbort {
+                transfer_id: 1,
+                reason: LinkCableAbortReason::Timeout,
+            },
+            0,
+        )
+        .await;
+    let packet = host
+        .expect_link_packet_before_grant_status(1, "aborted")
+        .await;
+    assert_received_gba_frame(&packet, &abort, 0);
+
+    let host_aborted = host.expect_link_grant_status("aborted").await;
+    let guest_aborted = guest.expect_link_grant_status("aborted").await;
+    assert_eq!(host_aborted.cable_epoch, cable_epoch);
+    assert_eq!(guest_aborted.cable_epoch, cable_epoch);
 }
 
 #[tokio::test]
@@ -143,9 +199,29 @@ async fn assert_link_handshake_rejected(url: String, include_auth: bool, expecte
 }
 
 fn assert_received_mode_set(message: &Value, expected: &GbaSioMultiFrame) {
+    assert_received_gba_frame(
+        message,
+        expected,
+        match expected.event {
+            GbaSioMultiEvent::ModeSet { emulated_time, .. } => emulated_time,
+            _ => panic!("expected GBA MODE_SET fixture"),
+        },
+    );
+
     let payload: Vec<u8> =
         serde_json::from_value(message["packet"]["payload"].clone()).expect("SBLK payload bytes");
     let decoded = decode_gba_sio_multi_frame(&payload).expect("relayed GBA SIO MODE_SET");
+    assert!(matches!(decoded.event, GbaSioMultiEvent::ModeSet { .. }));
+}
+
+fn assert_received_gba_frame(
+    message: &Value,
+    expected: &GbaSioMultiFrame,
+    envelope_emulated_time: u64,
+) {
+    let payload: Vec<u8> =
+        serde_json::from_value(message["packet"]["payload"].clone()).expect("SBLK payload bytes");
+    let decoded = decode_gba_sio_multi_frame(&payload).expect("relayed GBA SIO event");
 
     assert_eq!(decoded, *expected);
     assert_eq!(decoded.header.room_epoch, expected.header.room_epoch);
@@ -165,8 +241,8 @@ fn assert_received_mode_set(message: &Value, expected: &GbaSioMultiFrame) {
         json!(expected.header.sender_sequence)
     );
 
-    let GbaSioMultiEvent::ModeSet { emulated_time, .. } = decoded.event else {
-        panic!("expected relayed GBA MODE_SET");
-    };
-    assert_eq!(message["packet"]["emulatedTime"], json!(emulated_time));
+    assert_eq!(
+        message["packet"]["emulatedTime"],
+        json!(envelope_emulated_time)
+    );
 }
