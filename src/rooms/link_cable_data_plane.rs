@@ -598,6 +598,12 @@ impl LinkCableDataPlaneHandle {
     ) -> Result<(), LinkCableDataPlaneError> {
         let sender_slot = player_slot(authenticated_slot)?;
         let mut state = self.inner.lock()?;
+        if observed_room_epoch != state.room_epoch {
+            return Err(LinkCableDataPlaneError::RoomEpochMismatch);
+        }
+        if observed_session_epoch != state.session_epoch {
+            return Err(LinkCableDataPlaneError::SessionEpochMismatch);
+        }
         ensure_open(&state)?;
         if state.status != LinkCableDataPlaneStatus::Active {
             return Err(LinkCableDataPlaneError::NotActive);
@@ -611,12 +617,6 @@ impl LinkCableDataPlaneHandle {
         };
         if endpoint.connection_id != connection_id || !endpoint.receiver_claimed {
             return Err(LinkCableDataPlaneError::AuthenticatedSlotMismatch);
-        }
-        if observed_room_epoch != state.room_epoch {
-            return Err(LinkCableDataPlaneError::RoomEpochMismatch);
-        }
-        if observed_session_epoch != state.session_epoch {
-            return Err(LinkCableDataPlaneError::SessionEpochMismatch);
         }
         if packet.player_index != authenticated_slot {
             return self.abort_relay(
@@ -1187,6 +1187,151 @@ mod tests {
                 .expect("snapshot")
                 .status,
             LinkCableDataPlaneStatus::Aborted
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_epochs_precede_inactive_closed_and_terminal_draining_states() {
+        let (
+            inactive_handle,
+            inactive_connection,
+            _inactive_peer_connection,
+            _inactive_sender_receiver,
+            _inactive_target_receiver,
+            inactive_cable,
+        ) = active_pair(2).await;
+        inactive_handle
+            .synchronize_epochs(ROOM_EPOCH + 1, SESSION_EPOCH + 1)
+            .expect("synchronize epochs");
+        let inactive_packet = packet(PlayerIndex::ONE, 0, inactive_cable, EMULATED_TIME);
+
+        assert_eq!(
+            inactive_handle.relay(
+                inactive_connection,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                inactive_packet.clone(),
+            ),
+            Err(LinkCableDataPlaneError::RoomEpochMismatch),
+            "room epoch must win over an inactive data-plane status"
+        );
+        assert_eq!(
+            inactive_handle.relay(
+                inactive_connection,
+                PlayerIndex::ONE,
+                ROOM_EPOCH + 1,
+                SESSION_EPOCH,
+                inactive_packet.clone(),
+            ),
+            Err(LinkCableDataPlaneError::SessionEpochMismatch),
+            "session epoch must win over an inactive data-plane status"
+        );
+
+        inactive_handle.close().expect("close data plane");
+        assert_eq!(
+            inactive_handle.relay(
+                inactive_connection,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                inactive_packet.clone(),
+            ),
+            Err(LinkCableDataPlaneError::RoomEpochMismatch),
+            "room epoch must win over a closed data plane"
+        );
+        assert_eq!(
+            inactive_handle.relay(
+                inactive_connection,
+                PlayerIndex::ONE,
+                ROOM_EPOCH + 1,
+                SESSION_EPOCH,
+                inactive_packet,
+            ),
+            Err(LinkCableDataPlaneError::SessionEpochMismatch),
+            "session epoch must win over a closed data plane"
+        );
+
+        let (
+            terminal_handle,
+            terminal_connection_zero,
+            terminal_connection_one,
+            _terminal_receiver_zero,
+            mut terminal_receiver_one,
+            terminal_cable,
+        ) = active_pair_for(4, LinkCableWireProtocol::GbSerialV1).await;
+        let start = gb_packet(
+            PlayerIndex::ONE,
+            0,
+            terminal_cable,
+            GbSerialEvent::Start {
+                transfer_id: 1,
+                clock_owner_slot: 0,
+                sc_control: GB_SERIAL_NORMAL_CLOCK_CONTROL,
+                owner_byte: 0xa5,
+                emulated_time: 1,
+            },
+            1,
+        );
+        terminal_handle
+            .relay(
+                terminal_connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                start.clone(),
+            )
+            .expect("GB start");
+        assert_eq!(
+            terminal_receiver_one
+                .recv()
+                .await
+                .expect("GB start delivery"),
+            LinkCableDataPlaneEvent::Packet(start)
+        );
+
+        let abort = gb_packet(
+            PlayerIndex::TWO,
+            0,
+            terminal_cable,
+            GbSerialEvent::Abort {
+                transfer_id: 1,
+                clock_owner_slot: 0,
+                reason: LinkCableAbortReason::Timeout,
+            },
+            0,
+        );
+        terminal_handle
+            .relay(
+                terminal_connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                abort.clone(),
+            )
+            .expect("accepted GB abort");
+
+        assert_eq!(
+            terminal_handle.relay(
+                terminal_connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH - 1,
+                SESSION_EPOCH,
+                abort.clone(),
+            ),
+            Err(LinkCableDataPlaneError::RoomEpochMismatch),
+            "room epoch must win while a terminal abort awaits delivery"
+        );
+        assert_eq!(
+            terminal_handle.relay(
+                terminal_connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH - 1,
+                abort,
+            ),
+            Err(LinkCableDataPlaneError::SessionEpochMismatch),
+            "session epoch must win while a terminal abort awaits delivery"
         );
     }
 

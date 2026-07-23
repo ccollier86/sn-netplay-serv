@@ -1,7 +1,8 @@
 mod support;
 
 use sb_netplay_serv::protocol::{
-    GbaSioMultiEvent, GbaSioMultiFrame, LinkCableAbortReason, decode_gba_sio_multi_frame,
+    GbaSioMultiEvent, GbaSioMultiFrame, LinkCableAbortReason, LinkCableWireHeader,
+    decode_gba_sio_multi_frame, encode_gba_sio_multi_frame,
 };
 use serde_json::Value;
 use serde_json::json;
@@ -99,6 +100,59 @@ async fn link_packet_before_start_is_rejected() {
     host.send_gba_mode_set(16).await;
 
     host.expect_error("notPlaying").await;
+}
+
+#[tokio::test]
+async fn old_link_packet_during_recovery_is_rejected_by_epoch_before_room_status() {
+    let server = SmokeServer::start().await;
+    server.create_link_room().await;
+    let (mut host, mut guest) = connect_link_pair(&server).await;
+    move_link_pair_to_syncing(&mut host, &mut guest).await;
+
+    host.send(json!({ "type": "ready" })).await;
+    guest.send(json!({ "type": "ready" })).await;
+    host.expect_type("startSession").await;
+    guest.expect_type("startSession").await;
+
+    let (old_room_epoch, old_session_epoch) = host.epochs();
+    let old_grant = host.link_grant().expect("ready host grant").clone();
+    guest.close_control().await;
+    host.expect_type("recoveryStarted").await;
+
+    let old_frame = GbaSioMultiFrame {
+        header: LinkCableWireHeader {
+            room_epoch: old_room_epoch,
+            session_epoch: old_session_epoch,
+            cable_epoch: old_grant.cable_epoch,
+            sender_sequence: 0,
+            sender_slot: old_grant.local_slot,
+        },
+        event: GbaSioMultiEvent::ModeSet {
+            mode: 2,
+            siocnt: 0x2000,
+            rcnt: 0,
+            emulated_time: 16,
+        },
+    };
+    let payload = encode_gba_sio_multi_frame(&old_frame).expect("old SBLK frame");
+    host.send(json!({
+        "type": "linkCablePacket",
+        "roomEpoch": old_room_epoch,
+        "sessionEpoch": old_session_epoch,
+        "packet": {
+            "playerIndex": old_grant.local_slot,
+            "sequence": 0,
+            "emulatedTime": 16,
+            "payload": payload
+        }
+    }))
+    .await;
+
+    let error = host.expect_type("error").await;
+    assert!(
+        error["code"] == "staleRoomEpoch" || error["code"] == "staleSessionEpoch",
+        "old recovery packet must be rejected by epoch, got {error}"
+    );
 }
 
 #[tokio::test]

@@ -99,14 +99,26 @@ Before every link-provider server checkpoint:
 
 The server foundation now includes the private grant, frozen SBLK validation,
 bounded targeted relay, endpoint ownership, stale-epoch rejection, and
-reconnect generation changes. Remaining release work is:
+reconnect generation changes. Link-packet epoch validation is performed again
+under the authoritative registry read and inside the data plane before
+inactive/closed checks, so a concurrent recovery is linearized as either a
+successful old-generation relay or a stale-epoch response rather than a
+terminal `notPlaying` error.
 
-1. Consume `linkCableGrant` / `linkCableGrantUpdated` in the Android transport
-   actor and configure the native bridge with the exact granted identity.
-2. Exercise disconnect/reconnect through two real Android processes and prove a
+On 2026-07-23, a physical Android host and synthetic protocol-5 guest reached
+playing twice around an intentional guest disconnect. Room/session epochs
+advanced from `2/2` to `3/3`, cable epoch advanced from `1` to `2`, the resume
+capability rotated, and each generation exchanged a valid 56-byte GBA SBLK
+frame in both directions. Android returned to solo play after the guest left.
+This proves the provider/native recovery seam, but it is not the two-physical-
+Android qualification gate.
+
+Remaining release work is:
+
+1. Exercise disconnect/reconnect through two real Android processes and prove a
    strictly newer cable epoch is required before traffic resumes.
-3. Run two-client GB, GBC, and GBA qualification before enabling any rollout.
-4. Add multi-room saturation/load qualification before production capacity is
+2. Run two-client GB, GBC, and GBA qualification before enabling any rollout.
+3. Add multi-room saturation/load qualification before production capacity is
    raised.
 
 Future PSP and Nintendo 3DS multiplayer integrate as separate external-network

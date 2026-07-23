@@ -245,6 +245,67 @@ async fn stale_link_route_epoch_is_rejected_without_any_delivery() {
 }
 
 #[tokio::test]
+async fn old_link_route_during_recovery_is_rejected_by_epoch_before_room_status() {
+    let (registry, invite, host_connection, guest_connection) = compatible_link_room().await;
+    let LinkCableAttachment {
+        receiver: mut host_receiver,
+        ..
+    } = registry
+        .claim_link_cable_data_plane(invite.clone(), host_connection)
+        .await
+        .expect("host data plane")
+        .expect("link room");
+    let LinkCableAttachment {
+        receiver: _guest_receiver,
+        snapshot: active_snapshot,
+    } = registry
+        .claim_link_cable_data_plane(invite.clone(), guest_connection)
+        .await
+        .expect("guest data plane")
+        .expect("link room");
+    let activated = timeout(Duration::from_millis(100), host_receiver.recv())
+        .await
+        .expect("host activation notification")
+        .expect("host private event");
+    assert!(matches!(
+        activated,
+        LinkCableDataPlaneEvent::Lifecycle(snapshot)
+            if snapshot.status == LinkCableDataPlaneStatus::Active
+    ));
+
+    registry
+        .mark_ready(invite.clone(), host_connection, None)
+        .await
+        .expect("host ready");
+    let playing = registry
+        .mark_ready(invite.clone(), guest_connection, None)
+        .await
+        .expect("guest ready");
+    assert_eq!(playing.status, RoomStatus::Playing);
+
+    let packet = gba_mode_set_packet(PlayerIndex::ONE, 0, 64, active_snapshot);
+    let recovering = registry
+        .disconnect(invite.clone(), guest_connection)
+        .await
+        .expect("guest disconnect");
+    assert_eq!(recovering.status, RoomStatus::Recovering);
+    assert!(recovering.room_epoch > active_snapshot.room_epoch);
+    assert!(recovering.session_epoch > active_snapshot.session_epoch);
+
+    let result = registry
+        .relay_link_cable_packet(
+            invite,
+            host_connection,
+            active_snapshot.room_epoch,
+            active_snapshot.session_epoch,
+            packet,
+        )
+        .await;
+
+    assert!(matches!(result, Err(RoomError::StaleRoomEpoch)));
+}
+
+#[tokio::test]
 async fn link_compatibility_after_start_does_not_roll_back_room() {
     let (registry, invite, host_connection, guest_connection) = compatible_link_room().await;
     registry

@@ -145,6 +145,12 @@ impl InMemoryRoomRegistry {
             let stored_room = rooms
                 .get(invite_code.normalized())
                 .ok_or(RoomError::NotFound)?;
+            if stored_room.room.room_epoch != room_epoch {
+                return Err(RoomError::StaleRoomEpoch);
+            }
+            if stored_room.room.session_epoch != session_epoch {
+                return Err(RoomError::StaleSessionEpoch);
+            }
             stored_room
                 .room
                 .link_cable_data_plane_handle_for_connection(connection_id)?

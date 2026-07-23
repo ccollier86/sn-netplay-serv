@@ -400,6 +400,11 @@ async fn handle_client_message(
         } => {
             apply_room_result(
                 sender,
+                validate_epochs(services, invite_code, room_epoch, session_epoch).await,
+            )
+            .await?;
+            apply_room_result(
+                sender,
                 services
                     .rooms
                     .relay_link_cable_packet(
