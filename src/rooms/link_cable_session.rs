@@ -128,6 +128,7 @@ impl LinkCableSession {
 
     /// Maps private-provider failures onto the stable room-domain vocabulary.
     pub(crate) fn map_data_plane_error(error: LinkCableDataPlaneError) -> RoomError {
+        let diagnostic_class = error.diagnostic_class();
         match error {
             LinkCableDataPlaneError::Closed => RoomError::RoomClosed,
             LinkCableDataPlaneError::ConnectionNotAttached
@@ -155,7 +156,9 @@ impl LinkCableSession {
             | LinkCableDataPlaneError::CableEpochExhausted
             | LinkCableDataPlaneError::AttachmentGenerationExhausted
             | LinkCableDataPlaneError::LifecycleRevisionExhausted
-            | LinkCableDataPlaneError::StatePoisoned => RoomError::LinkPacketInvalid,
+            | LinkCableDataPlaneError::StatePoisoned => {
+                RoomError::LinkPacketInvalid { diagnostic_class }
+            }
             LinkCableDataPlaneError::EnvelopeSlotMismatch(player_index) => {
                 RoomError::SlotSpoofing(player_index)
             }
@@ -192,5 +195,32 @@ impl LinkCableSession {
     ) -> bool {
         self.state
             .connected_players_are_compatible(connected_players, max_players)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LinkCableSession;
+    use crate::protocol::LinkCableWireCodecError;
+    use crate::rooms::{LinkCableDataPlaneError, LinkCableTransactionError, RoomError};
+
+    #[test]
+    fn mapping_preserves_static_link_rejection_class() {
+        assert_eq!(
+            LinkCableSession::map_data_plane_error(LinkCableDataPlaneError::Transaction(
+                LinkCableTransactionError::TransferAlreadyPending,
+            )),
+            RoomError::LinkPacketInvalid {
+                diagnostic_class: "transactionTransferAlreadyPending",
+            }
+        );
+        assert_eq!(
+            LinkCableSession::map_data_plane_error(LinkCableDataPlaneError::WireCodec(
+                LinkCableWireCodecError::UnsupportedMagic,
+            )),
+            RoomError::LinkPacketInvalid {
+                diagnostic_class: "wireUnsupportedMagic",
+            }
+        );
     }
 }

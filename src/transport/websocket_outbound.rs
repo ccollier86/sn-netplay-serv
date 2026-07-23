@@ -94,9 +94,10 @@ fn room_error_message(error: RoomError) -> ServerMessage {
             "snapshotFileRelayUnavailable",
             "Snapshot file relay is unavailable for this room.",
         ),
-        RoomError::LinkPacketInvalid => {
-            static_error("linkPacketInvalid", "Link-cable packet is invalid.")
-        }
+        RoomError::LinkPacketInvalid { diagnostic_class } => ServerMessage::Error {
+            code: "linkPacketInvalid".to_string(),
+            message: format!("Link-cable packet is invalid (diagnostic: {diagnostic_class})."),
+        },
         RoomError::InvalidPayload => static_error("invalidPayload", "Payload is invalid."),
         RoomError::OutOfOrderLinkPacket => {
             static_error("outOfOrderLinkPacket", "Link-cable packet is out of order.")
@@ -135,5 +136,28 @@ fn room_error_message(error: RoomError) -> ServerMessage {
         RoomError::VoiceUnavailable => {
             static_error("voiceUnavailable", "Voice chat is unavailable.")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::room_error_message;
+    use crate::rooms::RoomError;
+
+    #[test]
+    fn link_packet_error_keeps_stable_code_and_serializes_diagnostic_class() {
+        let payload = serde_json::to_value(room_error_message(RoomError::LinkPacketInvalid {
+            diagnostic_class: "transactionTransferIdMismatch",
+        }))
+        .expect("server error serializes");
+
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "type": "error",
+                "code": "linkPacketInvalid",
+                "message": "Link-cable packet is invalid (diagnostic: transactionTransferIdMismatch)."
+            })
+        );
     }
 }

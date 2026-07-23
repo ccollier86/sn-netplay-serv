@@ -156,15 +156,38 @@ impl InMemoryRoomRegistry {
                 .link_cable_data_plane_handle_for_connection(connection_id)?
         };
 
-        data_plane
-            .relay(
-                connection_id,
-                player_index,
-                room_epoch,
-                session_epoch,
-                packet,
-            )
-            .map_err(map_link_cable_data_plane_error)
+        let sender_slot = packet.player_index.zero_based();
+        let sender_sequence = packet.sequence;
+        let result = data_plane.relay(
+            connection_id,
+            player_index,
+            room_epoch,
+            session_epoch,
+            packet,
+        );
+
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let diagnostic_class = error.diagnostic_class();
+                let detail = format!(
+                    "relay rejected class={diagnostic_class} slot={sender_slot} \
+                     sequence={sender_sequence} observedRoomEpoch={room_epoch} \
+                     observedSessionEpoch={session_epoch}"
+                );
+                let mut rooms = self.invite_codes.write().await;
+                if let Some(stored_room) = rooms.get_mut(invite_code.normalized()) {
+                    stored_room.record_diagnostic_observation(
+                        self.clock.now(),
+                        "linkCableRelayRejected",
+                        &detail,
+                    );
+                    self.record_recent_events(stored_room.debug_events(1));
+                }
+
+                Err(map_link_cable_data_plane_error(error))
+            }
+        }
     }
 
     /// Records a deterministic state hash and triggers resync on true drift.

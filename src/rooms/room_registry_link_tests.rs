@@ -173,6 +173,82 @@ async fn validated_link_packet_uses_only_the_targeted_private_data_plane() {
 }
 
 #[tokio::test]
+async fn rejected_link_packet_records_class_without_advancing_public_event_sequence() {
+    let (registry, invite, host_connection, guest_connection) = compatible_link_room().await;
+    let LinkCableAttachment {
+        receiver: _host_receiver,
+        ..
+    } = registry
+        .claim_link_cable_data_plane(invite.clone(), host_connection)
+        .await
+        .expect("host data plane")
+        .expect("link room");
+    let LinkCableAttachment {
+        receiver: _guest_receiver,
+        snapshot: active_snapshot,
+    } = registry
+        .claim_link_cable_data_plane(invite.clone(), guest_connection)
+        .await
+        .expect("guest data plane")
+        .expect("link room");
+
+    registry
+        .mark_ready(invite.clone(), host_connection, None)
+        .await
+        .expect("host ready");
+    registry
+        .mark_ready(invite.clone(), guest_connection, None)
+        .await
+        .expect("guest ready");
+
+    let mut events = registry.subscribe(invite.clone()).await.expect("events");
+    let view_before = registry
+        .room_view(invite.clone())
+        .await
+        .expect("room before rejected relay");
+    let packet = gba_mode_set_packet(PlayerIndex::ONE, 1, 64, active_snapshot);
+
+    let result = registry
+        .relay_link_cable_packet(
+            invite.clone(),
+            host_connection,
+            active_snapshot.room_epoch,
+            active_snapshot.session_epoch,
+            packet,
+        )
+        .await;
+
+    assert_eq!(
+        result,
+        Err(RoomError::LinkPacketInvalid {
+            diagnostic_class: "senderSequenceMismatch",
+        })
+    );
+    assert!(matches!(events.try_recv(), Err(TryRecvError::Empty)));
+
+    let view_after = registry
+        .room_view(invite.clone())
+        .await
+        .expect("room after rejected relay");
+    assert_eq!(view_after.event_seq, view_before.event_seq);
+
+    let diagnostic = registry
+        .room_events(invite, 1)
+        .await
+        .expect("room diagnostics")
+        .pop()
+        .expect("link rejection diagnostic");
+    assert_eq!(diagnostic.event_seq, view_before.event_seq);
+    assert_eq!(diagnostic.kind, "linkCableRelayRejected");
+    assert!(diagnostic.detail.contains("class=senderSequenceMismatch"));
+    assert!(diagnostic.detail.contains("slot=0"));
+    assert!(diagnostic.detail.contains("sequence=1"));
+
+    let recent = registry.recent_events(1).await;
+    assert_eq!(recent, vec![diagnostic]);
+}
+
+#[tokio::test]
 async fn stale_link_route_epoch_is_rejected_without_any_delivery() {
     let (registry, invite, host_connection, guest_connection) = compatible_link_room().await;
     let LinkCableAttachment {

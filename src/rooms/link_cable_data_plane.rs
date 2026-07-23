@@ -179,6 +179,13 @@ pub(crate) enum LinkCableDataPlaneError {
     StatePoisoned,
 }
 
+impl LinkCableDataPlaneError {
+    /// Returns the stable, sanitized class used by operator diagnostics.
+    pub(crate) fn diagnostic_class(&self) -> &'static str {
+        link_cable_data_plane_error_class(self)
+    }
+}
+
 /// Receiver and initial private state returned by a one-step attachment.
 pub struct LinkCableAttachment {
     pub(crate) receiver: LinkCableDataPlaneReceiver,
@@ -785,7 +792,7 @@ impl LinkCableDataPlaneHandle {
             Some(sender_slot),
             Some(sender_sequence),
             Some(reason),
-            link_cable_data_plane_error_class(&error),
+            error.diagnostic_class(),
         );
         if let Err(lifecycle_error) = abort_cable(&mut state, Some(reason)) {
             drop(state);

@@ -51,8 +51,15 @@ pub enum RoomError {
     #[error("snapshot file relay is unavailable")]
     SnapshotFileRelayUnavailable,
     /// Link-cable packet failed relay validation.
-    #[error("link-cable packet is invalid")]
-    LinkPacketInvalid,
+    ///
+    /// The class is a static, sanitized operator diagnostic. It intentionally
+    /// carries no packet bytes, client-controlled text, credentials, or room
+    /// identifiers.
+    #[error("link-cable packet is invalid ({diagnostic_class})")]
+    LinkPacketInvalid {
+        /// Stable private-provider rejection class.
+        diagnostic_class: &'static str,
+    },
     /// Link-cable packet sequence did not increase.
     #[error("link-cable packet is out of order")]
     OutOfOrderLinkPacket,

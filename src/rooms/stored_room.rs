@@ -183,6 +183,13 @@ impl StoredRoom {
         self.record_event(now, kind, detail);
     }
 
+    /// Records a diagnostic observation without advancing the public event
+    /// sequence or broadcasting a room-state update.
+    pub(super) fn record_diagnostic_observation(&mut self, now: Instant, kind: &str, detail: &str) {
+        let room = self.room.view_for_event(self.event_seq, now);
+        self.push_debug_event(&room, kind, detail);
+    }
+
     /// Emits a session-start event.
     pub(super) fn emit_start(&mut self, now: Instant, start_frame: u64) {
         let room = self.record_event(now, "sessionStarted", "session started");
@@ -669,6 +676,11 @@ impl StoredRoom {
     fn record_event(&mut self, now: Instant, kind: &str, detail: &str) -> RoomView {
         self.event_seq = self.event_seq.saturating_add(1);
         let room = self.room.view_for_event(self.event_seq, now);
+        self.push_debug_event(&room, kind, detail);
+        room
+    }
+
+    fn push_debug_event(&mut self, room: &RoomView, kind: &str, detail: &str) {
         self.debug_events.push(RoomDebugEvent {
             timestamp_ms: current_timestamp_ms(),
             room_id: room.room_id,
@@ -680,7 +692,6 @@ impl StoredRoom {
             kind: kind.to_string(),
             detail: detail.to_string(),
         });
-        room
     }
 }
 
