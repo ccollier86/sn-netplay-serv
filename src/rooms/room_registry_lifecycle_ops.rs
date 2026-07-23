@@ -306,6 +306,27 @@ impl InMemoryRoomRegistry {
             _ => "socketTransportClosed",
         };
 
+        if socket_kind == "control"
+            && let Ok(Some(snapshot)) = stored_room
+                .room
+                .link_cable_diagnostic_snapshot_for_connection(connection_id)
+        {
+            tracing::warn!(
+                target: "sb_netplay_serv::link_cable",
+                link_event = "controlTransportClosed",
+                room_scope = snapshot.room_scope,
+                room_epoch = snapshot.room_epoch,
+                session_epoch = snapshot.session_epoch,
+                cable_epoch = snapshot.cable_epoch,
+                slot = snapshot.local_slot.zero_based(),
+                sequence = snapshot.next_sender_sequence,
+                abort_reason = "peerDisconnected",
+                error_class = transport_close_error_class(&reason),
+                close_code = ?transport_close_code(&reason),
+                "link cable control transport closed"
+            );
+        }
+
         stored_room.record_debug_event(now, kind, &detail);
         self.record_recent_events(stored_room.debug_events(1));
 
@@ -481,4 +502,46 @@ fn normalize_exit_reason(reason: String) -> String {
     }
 
     reason.chars().take(80).collect()
+}
+
+fn transport_close_error_class(reason: &str) -> &'static str {
+    if reason.starts_with("peer close frame code=") {
+        "peerCloseFrame"
+    } else if reason == "peer stream ended without close frame" {
+        "peerStreamEnded"
+    } else if reason.starts_with("socket receive error ") {
+        "socketReceiveError"
+    } else {
+        "unknownTransportClose"
+    }
+}
+
+fn transport_close_code(reason: &str) -> Option<u16> {
+    reason
+        .strip_prefix("peer close frame code=")?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{transport_close_code, transport_close_error_class};
+
+    #[test]
+    fn classifies_transport_close_without_reusing_client_reason_text() {
+        let reason = "peer close frame code=1000 reason=user supplied details";
+
+        assert_eq!(transport_close_error_class(reason), "peerCloseFrame");
+        assert_eq!(transport_close_code(reason), Some(1000));
+        assert_eq!(
+            transport_close_error_class("peer stream ended without close frame"),
+            "peerStreamEnded"
+        );
+        assert_eq!(
+            transport_close_error_class("socket receive error connection reset"),
+            "socketReceiveError"
+        );
+    }
 }

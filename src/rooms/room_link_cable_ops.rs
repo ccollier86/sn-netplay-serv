@@ -173,6 +173,25 @@ impl NetplayRoom {
         Ok(Some(attachment))
     }
 
+    /// Returns link-only lifecycle context for a current control connection.
+    ///
+    /// The snapshot contains no packet bytes, connection identifiers, invite
+    /// codes, license subjects, or bearer tokens.
+    pub(crate) fn link_cable_diagnostic_snapshot_for_connection(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Result<Option<LinkCableDataPlaneSnapshot>, RoomError> {
+        if !self.is_link_cable() {
+            return Ok(None);
+        }
+        let player_index = self
+            .player_index_for_connection(connection_id)
+            .ok_or(RoomError::UnknownConnection)?;
+        self.link_cable_session()?
+            .diagnostic_snapshot(player_index)
+            .map(Some)
+    }
+
     /// Invalidates one exact link endpoint connection.
     ///
     /// This deliberately does not consult player slots because lifecycle code

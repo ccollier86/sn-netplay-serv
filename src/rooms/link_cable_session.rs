@@ -90,6 +90,16 @@ impl LinkCableSession {
             .map_err(Self::map_data_plane_error)
     }
 
+    /// Returns server-private lifecycle context for sanitized diagnostics.
+    pub(crate) fn diagnostic_snapshot(
+        &self,
+        local_slot: PlayerIndex,
+    ) -> Result<LinkCableDataPlaneSnapshot, RoomError> {
+        self.data_plane
+            .snapshot(local_slot)
+            .map_err(Self::map_data_plane_error)
+    }
+
     /// Invalidates one exact connection without replacing either endpoint.
     pub(crate) fn invalidate_connection(
         &self,

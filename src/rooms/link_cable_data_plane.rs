@@ -57,6 +57,11 @@ pub struct LinkCableDataPlaneSnapshot {
     pub(crate) lifecycle_revision: u64,
     /// Authenticated endpoint receiving this private projection.
     pub(crate) local_slot: PlayerIndex,
+    /// Exact next sequence expected from the authenticated endpoint.
+    ///
+    /// This stays server-private and exists so lifecycle diagnostics can
+    /// identify the packet boundary without logging packet contents.
+    pub(crate) next_sender_sequence: u64,
 }
 
 impl fmt::Debug for LinkCableDataPlaneSnapshot {
@@ -73,6 +78,7 @@ impl fmt::Debug for LinkCableDataPlaneSnapshot {
             .field("lifecycle_revision", &self.lifecycle_revision)
             .field("queue_capacity", &self.queue_capacity)
             .field("local_slot", &self.local_slot)
+            .field("next_sender_sequence", &self.next_sender_sequence)
             .finish()
     }
 }
@@ -485,6 +491,14 @@ impl LinkCableDataPlaneHandle {
             self.inner.notifiers[1 - slot].notify_one();
             return Ok(snapshot);
         }
+        trace_link_cable_abort(
+            &state,
+            "connectionInvalidated",
+            Some(slot),
+            None,
+            Some(LinkCableAbortReason::PeerDisconnected),
+            "controlConnectionDetached",
+        );
         if let Err(error) = abort_cable(&mut state, Some(LinkCableAbortReason::PeerDisconnected)) {
             drop(state);
             self.inner.notify_both();
@@ -516,6 +530,14 @@ impl LinkCableDataPlaneHandle {
 
         state.room_epoch = room_epoch;
         state.session_epoch = session_epoch;
+        trace_link_cable_abort(
+            &state,
+            "authoritativeEpochChanged",
+            None,
+            None,
+            None,
+            "providerEpochChanged",
+        );
         if let Err(error) = abort_cable(&mut state, None) {
             drop(state);
             self.inner.notify_both();
@@ -559,6 +581,14 @@ impl LinkCableDataPlaneHandle {
         if state.status == LinkCableDataPlaneStatus::Closed {
             return Ok(());
         }
+        trace_link_cable_abort(
+            &state,
+            "providerClosed",
+            None,
+            None,
+            Some(LinkCableAbortReason::CoreClosed),
+            "providerClosed",
+        );
         clear_packet_state(&mut state);
         state.status = LinkCableDataPlaneStatus::Closed;
         state.abort_reason = Some(LinkCableAbortReason::CoreClosed);
@@ -573,7 +603,6 @@ impl LinkCableDataPlaneHandle {
     }
 
     /// Returns the current private state projected for one authenticated slot.
-    #[cfg(test)]
     pub(crate) fn snapshot(
         &self,
         local_slot: PlayerIndex,
@@ -621,6 +650,8 @@ impl LinkCableDataPlaneHandle {
         if packet.player_index != authenticated_slot {
             return self.abort_relay(
                 state,
+                sender_slot,
+                packet.sequence,
                 LinkCableAbortReason::ProtocolViolation,
                 LinkCableDataPlaneError::EnvelopeSlotMismatch(packet.player_index),
             );
@@ -630,6 +661,8 @@ impl LinkCableDataPlaneHandle {
         {
             return self.abort_relay(
                 state,
+                sender_slot,
+                packet.sequence,
                 LinkCableAbortReason::ProtocolViolation,
                 LinkCableDataPlaneError::InvalidPacketSize,
             );
@@ -640,6 +673,8 @@ impl LinkCableDataPlaneHandle {
             Err(error) => {
                 return self.abort_relay(
                     state,
+                    sender_slot,
+                    packet.sequence,
                     LinkCableAbortReason::ProtocolViolation,
                     LinkCableDataPlaneError::WireCodec(error),
                 );
@@ -653,6 +688,8 @@ impl LinkCableDataPlaneHandle {
         {
             return self.abort_relay(
                 state,
+                sender_slot,
+                packet.sequence,
                 LinkCableAbortReason::ProtocolViolation,
                 LinkCableDataPlaneError::WireIdentityMismatch,
             );
@@ -660,6 +697,8 @@ impl LinkCableDataPlaneHandle {
         if header.sender_sequence != packet.sequence {
             return self.abort_relay(
                 state,
+                sender_slot,
+                packet.sequence,
                 LinkCableAbortReason::ProtocolViolation,
                 LinkCableDataPlaneError::EnvelopeSequenceMismatch,
             );
@@ -667,6 +706,8 @@ impl LinkCableDataPlaneHandle {
         if event_emulated_time(&frame).is_some_and(|time| time != packet.emulated_time) {
             return self.abort_relay(
                 state,
+                sender_slot,
+                packet.sequence,
                 LinkCableAbortReason::ProtocolViolation,
                 LinkCableDataPlaneError::EnvelopeTimeMismatch,
             );
@@ -674,6 +715,8 @@ impl LinkCableDataPlaneHandle {
         if header.sender_sequence != state.next_sender_sequences[sender_slot] {
             return self.abort_relay(
                 state,
+                sender_slot,
+                packet.sequence,
                 LinkCableAbortReason::ProtocolViolation,
                 LinkCableDataPlaneError::SenderSequenceMismatch,
             );
@@ -683,6 +726,8 @@ impl LinkCableDataPlaneHandle {
         if !state.endpoints[target_slot].is_some_and(|target| target.receiver_claimed) {
             return self.abort_relay(
                 state,
+                sender_slot,
+                packet.sequence,
                 LinkCableAbortReason::PeerDisconnected,
                 LinkCableDataPlaneError::TargetUnavailable,
             );
@@ -690,6 +735,8 @@ impl LinkCableDataPlaneHandle {
         if state.queues[target_slot].len() >= state.queue_capacity {
             return self.abort_relay(
                 state,
+                sender_slot,
+                packet.sequence,
                 LinkCableAbortReason::QueueOverflow,
                 LinkCableDataPlaneError::QueueOverflow,
             );
@@ -697,6 +744,8 @@ impl LinkCableDataPlaneHandle {
         if let Err(error) = state.transaction_state.validate_and_apply(&frame) {
             return self.abort_relay(
                 state,
+                sender_slot,
+                packet.sequence,
                 LinkCableAbortReason::ProtocolViolation,
                 LinkCableDataPlaneError::Transaction(error),
             );
@@ -725,9 +774,19 @@ impl LinkCableDataPlaneHandle {
     fn abort_relay(
         &self,
         mut state: MutexGuard<'_, LinkCableDataPlaneState>,
+        sender_slot: usize,
+        sender_sequence: u64,
         reason: LinkCableAbortReason,
         error: LinkCableDataPlaneError,
     ) -> Result<(), LinkCableDataPlaneError> {
+        trace_link_cable_abort(
+            &state,
+            "relayRejected",
+            Some(sender_slot),
+            Some(sender_sequence),
+            Some(reason),
+            link_cable_data_plane_error_class(&error),
+        );
         if let Err(lifecycle_error) = abort_cable(&mut state, Some(reason)) {
             drop(state);
             self.inner.notify_both();
@@ -819,6 +878,14 @@ impl LinkCableDataPlaneReceiver {
             return Ok(());
         }
 
+        trace_link_cable_abort(
+            &state,
+            "terminalAbortDelivered",
+            Some(delivery.sender_slot),
+            Some(delivery.sender_sequence),
+            Some(delivery.reason),
+            "peerTerminalAbort",
+        );
         abort_cable(&mut state, Some(delivery.reason))?;
         drop(state);
         inner.notify_both();
@@ -883,6 +950,14 @@ impl LinkCableDataPlaneInner {
             self.notifiers[1 - slot].notify_one();
             return;
         }
+        trace_link_cable_abort(
+            &state,
+            "receiverDropped",
+            Some(slot),
+            None,
+            Some(LinkCableAbortReason::PeerDisconnected),
+            "receiverAttachmentDropped",
+        );
         let _ = abort_cable(&mut state, Some(LinkCableAbortReason::PeerDisconnected));
         drop(state);
         self.notify_both();
@@ -987,6 +1062,7 @@ fn snapshot_for(
     state: &LinkCableDataPlaneState,
     local_slot: PlayerIndex,
 ) -> LinkCableDataPlaneSnapshot {
+    let local_slot_index = usize::from(local_slot.zero_based());
     LinkCableDataPlaneSnapshot {
         room_scope: state.room_scope.get(),
         room_epoch: state.room_epoch,
@@ -998,6 +1074,116 @@ fn snapshot_for(
         abort_reason: state.abort_reason,
         lifecycle_revision: state.lifecycle_revision,
         local_slot,
+        next_sender_sequence: state.next_sender_sequences[local_slot_index],
+    }
+}
+
+fn trace_link_cable_abort(
+    state: &LinkCableDataPlaneState,
+    trigger: &'static str,
+    slot: Option<usize>,
+    sequence: Option<u64>,
+    abort_reason: Option<LinkCableAbortReason>,
+    error_class: &'static str,
+) {
+    let expected_sequence = slot.map(|slot| state.next_sender_sequences[slot]);
+    tracing::warn!(
+        target: "sb_netplay_serv::link_cable",
+        link_event = "dataPlaneAborted",
+        trigger = trigger,
+        room_scope = state.room_scope.get(),
+        room_epoch = state.room_epoch,
+        session_epoch = state.session_epoch,
+        cable_epoch = state.cable_epoch,
+        slot = ?slot,
+        sequence = ?sequence,
+        expected_sequence = ?expected_sequence,
+        next_sequence_slot_0 = state.next_sender_sequences[0],
+        next_sequence_slot_1 = state.next_sender_sequences[1],
+        abort_reason = link_cable_abort_reason_class(abort_reason),
+        error_class = error_class,
+        "link cable data plane aborted"
+    );
+}
+
+const fn link_cable_abort_reason_class(reason: Option<LinkCableAbortReason>) -> &'static str {
+    match reason {
+        Some(LinkCableAbortReason::Timeout) => "timeout",
+        Some(LinkCableAbortReason::ProtocolViolation) => "protocolViolation",
+        Some(LinkCableAbortReason::QueueOverflow) => "queueOverflow",
+        Some(LinkCableAbortReason::PeerDisconnected) => "peerDisconnected",
+        Some(LinkCableAbortReason::CoreClosed) => "coreClosed",
+        None => "providerEpochChanged",
+    }
+}
+
+fn link_cable_data_plane_error_class(error: &LinkCableDataPlaneError) -> &'static str {
+    match error {
+        LinkCableDataPlaneError::InvalidCapacity => "invalidCapacity",
+        LinkCableDataPlaneError::EpochOutOfRange => "epochOutOfRange",
+        LinkCableDataPlaneError::InvalidPlayerIndex => "invalidPlayerIndex",
+        LinkCableDataPlaneError::ConnectionAlreadyBound => "connectionAlreadyBound",
+        LinkCableDataPlaneError::EndpointAlreadyBound => "endpointAlreadyBound",
+        LinkCableDataPlaneError::ReceiverAlreadyClaimed => "receiverAlreadyClaimed",
+        LinkCableDataPlaneError::ConnectionNotAttached => "connectionNotAttached",
+        LinkCableDataPlaneError::AttachmentReplaced => "attachmentReplaced",
+        LinkCableDataPlaneError::Closed => "providerClosed",
+        LinkCableDataPlaneError::NotActive => "providerNotActive",
+        LinkCableDataPlaneError::AuthenticatedSlotMismatch => "authenticatedSlotMismatch",
+        LinkCableDataPlaneError::RoomEpochMismatch => "roomEpochMismatch",
+        LinkCableDataPlaneError::SessionEpochMismatch => "sessionEpochMismatch",
+        LinkCableDataPlaneError::EnvelopeSlotMismatch(_) => "envelopeSlotMismatch",
+        LinkCableDataPlaneError::EnvelopeSequenceMismatch => "envelopeSequenceMismatch",
+        LinkCableDataPlaneError::EnvelopeTimeMismatch => "envelopeTimeMismatch",
+        LinkCableDataPlaneError::WireIdentityMismatch => "wireIdentityMismatch",
+        LinkCableDataPlaneError::SenderSequenceMismatch => "senderSequenceMismatch",
+        LinkCableDataPlaneError::InvalidPacketSize => "invalidPacketSize",
+        LinkCableDataPlaneError::WireCodec(error) => link_cable_wire_error_class(*error),
+        LinkCableDataPlaneError::Transaction(error) => link_cable_transaction_error_class(*error),
+        LinkCableDataPlaneError::TargetUnavailable => "targetUnavailable",
+        LinkCableDataPlaneError::QueueOverflow => "queueOverflow",
+        LinkCableDataPlaneError::CableEpochExhausted => "cableEpochExhausted",
+        LinkCableDataPlaneError::AttachmentGenerationExhausted => "attachmentGenerationExhausted",
+        LinkCableDataPlaneError::LifecycleRevisionExhausted => "lifecycleRevisionExhausted",
+        LinkCableDataPlaneError::StatePoisoned => "statePoisoned",
+    }
+}
+
+const fn link_cable_wire_error_class(error: LinkCableWireCodecError) -> &'static str {
+    match error {
+        LinkCableWireCodecError::UnsupportedProtocol => "wireUnsupportedProtocol",
+        LinkCableWireCodecError::InvalidFrameSize => "wireInvalidFrameSize",
+        LinkCableWireCodecError::UnsupportedMagic => "wireUnsupportedMagic",
+        LinkCableWireCodecError::UnsupportedVersion => "wireUnsupportedVersion",
+        LinkCableWireCodecError::ReservedFlagsSet => "wireReservedFlagsSet",
+        LinkCableWireCodecError::HighBitSet => "wireHighBitSet",
+        LinkCableWireCodecError::InvalidSlot => "wireInvalidSlot",
+        LinkCableWireCodecError::BodyLengthMismatch => "wireBodyLengthMismatch",
+        LinkCableWireCodecError::UnsupportedEventKind => "wireUnsupportedEventKind",
+        LinkCableWireCodecError::InvalidEventBodyLength => "wireInvalidEventBodyLength",
+        LinkCableWireCodecError::InvalidTransferId => "wireInvalidTransferId",
+        LinkCableWireCodecError::InvalidEventRole => "wireInvalidEventRole",
+        LinkCableWireCodecError::InvalidGbaMode => "wireInvalidGbaMode",
+        LinkCableWireCodecError::InvalidGbaTransferStart => "wireInvalidGbaTransferStart",
+        LinkCableWireCodecError::InvalidGbaDisconnectedWords => "wireInvalidGbaDisconnectedWords",
+        LinkCableWireCodecError::InvalidGbSerialControl => "wireInvalidGbSerialControl",
+        LinkCableWireCodecError::InvalidAbortReason => "wireInvalidAbortReason",
+    }
+}
+
+const fn link_cable_transaction_error_class(error: LinkCableTransactionError) -> &'static str {
+    match error {
+        LinkCableTransactionError::ProtocolMismatch => "transactionProtocolMismatch",
+        LinkCableTransactionError::GbaMultiModeNotReady => "transactionGbaMultiModeNotReady",
+        LinkCableTransactionError::GbaModeChangedDuringTransfer => {
+            "transactionGbaModeChangedDuringTransfer"
+        }
+        LinkCableTransactionError::TransferAlreadyPending => "transactionTransferAlreadyPending",
+        LinkCableTransactionError::NoPendingTransfer => "transactionNoPendingTransfer",
+        LinkCableTransactionError::UnexpectedTransactionPhase => "transactionUnexpectedPhase",
+        LinkCableTransactionError::TransferIdMismatch => "transactionTransferIdMismatch",
+        LinkCableTransactionError::TransferIdExhausted => "transactionTransferIdExhausted",
+        LinkCableTransactionError::CommitPayloadMismatch => "transactionCommitPayloadMismatch",
     }
 }
 
@@ -1037,6 +1223,7 @@ mod tests {
     use super::{
         LinkCableAttachment, LinkCableDataPlaneError, LinkCableDataPlaneEvent,
         LinkCableDataPlaneHandle, LinkCableDataPlaneReceiver, LinkCableDataPlaneStatus,
+        link_cable_abort_reason_class, link_cable_data_plane_error_class,
     };
     use crate::protocol::{
         GB_SERIAL_NORMAL_CLOCK_CONTROL, GbSerialEvent, GbSerialFrame, GbaSioMultiEvent,
@@ -1050,6 +1237,26 @@ mod tests {
     const ROOM_EPOCH: u64 = 11;
     const SESSION_EPOCH: u64 = 17;
     const EMULATED_TIME: u64 = 23;
+
+    #[test]
+    fn diagnostic_classes_are_static_and_preserve_failure_specificity() {
+        assert_eq!(
+            link_cable_abort_reason_class(Some(LinkCableAbortReason::PeerDisconnected)),
+            "peerDisconnected"
+        );
+        assert_eq!(
+            link_cable_data_plane_error_class(&LinkCableDataPlaneError::WireCodec(
+                LinkCableWireCodecError::UnsupportedMagic,
+            )),
+            "wireUnsupportedMagic"
+        );
+        assert_eq!(
+            link_cable_data_plane_error_class(&LinkCableDataPlaneError::Transaction(
+                LinkCableTransactionError::TransferAlreadyPending,
+            )),
+            "transactionTransferAlreadyPending"
+        );
+    }
 
     #[tokio::test]
     async fn relays_only_to_the_opposite_endpoint_without_echo() {
