@@ -1,0 +1,137 @@
+{
+  "roomJoinedWaitingForPeer": {
+    "type": "roomJoined",
+    "eventSeq": 7,
+    "roomEpoch": 3,
+    "sessionEpoch": 5,
+    "yourPlayerIndex": 0,
+    "resumeToken": "resume-token",
+    "voice": null,
+    "linkCableGrant": {
+      "contractVersion": 1,
+      "roomScope": "9223372036854775807",
+      "roomEpoch": 3,
+      "sessionEpoch": 5,
+      "cableEpoch": 0,
+      "localSlot": 0,
+      "linkProtocol": "gba-sio-multi-v1",
+      "maximumEventBytes": 128,
+      "queueCapacity": 64,
+      "status": "waitingForPeer"
+    },
+    "room": "$roomView"
+  },
+  "linkCableGrantUpdated": {
+    "ready": {
+      "type": "linkCableGrantUpdated",
+      "grant": {
+        "contractVersion": 1,
+        "roomScope": "9223372036854775807",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "cableEpoch": 9,
+        "localSlot": 0,
+        "linkProtocol": "gba-sio-multi-v1",
+        "maximumEventBytes": 128,
+        "queueCapacity": 64,
+        "status": "ready"
+      }
+    },
+    "abortedProviderReset": {
+      "type": "linkCableGrantUpdated",
+      "grant": {
+        "contractVersion": 1,
+        "roomScope": "9223372036854775807",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "cableEpoch": 9,
+        "localSlot": 0,
+        "linkProtocol": "gba-sio-multi-v1",
+        "maximumEventBytes": 128,
+        "queueCapacity": 64,
+        "status": "aborted",
+        "failureReason": "providerReset"
+      }
+    },
+    "abortedPeerDisconnected": {
+      "type": "linkCableGrantUpdated",
+      "grant": {
+        "contractVersion": 1,
+        "roomScope": "9223372036854775807",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "cableEpoch": 9,
+        "localSlot": 0,
+        "linkProtocol": "gba-sio-multi-v1",
+        "maximumEventBytes": 128,
+        "queueCapacity": 64,
+        "status": "aborted",
+        "failureReason": "peerDisconnected"
+      }
+    },
+    "abortedQueueOverflow": {
+      "type": "linkCableGrantUpdated",
+      "grant": {
+        "contractVersion": 1,
+        "roomScope": "9223372036854775807",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "cableEpoch": 9,
+        "localSlot": 0,
+        "linkProtocol": "gba-sio-multi-v1",
+        "maximumEventBytes": 128,
+        "queueCapacity": 64,
+        "status": "aborted",
+        "failureReason": "queueOverflow"
+      }
+    },
+    "abortedProtocolViolation": {
+      "type": "linkCableGrantUpdated",
+      "grant": {
+        "contractVersion": 1,
+        "roomScope": "9223372036854775807",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "cableEpoch": 9,
+        "localSlot": 0,
+        "linkProtocol": "gba-sio-multi-v1",
+        "maximumEventBytes": 128,
+        "queueCapacity": 64,
+        "status": "aborted",
+        "failureReason": "protocolViolation"
+      }
+    },
+    "abortedRouteClosed": {
+      "type": "linkCableGrantUpdated",
+      "grant": {
+        "contractVersion": 1,
+        "roomScope": "9223372036854775807",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "cableEpoch": 9,
+        "localSlot": 0,
+        "linkProtocol": "gba-sio-multi-v1",
+        "maximumEventBytes": 128,
+        "queueCapacity": 64,
+        "status": "aborted",
+        "failureReason": "routeClosed"
+      }
+    },
+    "closed": {
+      "type": "linkCableGrantUpdated",
+      "grant": {
+        "contractVersion": 1,
+        "roomScope": "9223372036854775807",
+        "roomEpoch": 3,
+        "sessionEpoch": 5,
+        "cableEpoch": 9,
+        "localSlot": 0,
+        "linkProtocol": "gba-sio-multi-v1",
+        "maximumEventBytes": 128,
+        "queueCapacity": 64,
+        "status": "closed",
+        "failureReason": "routeClosed"
+      }
+    }
+  }
+}

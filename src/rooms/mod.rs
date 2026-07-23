@@ -15,8 +15,10 @@ mod ids;
 mod input_frame_acceptance;
 mod input_frame_relay_buffer;
 mod invite_code;
+mod link_cable_data_plane;
 mod link_cable_room_state;
 mod link_cable_session;
+mod link_cable_transaction;
 mod player_runtime_state_mapping;
 mod player_slot;
 mod recovery_config;
@@ -42,6 +44,7 @@ mod room_registry_snapshot;
 mod room_registry_trait;
 mod room_rom_relay_ops;
 mod room_runner_handoff_ops;
+mod room_scope;
 mod room_snapshot_ops;
 mod room_start_sync;
 mod room_state_hash_ops;
@@ -83,7 +86,14 @@ pub use ids::{ConnectionId, PlayerIndex, RoomId};
 pub use input_frame_acceptance::InputFrameAcceptance;
 pub(crate) use input_frame_relay_buffer::InputFrameRelayBuffer;
 pub use invite_code::{InviteCode, InviteCodeGenerator, UuidInviteCodeGenerator};
+#[doc(hidden)]
+pub use link_cable_data_plane::LinkCableAttachment;
+pub(crate) use link_cable_data_plane::{
+    LinkCableDataPlaneError, LinkCableDataPlaneEvent, LinkCableDataPlaneHandle,
+    LinkCableDataPlaneReceiver, LinkCableDataPlaneSnapshot, LinkCableDataPlaneStatus,
+};
 pub(crate) use link_cable_session::LinkCableSession;
+pub(crate) use link_cable_transaction::{LinkCableTransactionError, LinkCableTransactionState};
 pub use player_slot::{PlayerRole, PlayerRuntimeState, PlayerSlot, PlayerStatus};
 pub use recovery_config::RoomRecoveryConfig;
 pub use resume_token::{
@@ -105,10 +115,12 @@ pub use room_frame_clock_task::spawn_room_frame_clock_task;
 pub(crate) use room_host_frame_ops::HostFrameOpenOutcome;
 pub use room_host_frame_ops::{HostFrameRelayOutcome, ScheduledHostFrameReleaseOutcome};
 pub use room_join::RoomJoin;
+pub(crate) use room_link_cable_ops::map_link_cable_data_plane_error;
 pub use room_performance_sample::RoomPerformanceSample;
 pub use room_registry::InMemoryRoomRegistry;
 pub use room_registry_snapshot::RoomRegistrySnapshot;
 pub use room_registry_trait::{RoomEventReceiver, RoomInputEventReceiver, RoomRegistry};
+pub(crate) use room_scope::{RoomScope, RoomScopeAllocator, ServerRoomScopeAllocator};
 pub(crate) use room_start_sync::{ClockSyncSampleRequestState, StartSyncOutcome};
 pub(crate) use room_state_hash_ops::StateHashEvaluation;
 pub use room_status::RoomStatus;

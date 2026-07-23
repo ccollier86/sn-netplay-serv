@@ -27,7 +27,7 @@ impl InMemoryRoomRegistry {
         let resume_token = self.resume_token_generator.generate();
         let input_socket_token = self.resume_token_generator.generate();
         let now = self.clock.now();
-        let mut room = NetplayRoom::new_with_protocol_and_resume(
+        let mut room = NetplayRoom::new_with_protocol_resume_and_scope(
             host,
             host_connection,
             invite_code.clone(),
@@ -36,6 +36,7 @@ impl InMemoryRoomRegistry {
             resume_token.hash(),
             input_socket_token.hash(),
             now,
+            self.room_scope_allocator.allocate(),
         );
         if let Some(voice) = self.create_voice_state_for_room(&room).await {
             room.set_voice_state(voice);
@@ -104,11 +105,13 @@ impl InMemoryRoomRegistry {
         )?;
 
         stored_room.emit_state(now, "hostConnected", "host socket connected");
+        let input_socket_token =
+            (!stored_room.room.is_link_cable()).then(|| input_socket_token.expose().to_string());
         let room = stored_room.view(now);
         self.record_recent_events(stored_room.debug_events(1));
 
         Ok(RoomJoin {
-            input_socket_token: input_socket_token.expose().to_string(),
+            input_socket_token,
             player_index,
             resume_token: resume_token.expose().to_string(),
             voice: stored_room.room.voice_grant_for(player_index),
@@ -141,11 +144,13 @@ impl InMemoryRoomRegistry {
         )?;
 
         stored_room.emit_state(now, "guestConnected", "guest socket connected");
+        let input_socket_token =
+            (!stored_room.room.is_link_cable()).then(|| input_socket_token.expose().to_string());
         let room = stored_room.view(now);
         self.record_recent_events(stored_room.debug_events(1));
 
         Ok(RoomJoin {
-            input_socket_token: input_socket_token.expose().to_string(),
+            input_socket_token,
             player_index,
             resume_token: resume_token.expose().to_string(),
             voice: stored_room.room.voice_grant_for(player_index),
@@ -182,11 +187,13 @@ impl InMemoryRoomRegistry {
             capabilities,
         })?;
         stored_room.emit_state(now, "playerReconnected", "player reconnected");
+        let input_socket_token =
+            (!stored_room.room.is_link_cable()).then(|| input_socket_token.expose().to_string());
         let room = stored_room.view(now);
         self.record_recent_events(stored_room.debug_events(1));
 
         Ok(RoomJoin {
-            input_socket_token: input_socket_token.expose().to_string(),
+            input_socket_token,
             player_index,
             resume_token: next_resume_token.expose().to_string(),
             voice: stored_room.room.voice_grant_for(player_index),

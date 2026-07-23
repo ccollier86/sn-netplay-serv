@@ -36,6 +36,8 @@ pub struct WebSocketJoinRequest {
     pub supports_clock_sync: bool,
     /// Whether this socket can use the v2 fast binary input relay.
     pub supports_fast_input_relay: bool,
+    /// Explicit completed link contract admitted at the HTTP boundary.
+    pub link_contract_version: Option<u16>,
 }
 
 /// Authorization intent for a room control socket.
@@ -93,6 +95,7 @@ impl std::fmt::Debug for WebSocketJoinRequest {
             .debug_struct("WebSocketJoinRequest")
             .field("invite_code", &self.invite_code)
             .field("intent", &self.intent)
+            .field("link_contract_version", &self.link_contract_version)
             .finish_non_exhaustive()
     }
 }

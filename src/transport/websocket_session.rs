@@ -5,8 +5,14 @@
 //! handler.
 
 use crate::http::AppServices;
-use crate::protocol::ServerMessage;
-use crate::rooms::{ClientTransportCapabilities, ConnectionId, RoomEvent};
+use crate::protocol::{
+    LINK_CABLE_CONTRACT_VERSION, LinkCableAbortReason, LinkCableDataPlaneGrant,
+    LinkCableGrantFailureReason, LinkCableGrantStatus, MAX_LINK_CABLE_WIRE_BYTES, ServerMessage,
+};
+use crate::rooms::{
+    ClientTransportCapabilities, ConnectionId, LinkCableDataPlaneError, LinkCableDataPlaneEvent,
+    LinkCableDataPlaneReceiver, LinkCableDataPlaneSnapshot, LinkCableDataPlaneStatus, RoomEvent,
+};
 use crate::transport::websocket_message_handler::handle_client_text;
 use crate::transport::websocket_outbound::{
     SocketSender, send_server_message, send_static_error, send_upgrade_error,
@@ -16,6 +22,7 @@ use crate::transport::{WebSocketJoinRequest, WebSocketJoinRole, WebSocketRoomJoi
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
 use futures_util::stream::SplitStream;
+use std::future::pending;
 
 /// Handles one upgraded WebSocket until the client disconnects.
 pub async fn handle_websocket_session(
@@ -88,6 +95,26 @@ pub async fn handle_websocket_session(
             return;
         }
     };
+
+    let link_attachment = match services
+        .rooms
+        .claim_link_cable_data_plane(invite_code.clone(), connection_id)
+        .await
+    {
+        Ok(attachment) => attachment,
+        Err(error) => {
+            let _ = services
+                .rooms
+                .disconnect(invite_code.clone(), connection_id)
+                .await;
+            send_upgrade_error(socket, error).await;
+            return;
+        }
+    };
+    let initial_link_grant = link_attachment
+        .as_ref()
+        .map(|attachment| link_data_plane_grant(attachment.snapshot));
+
     services.metrics.record_websocket_joined();
     if reconnecting {
         services.metrics.record_player_reconnected();
@@ -118,6 +145,7 @@ pub async fn handle_websocket_session(
             input_socket_token: join.input_socket_token,
             resume_token: join.resume_token,
             voice: join.voice,
+            link_cable_grant: initial_link_grant,
             room: join.room,
         },
     )
@@ -134,10 +162,12 @@ pub async fn handle_websocket_session(
         return;
     }
 
+    let mut link_receiver = link_attachment.map(|attachment| attachment.receiver);
     session_loop(
         &mut sender,
         &mut receiver,
         &mut events,
+        &mut link_receiver,
         &services,
         &invite_code,
         connection_id,
@@ -151,6 +181,7 @@ async fn session_loop(
     sender: &mut SocketSender,
     receiver: &mut SplitStream<WebSocket>,
     events: &mut crate::rooms::RoomEventReceiver,
+    link_receiver: &mut Option<LinkCableDataPlaneReceiver>,
     services: &AppServices,
     invite_code: &crate::rooms::InviteCode,
     connection_id: ConnectionId,
@@ -167,7 +198,94 @@ async fn session_loop(
                     break;
                 }
             }
+            link_event = next_link_data_plane_event(link_receiver) => {
+                if !handle_link_data_plane_event(sender, link_receiver, link_event).await {
+                    break;
+                }
+            }
         }
+    }
+}
+
+async fn next_link_data_plane_event(
+    receiver: &mut Option<LinkCableDataPlaneReceiver>,
+) -> Result<LinkCableDataPlaneEvent, LinkCableDataPlaneError> {
+    match receiver {
+        Some(receiver) => receiver.recv().await,
+        None => pending().await,
+    }
+}
+
+async fn handle_link_data_plane_event(
+    sender: &mut SocketSender,
+    receiver: &mut Option<LinkCableDataPlaneReceiver>,
+    event: Result<LinkCableDataPlaneEvent, LinkCableDataPlaneError>,
+) -> bool {
+    let message = match event {
+        Ok(LinkCableDataPlaneEvent::Packet(packet)) => ServerMessage::LinkCablePacket { packet },
+        Ok(LinkCableDataPlaneEvent::Lifecycle(snapshot)) => ServerMessage::LinkCableGrantUpdated {
+            grant: link_data_plane_grant(snapshot),
+        },
+        Err(LinkCableDataPlaneError::Closed) => {
+            *receiver = None;
+            return true;
+        }
+        Err(_) => {
+            *receiver = None;
+            return send_static_error(
+                sender,
+                "linkCableRouteClosed",
+                "The private link-cable route closed.",
+            )
+            .await
+            .is_ok();
+        }
+    };
+
+    send_server_message(sender, &message).await.is_ok()
+}
+
+fn link_data_plane_grant(snapshot: LinkCableDataPlaneSnapshot) -> LinkCableDataPlaneGrant {
+    let (status, failure_reason) = match snapshot.status {
+        LinkCableDataPlaneStatus::Waiting => (LinkCableGrantStatus::WaitingForPeer, None),
+        LinkCableDataPlaneStatus::Active => (LinkCableGrantStatus::Ready, None),
+        LinkCableDataPlaneStatus::Aborted => (
+            LinkCableGrantStatus::Aborted,
+            Some(match snapshot.abort_reason {
+                Some(LinkCableAbortReason::QueueOverflow) => {
+                    LinkCableGrantFailureReason::QueueOverflow
+                }
+                Some(LinkCableAbortReason::PeerDisconnected) => {
+                    LinkCableGrantFailureReason::PeerDisconnected
+                }
+                Some(LinkCableAbortReason::ProtocolViolation | LinkCableAbortReason::Timeout) => {
+                    LinkCableGrantFailureReason::ProtocolViolation
+                }
+                Some(LinkCableAbortReason::CoreClosed) | None => {
+                    LinkCableGrantFailureReason::ProviderReset
+                }
+            }),
+        ),
+        LinkCableDataPlaneStatus::Closed => (
+            LinkCableGrantStatus::Closed,
+            Some(LinkCableGrantFailureReason::RouteClosed),
+        ),
+    };
+
+    LinkCableDataPlaneGrant {
+        contract_version: LINK_CABLE_CONTRACT_VERSION,
+        room_scope: snapshot.room_scope.to_string(),
+        room_epoch: snapshot.room_epoch,
+        session_epoch: snapshot.session_epoch,
+        cable_epoch: snapshot.cable_epoch,
+        local_slot: snapshot.local_slot.zero_based(),
+        link_protocol: snapshot.protocol.wire_value().to_string(),
+        maximum_event_bytes: u16::try_from(MAX_LINK_CABLE_WIRE_BYTES)
+            .expect("SBLK maximum frame size fits in u16"),
+        queue_capacity: u16::try_from(snapshot.queue_capacity)
+            .expect("configured link queue capacity fits in u16"),
+        status,
+        failure_reason,
     }
 }
 
@@ -362,12 +480,6 @@ async fn handle_room_event(
         },
         Ok(RoomEvent::InputFrame { .. }) => {
             return true;
-        }
-        Ok(RoomEvent::LinkCablePacket { source, packet }) => {
-            if source == connection_id {
-                return true;
-            }
-            ServerMessage::LinkCablePacket { packet }
         }
         Ok(RoomEvent::SnapshotChunk {
             source,

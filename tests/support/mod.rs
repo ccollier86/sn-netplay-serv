@@ -138,6 +138,23 @@ pub struct SmokeClient {
     room_epoch: u64,
     session_epoch: u64,
     protocol_version: u16,
+    accepts_link_grants: bool,
+    link_grant: Option<SmokeLinkCableGrant>,
+    next_link_sender_sequence: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SmokeLinkCableGrant {
+    pub contract_version: u16,
+    pub room_scope: String,
+    pub room_epoch: u64,
+    pub session_epoch: u64,
+    pub cable_epoch: u64,
+    pub local_slot: u8,
+    pub link_protocol: String,
+    pub maximum_event_bytes: u16,
+    pub queue_capacity: u16,
+    pub status: String,
 }
 
 impl SmokeClient {
@@ -149,6 +166,25 @@ impl SmokeClient {
             install_id,
             LEGACY_NETPLAY_PROTOCOL_VERSION,
             false,
+            false,
+        )
+        .await
+    }
+
+    pub async fn connect_link(
+        server: &SmokeServer,
+        role: &str,
+        token: &str,
+        install_id: &str,
+    ) -> Self {
+        Self::connect_initial(
+            server,
+            role,
+            token,
+            install_id,
+            LEGACY_NETPLAY_PROTOCOL_VERSION,
+            false,
+            true,
         )
         .await
     }
@@ -165,6 +201,7 @@ impl SmokeClient {
             token,
             install_id,
             NETPLAY_PROTOCOL_VERSION,
+            false,
             false,
         )
         .await
@@ -183,6 +220,7 @@ impl SmokeClient {
             install_id,
             LEGACY_NETPLAY_PROTOCOL_VERSION,
             true,
+            false,
         )
         .await
     }
@@ -194,6 +232,7 @@ impl SmokeClient {
         install_id: &str,
         protocol_version: u16,
         runner_handoff: bool,
+        supports_link_contract: bool,
     ) -> Self {
         let runner_handoff_query = if runner_handoff {
             "&runnerHandoff=true"
@@ -205,9 +244,19 @@ impl SmokeClient {
         } else {
             ""
         };
+        let link_contract_query = if supports_link_contract {
+            "&linkContractVersion=1"
+        } else {
+            ""
+        };
         let mut request = format!(
-            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion={}{}{}",
-            server.ws_base, INVITE_CODE, protocol_version, runner_handoff_query, capability_query
+            "{}/v1/ws?inviteCode={}&role={role}&protocolVersion={}{}{}{}",
+            server.ws_base,
+            INVITE_CODE,
+            protocol_version,
+            runner_handoff_query,
+            capability_query,
+            link_contract_query
         )
         .into_client_request()
         .expect("websocket request");
@@ -231,6 +280,9 @@ impl SmokeClient {
             room_epoch: 1,
             session_epoch: 1,
             protocol_version,
+            accepts_link_grants: supports_link_contract,
+            link_grant: None,
+            next_link_sender_sequence: 0,
         }
     }
 
@@ -261,6 +313,9 @@ impl SmokeClient {
             room_epoch,
             session_epoch,
             protocol_version: LEGACY_NETPLAY_PROTOCOL_VERSION,
+            accepts_link_grants: false,
+            link_grant: None,
+            next_link_sender_sequence: 0,
         }
     }
 
@@ -335,6 +390,10 @@ impl SmokeClient {
     pub fn epochs(&self) -> (u64, u64) {
         (self.room_epoch, self.session_epoch)
     }
+
+    pub fn link_grant(&self) -> Option<&SmokeLinkCableGrant> {
+        self.link_grant.as_ref()
+    }
 }
 
 pub fn compatibility_fingerprint() -> Value {
@@ -398,12 +457,50 @@ pub async fn connect_ready_pair(server: &SmokeServer) -> (SmokeClient, SmokeClie
     let guest_join = guest.expect_type("roomJoined").await;
     assert_eq!(host_join["yourPlayerIndex"], 0);
     assert_eq!(guest_join["yourPlayerIndex"], 1);
+    assert!(host_join.get("linkCableGrant").is_none());
+    assert!(guest_join.get("linkCableGrant").is_none());
+    assert!(host.link_grant().is_none());
+    assert!(guest.link_grant().is_none());
     host.expect_type("compatibilityRequested").await;
     host.connect_input(server, "host-token", "host-install", &host_join)
         .await;
     guest
         .connect_input(server, "guest-token", "guest-install", &guest_join)
         .await;
+
+    (host, guest)
+}
+
+pub async fn connect_link_pair(server: &SmokeServer) -> (SmokeClient, SmokeClient) {
+    let mut host = SmokeClient::connect_link(server, "host", "host-token", "host-install").await;
+    let mut guest =
+        SmokeClient::connect_link(server, "guest", "guest-token", "guest-install").await;
+
+    let host_join = host.expect_type("roomJoined").await;
+    let guest_join = guest.expect_type("roomJoined").await;
+    assert_eq!(host_join["yourPlayerIndex"], 0);
+    assert_eq!(guest_join["yourPlayerIndex"], 1);
+    assert!(host_join.get("inputSocketToken").is_none());
+    assert!(guest_join.get("inputSocketToken").is_none());
+    host.expect_type("compatibilityRequested").await;
+
+    let host_grant = host.expect_link_grant_status("ready").await;
+    let guest_grant = guest.expect_link_grant_status("ready").await;
+    assert!(
+        host_grant
+            .room_scope
+            .parse::<u64>()
+            .is_ok_and(|room_scope| room_scope > 0)
+    );
+    assert_eq!(guest_grant.room_scope, host_grant.room_scope);
+    assert!(host_grant.cable_epoch > 0);
+    assert_eq!(guest_grant.cable_epoch, host_grant.cable_epoch);
+    assert_eq!(host_grant.local_slot, 0);
+    assert_eq!(guest_grant.local_slot, 1);
+    assert_eq!(host_grant.link_protocol, "gba-sio-multi-v1");
+    assert_eq!(guest_grant.link_protocol, host_grant.link_protocol);
+    assert!(host_grant.queue_capacity > 0);
+    assert_eq!(guest_grant.queue_capacity, host_grant.queue_capacity);
 
     (host, guest)
 }
@@ -471,9 +568,10 @@ pub fn link_cable_compatibility() -> Value {
     json!({
         "protocolVersion": LEGACY_NETPLAY_PROTOCOL_VERSION,
         "systemFamily": "gba",
-        "linkProtocol": "gba-link-cable-v1",
+        "linkProtocol": "gba-sio-multi-v1",
         "runtimeProfile": "mgba-link-runtime-v1",
-        "systemDataHash": null
+        "coreBuildId": "android-mgba-0.10.5-sb1",
+        "supportedModes": ["multi"]
     })
 }
 
@@ -629,6 +727,7 @@ fn empty_sha256() -> String {
 fn create_link_room_body() -> Value {
     json!({
         "desktopProtocolVersion": LEGACY_NETPLAY_PROTOCOL_VERSION,
+        "linkContractVersion": 1,
         "session": {
             "hostAppVersion": "0.2.13",
             "mode": "linkCable",
@@ -646,7 +745,7 @@ fn create_link_room_body() -> Value {
             },
             "link": {
                 "systemFamily": "gba",
-                "linkProtocol": "gba-link-cable-v1",
+                "linkProtocol": "gba-sio-multi-v1",
                 "runtimeProfile": "mgba-link-runtime-v1",
                 "maxPlayers": 2,
                 "transport": "relay"

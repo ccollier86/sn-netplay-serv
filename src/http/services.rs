@@ -11,8 +11,8 @@ use crate::lobbies::LobbyRegistry;
 use crate::observability::MetricsRecorder;
 use crate::protocol::NetplayProtocolRolloutPolicy;
 use crate::protocol::{
-    NetplayClientKind, NetplayRoomMode, NetplaySessionDescriptor, NetplaySessionMode,
-    RomRelayCapability, RomRelayCapabilityReason, RomRelayIntent,
+    LINK_CABLE_CONTRACT_VERSION, NetplayClientKind, NetplayRoomMode, NetplaySessionDescriptor,
+    NetplaySessionMode, RomRelayCapability, RomRelayCapabilityReason, RomRelayIntent,
 };
 use crate::rate_limit::RateLimiter;
 use crate::rooms::RoomRegistry;
@@ -109,19 +109,34 @@ impl LinkCableRolloutPolicy {
         self.enabled
     }
 
-    /// Rejects link-cable sessions before they reach the room provider.
-    pub(crate) fn validate_provider_availability(
+    /// Rejects link sessions unless both the server and client completed this contract.
+    pub(crate) fn validate_provider_admission(
         self,
         session: &NetplaySessionDescriptor,
+        client_contract_version: Option<u16>,
     ) -> Result<(), HttpError> {
-        if session.mode == NetplaySessionMode::LinkCable && !self.enabled {
+        if session.mode != NetplaySessionMode::LinkCable {
+            return Ok(());
+        }
+
+        if !self.enabled {
             return Err(HttpError::InvalidRequest {
                 code: "linkCableUnavailable",
                 message: "Link-cable multiplayer is not available on this server.",
             });
         }
 
-        Ok(())
+        match client_contract_version {
+            None => Err(HttpError::InvalidRequest {
+                code: "linkCableCapabilityRequired",
+                message: "This link room requires an explicit linkContractVersion.",
+            }),
+            Some(LINK_CABLE_CONTRACT_VERSION) => Ok(()),
+            Some(_) => Err(HttpError::InvalidRequest {
+                code: "linkCableCapabilityUnsupported",
+                message: "This client does not support the server's link-cable contract.",
+            }),
+        }
     }
 }
 

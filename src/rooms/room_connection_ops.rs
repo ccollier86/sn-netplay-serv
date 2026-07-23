@@ -79,7 +79,18 @@ impl NetplayRoom {
             );
             slot.player_index
         };
-        self.reset_sync_for_checking_compatibility();
+        if let Err(error) = self.reset_sync_for_checking_compatibility() {
+            self.clear_disconnected_slot(player_index, false);
+            return Err(error);
+        }
+        if self.is_link_cable() {
+            if let Err(error) = self.bind_link_cable_connection(player_index, connection_id) {
+                let _ = self.close_link_cable_data_plane();
+                self.status = RoomStatus::Closed;
+                self.clear_disconnected_slot(player_index, false);
+                return Err(error);
+            }
+        }
 
         Ok(player_index)
     }
@@ -114,43 +125,62 @@ impl NetplayRoom {
             return Err(RoomError::RoomClosed);
         }
 
-        let slot = self
+        let (slot_position, player_index, previous_connection, subject_matches) = self
             .players
-            .iter_mut()
-            .find(|candidate| candidate.role == PlayerRole::Host)
+            .iter()
+            .enumerate()
+            .find(|(_, candidate)| candidate.role == PlayerRole::Host)
+            .map(|(position, slot)| {
+                (
+                    position,
+                    slot.player_index,
+                    slot.connection_id,
+                    slot.subject_key
+                        .as_deref()
+                        .is_some_and(|subject_key| subject_key == license.identity_key()),
+                )
+            })
             .ok_or(RoomError::UnknownConnection)?;
-        let subject_matches = slot
-            .subject_key
-            .as_deref()
-            .is_some_and(|subject_key| subject_key == license.identity_key());
 
         if !subject_matches {
             return Err(RoomError::HostSubjectMismatch);
         }
 
-        slot.connection_id = Some(connection_id);
-        slot.input_connection_id = None;
-        slot.status = PlayerStatus::Connected;
-        slot.runtime_state = PlayerRuntimeState::Connected;
-        slot.resume_token_hash = Some(resume_token_hash);
-        slot.input_socket_token_hash = Some(input_socket_token_hash);
-        slot.input_socket_control_connection_id = Some(connection_id);
-        slot.supports_state_file_relay = capabilities.supports_state_file_relay;
-        slot.supports_rom_file_relay = capabilities.supports_rom_file_relay;
-        slot.supports_scheduled_start = capabilities.supports_scheduled_start;
-        slot.supports_clock_sync = capabilities.supports_clock_sync;
-        slot.supports_fast_input_relay = capabilities.supports_fast_input_relay;
-        slot.reconnect_deadline = None;
-        slot.reconnect_room_epoch = None;
-        slot.runner_handoff_deadline = None;
-        slot.last_seen_at = Some(now);
-        slot.latest_local_frame = None;
-        slot.latest_local_frame_reported_at = None;
-        slot.latest_network_report = None;
-        slot.latest_network_reported_at = None;
-        self.ready_players.remove(&slot.player_index);
+        if let Some(previous_connection) = previous_connection
+            && previous_connection != connection_id
+        {
+            self.invalidate_link_cable_connection_if_present(previous_connection)?;
+        }
 
-        Ok(slot.player_index)
+        {
+            let slot = &mut self.players[slot_position];
+            slot.connection_id = Some(connection_id);
+            slot.input_connection_id = None;
+            slot.status = PlayerStatus::Connected;
+            slot.runtime_state = PlayerRuntimeState::Connected;
+            slot.resume_token_hash = Some(resume_token_hash);
+            slot.input_socket_token_hash = Some(input_socket_token_hash);
+            slot.input_socket_control_connection_id = Some(connection_id);
+            slot.supports_state_file_relay = capabilities.supports_state_file_relay;
+            slot.supports_rom_file_relay = capabilities.supports_rom_file_relay;
+            slot.supports_scheduled_start = capabilities.supports_scheduled_start;
+            slot.supports_clock_sync = capabilities.supports_clock_sync;
+            slot.supports_fast_input_relay = capabilities.supports_fast_input_relay;
+            slot.reconnect_deadline = None;
+            slot.reconnect_room_epoch = None;
+            slot.runner_handoff_deadline = None;
+            slot.last_seen_at = Some(now);
+            slot.latest_local_frame = None;
+            slot.latest_local_frame_reported_at = None;
+            slot.latest_network_report = None;
+            slot.latest_network_reported_at = None;
+        }
+        self.ready_players.remove(&player_index);
+        if self.is_link_cable() {
+            self.bind_link_cable_connection(player_index, connection_id)?;
+        }
+
+        Ok(player_index)
     }
 
     /// Marks the connection as disconnected and returns whether the room closed.
@@ -168,6 +198,9 @@ impl NetplayRoom {
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
 
+        if self.is_link_cable() {
+            let _ = self.close_link_cable_data_plane();
+        }
         self.status = RoomStatus::Closed;
         self.reset_sync_state();
         self.players
@@ -201,8 +234,10 @@ impl NetplayRoom {
         reconnect_grace: Duration,
     ) -> Result<bool, RoomError> {
         if self.preserve_runner_handoff_disconnect(connection_id, now)? {
+            self.invalidate_link_cable_connection_if_present(connection_id)?;
             return Ok(false);
         }
+        self.invalidate_link_cable_connection_if_present(connection_id)?;
 
         let slot = self
             .players
@@ -240,6 +275,9 @@ impl NetplayRoom {
             self.mark_slot_reconnecting(player_index, now, reconnect_grace, reconnect_room_epoch);
             if !already_recovering {
                 self.enter_recovery_state(reconnect_room_epoch);
+                if self.status == RoomStatus::Closed {
+                    return Ok(true);
+                }
             }
             return Ok(false);
         }
@@ -262,17 +300,19 @@ impl NetplayRoom {
             return Err(RoomError::RoomClosed);
         }
 
-        let slot = self
+        let slot_position = self
             .players
-            .iter_mut()
-            .find(|slot| slot.player_index == request.player_index)
+            .iter()
+            .position(|slot| slot.player_index == request.player_index)
             .ok_or(RoomError::UnknownConnection)?;
+        let slot = &self.players[slot_position];
 
         if slot.resume_token_hash.as_deref() != Some(request.resume_token_hash) {
             return Err(RoomError::ResumeTokenInvalid);
         }
 
         let runner_handoff = slot.runner_handoff_deadline.is_some();
+        let previous_connection_id = slot.connection_id;
         if !runner_handoff && (slot.connection_id.is_some() || slot.reconnect_deadline.is_none()) {
             return Err(RoomError::ResumeTokenInvalid);
         }
@@ -289,11 +329,28 @@ impl NetplayRoom {
             .runner_handoff_deadline
             .is_some_and(|deadline| request.now >= deadline);
         if reconnect_expired || runner_handoff_expired {
+            let slot = &mut self.players[slot_position];
             slot.status = PlayerStatus::RecoveryExpired;
             slot.runtime_state = PlayerRuntimeState::RecoveryExpired;
             return Err(RoomError::RecoveryExpired);
         }
 
+        let link_endpoint_prebound = if self.is_link_cable() && runner_handoff {
+            if let Some(previous_connection_id) = previous_connection_id {
+                self.replace_link_cable_connection(
+                    request.player_index,
+                    previous_connection_id,
+                    request.connection_id,
+                )?;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        let slot = &mut self.players[slot_position];
         slot.connection_id = Some(request.connection_id);
         slot.input_connection_id = None;
         slot.status = PlayerStatus::Connected;
@@ -316,6 +373,9 @@ impl NetplayRoom {
         slot.runner_handoff_deadline = None;
         if !runner_handoff {
             self.restore_checking_compatibility_after_recovery();
+        }
+        if self.is_link_cable() && !link_endpoint_prebound {
+            self.bind_link_cable_connection(request.player_index, request.connection_id)?;
         }
 
         Ok(())
@@ -380,14 +440,27 @@ impl NetplayRoom {
                 slot.last_seen_at
                     .is_some_and(|last_seen| now.duration_since(last_seen) >= heartbeat_disconnect)
             })
-            .map(|slot| slot.player_index)
+            .filter_map(|slot| {
+                slot.connection_id
+                    .map(|connection_id| (slot.player_index, connection_id))
+            })
             .collect::<Vec<_>>();
 
         if stale_players.is_empty() {
             return false;
         }
 
-        for player_index in stale_players {
+        for (player_index, connection_id) in stale_players {
+            if self
+                .invalidate_link_cable_connection_if_present(connection_id)
+                .is_err()
+            {
+                if self.is_link_cable() {
+                    let _ = self.close_link_cable_data_plane();
+                }
+                self.status = RoomStatus::Closed;
+                return true;
+            }
             self.compatibility.remove(&player_index);
             self.ready_players.remove(&player_index);
             self.last_input_frames.remove(&player_index);
@@ -473,13 +546,23 @@ impl NetplayRoom {
             && self.players.iter().all(|slot| slot.connection_id.is_none())
     }
 
-    fn reset_sync_for_checking_compatibility(&mut self) {
+    fn reset_sync_for_checking_compatibility(&mut self) -> Result<(), RoomError> {
         self.bump_room_epoch();
+        if self.status == RoomStatus::Closed {
+            return Err(RoomError::RoomClosed);
+        }
         self.bump_session_epoch();
+        if self.status == RoomStatus::Closed {
+            return Err(RoomError::RoomClosed);
+        }
         self.restore_checking_compatibility_after_recovery();
+        Ok(())
     }
 
     fn restore_checking_compatibility_after_recovery(&mut self) {
+        if self.status == RoomStatus::Closed {
+            return;
+        }
         self.reset_sync_state();
         self.status = RoomStatus::CheckingCompatibility;
         self.players
@@ -514,6 +597,20 @@ impl NetplayRoom {
         }
     }
 
+    fn invalidate_link_cable_connection_if_present(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Result<(), RoomError> {
+        if !self.is_link_cable() {
+            return Ok(());
+        }
+
+        match self.invalidate_link_cable_connection(connection_id) {
+            Ok(_) | Err(RoomError::UnknownConnection) => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
     pub(super) fn clear_disconnected_slot(&mut self, player_index: PlayerIndex, is_host: bool) {
         if let Some(slot) = self
             .players
@@ -543,6 +640,9 @@ impl NetplayRoom {
         self.reset_sync_state();
 
         if is_host {
+            if self.is_link_cable() {
+                let _ = self.close_link_cable_data_plane();
+            }
             self.status = RoomStatus::Closed;
         }
     }

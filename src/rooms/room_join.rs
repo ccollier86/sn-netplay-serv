@@ -13,7 +13,10 @@ pub struct RoomJoin {
     /// Opaque reconnect token sent only to this player.
     pub resume_token: String,
     /// Opaque token used to attach the binary input socket.
-    pub input_socket_token: String,
+    ///
+    /// Link-cable rooms use their dedicated private data plane and therefore
+    /// never receive this controller-input capability.
+    pub input_socket_token: Option<String>,
     /// Optional player-specific voice grant. Never broadcast this in room views.
     pub voice: Option<PlayerVoiceJoinGrant>,
     /// Room state immediately after the join.

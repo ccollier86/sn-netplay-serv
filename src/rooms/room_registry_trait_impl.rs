@@ -10,10 +10,10 @@ use crate::protocol::{
     StateHashReport, StateRecoveryPin, StrictInputBatch,
 };
 use crate::rooms::{
-    ClientTransportCapabilities, ConnectionId, HostFrameRelayOutcome, InviteCode, PlayerIndex,
-    RomRelayGrantPair, RomRelayTransferIntent, RoomDebugEvent, RoomError, RoomEventReceiver,
-    RoomJoin, RoomRegistry, RoomRegistrySnapshot, RoomView, ScheduledHostFrameReleaseOutcome,
-    SnapshotFileRelayTransferIntent, StrictInputRelayOutcome,
+    ClientTransportCapabilities, ConnectionId, HostFrameRelayOutcome, InviteCode,
+    LinkCableAttachment, PlayerIndex, RomRelayGrantPair, RomRelayTransferIntent, RoomDebugEvent,
+    RoomError, RoomEventReceiver, RoomJoin, RoomRegistry, RoomRegistrySnapshot, RoomView,
+    ScheduledHostFrameReleaseOutcome, SnapshotFileRelayTransferIntent, StrictInputRelayOutcome,
 };
 
 #[async_trait::async_trait]
@@ -192,6 +192,19 @@ impl RoomRegistry for InMemoryRoomRegistry {
             .ok_or(RoomError::NotFound)?;
 
         Ok(stored_room.subscribe())
+    }
+
+    async fn claim_link_cable_data_plane(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<Option<LinkCableAttachment>, RoomError> {
+        let rooms = self.invite_codes.read().await;
+        let stored_room = rooms
+            .get(invite_code.normalized())
+            .ok_or(RoomError::NotFound)?;
+
+        stored_room.room.claim_link_cable_receiver(connection_id)
     }
 
     async fn subscribe_input(
@@ -438,10 +451,18 @@ impl RoomRegistry for InMemoryRoomRegistry {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        room_epoch: u64,
+        session_epoch: u64,
         packet: LinkCablePacket,
     ) -> Result<(), RoomError> {
-        self.relay_link_cable_packet_impl(invite_code, connection_id, packet)
-            .await
+        self.relay_link_cable_packet_impl(
+            invite_code,
+            connection_id,
+            room_epoch,
+            session_epoch,
+            packet,
+        )
+        .await
     }
 
     async fn record_state_hash(

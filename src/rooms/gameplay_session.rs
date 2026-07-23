@@ -5,7 +5,7 @@
 //! one gameplay provider.
 
 use crate::protocol::{NetplaySessionDescriptor, NetplaySessionMode};
-use crate::rooms::{ControllerNetplaySession, LinkCableSession};
+use crate::rooms::{ControllerNetplaySession, LinkCableSession, RoomScope};
 
 /// The one gameplay provider owned by a room.
 #[derive(Clone, Debug)]
@@ -18,12 +18,28 @@ pub(crate) enum GameplaySession {
 
 impl GameplaySession {
     /// Selects exactly one provider from the validated wire descriptor.
-    pub(crate) fn new(descriptor: &NetplaySessionDescriptor) -> Self {
+    pub(crate) fn new(
+        descriptor: &NetplaySessionDescriptor,
+        room_scope: RoomScope,
+        room_epoch: u64,
+        session_epoch: u64,
+    ) -> Self {
         match descriptor.mode {
             NetplaySessionMode::ControllerNetplay => {
                 Self::ControllerNetplay(ControllerNetplaySession)
             }
-            NetplaySessionMode::LinkCable => Self::LinkCable(LinkCableSession::default()),
+            NetplaySessionMode::LinkCable => {
+                let link = descriptor
+                    .link
+                    .as_ref()
+                    .expect("validated link-cable descriptor includes link metadata");
+                Self::LinkCable(LinkCableSession::new(
+                    room_scope,
+                    link,
+                    room_epoch,
+                    session_epoch,
+                ))
+            }
         }
     }
 

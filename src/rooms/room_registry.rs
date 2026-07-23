@@ -10,7 +10,8 @@ use crate::rooms::RoomRegistry;
 use crate::rooms::{
     Clock, ConnectionId, InviteCode, InviteCodeGenerator, NoopRoomDebugEventSink,
     ResumeTokenGenerator, RoomDebugEvent, RoomDebugEventLog, RoomDebugEventSink, RoomError,
-    RoomPerformanceSample, RoomRecoveryConfig, RoomView, SystemClock, UuidResumeTokenGenerator,
+    RoomPerformanceSample, RoomRecoveryConfig, RoomScopeAllocator, RoomView,
+    ServerRoomScopeAllocator, SystemClock, UuidResumeTokenGenerator,
 };
 use crate::voice::{DisabledVoiceBroker, VoiceBroker};
 use std::collections::HashMap;
@@ -42,6 +43,7 @@ pub struct InMemoryRoomRegistry {
     invite_codes: RwLock<HashMap<String, StoredRoom>>,
     invite_code_generator: Arc<dyn InviteCodeGenerator>,
     resume_token_generator: Arc<dyn ResumeTokenGenerator>,
+    room_scope_allocator: Arc<dyn RoomScopeAllocator>,
     clock: Arc<dyn Clock>,
     time_origin: Instant,
     recovery_config: RoomRecoveryConfig,
@@ -104,10 +106,33 @@ impl InMemoryRoomRegistry {
         event_sink: Arc<dyn RoomDebugEventSink>,
         voice_broker: Arc<dyn VoiceBroker>,
     ) -> Self {
+        Self::with_dependencies_event_sink_voice_and_room_scope(
+            invite_code_generator,
+            resume_token_generator,
+            clock,
+            recovery_config,
+            event_sink,
+            voice_broker,
+            Arc::new(ServerRoomScopeAllocator),
+        )
+    }
+
+    /// Creates a registry with an injectable authoritative room-scope source.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn with_dependencies_event_sink_voice_and_room_scope(
+        invite_code_generator: Arc<dyn InviteCodeGenerator>,
+        resume_token_generator: Arc<dyn ResumeTokenGenerator>,
+        clock: Arc<dyn Clock>,
+        recovery_config: RoomRecoveryConfig,
+        event_sink: Arc<dyn RoomDebugEventSink>,
+        voice_broker: Arc<dyn VoiceBroker>,
+        room_scope_allocator: Arc<dyn RoomScopeAllocator>,
+    ) -> Self {
         Self {
             invite_codes: RwLock::new(HashMap::new()),
             invite_code_generator,
             resume_token_generator,
+            room_scope_allocator,
             time_origin: clock.now(),
             clock,
             recovery_config,
@@ -194,6 +219,10 @@ impl InMemoryRoomRegistry {
 #[cfg(test)]
 #[path = "room_registry_link_tests.rs"]
 mod room_registry_link_tests;
+
+#[cfg(test)]
+#[path = "room_registry_scope_tests.rs"]
+mod room_registry_scope_tests;
 
 #[cfg(test)]
 #[path = "room_registry_start_sync_tests.rs"]

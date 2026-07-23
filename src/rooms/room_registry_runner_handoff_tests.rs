@@ -4,8 +4,9 @@ use super::{InMemoryRoomRegistry, RoomRegistry};
 use crate::auth::VerifiedLicense;
 use crate::protocol::NetplaySessionDescriptor;
 use crate::rooms::{
-    ClientTransportCapabilities, Clock, ConnectionId, InviteCode, InviteCodeGenerator, PlayerIndex,
-    PlayerStatus, RoomError, RoomRecoveryConfig, RoomStatus, UuidResumeTokenGenerator,
+    ClientTransportCapabilities, Clock, ConnectionId, InviteCode, InviteCodeGenerator,
+    LinkCableDataPlaneError, PlayerIndex, PlayerStatus, RoomError, RoomRecoveryConfig, RoomStatus,
+    UuidResumeTokenGenerator,
 };
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -102,7 +103,10 @@ async fn runner_claim_replaces_provisional_socket_rotates_token_and_rejects_late
             PlayerIndex::ONE,
             resumed.room.room_epoch,
             resumed.room.session_epoch,
-            resumed.input_socket_token.clone(),
+            resumed
+                .input_socket_token
+                .clone()
+                .expect("controller input token"),
             input_connection,
         )
         .await
@@ -113,11 +117,84 @@ async fn runner_claim_replaces_provisional_socket_rotates_token_and_rejects_late
             PlayerIndex::ONE,
             resumed.room.room_epoch,
             resumed.room.session_epoch,
-            resumed.input_socket_token,
+            resumed.input_socket_token.expect("controller input token"),
             ConnectionId::new(),
         )
         .await;
     assert!(matches!(input_replay, Err(RoomError::ResumeTokenInvalid)));
+}
+
+#[tokio::test]
+async fn link_runner_claim_atomically_replaces_live_provisional_endpoint() {
+    let clock = Arc::new(ManualClock::new(Instant::now()));
+    let registry = registry(clock);
+    let created = registry
+        .create_room(license("host"), ConnectionId::new(), link_descriptor())
+        .await
+        .expect("link room");
+    let invite = InviteCode::parse(created.invite_code).expect("invite");
+    let provisional_connection = ConnectionId::new();
+    let initial_join = registry
+        .connect_host(
+            invite.clone(),
+            license("host"),
+            provisional_connection,
+            ClientTransportCapabilities::default(),
+        )
+        .await
+        .expect("provisional host");
+    assert!(initial_join.input_socket_token.is_none());
+    let mut provisional_receiver = registry
+        .claim_link_cable_data_plane(invite.clone(), provisional_connection)
+        .await
+        .expect("provisional private route")
+        .expect("link room")
+        .receiver;
+
+    registry
+        .arm_runner_handoff(invite.clone(), provisional_connection)
+        .await
+        .expect("arm link handoff");
+    let initial_token = initial_join.resume_token;
+    let runner_connection = ConnectionId::new();
+    let resumed = registry
+        .reconnect_player(
+            invite.clone(),
+            PlayerIndex::ONE,
+            initial_join.room.room_epoch,
+            initial_token.clone(),
+            runner_connection,
+            ClientTransportCapabilities::default(),
+        )
+        .await
+        .expect("runner claims before provisional close");
+
+    assert_ne!(resumed.resume_token, initial_token);
+    assert!(resumed.input_socket_token.is_none());
+    let runner_attachment = registry
+        .claim_link_cable_data_plane(invite.clone(), runner_connection)
+        .await
+        .expect("runner private route")
+        .expect("link room");
+    assert_eq!(runner_attachment.snapshot.local_slot, PlayerIndex::ONE);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_millis(100), provisional_receiver.recv())
+            .await
+            .expect("provisional receiver invalidated"),
+        Err(LinkCableDataPlaneError::AttachmentReplaced)
+    );
+
+    assert!(matches!(
+        registry
+            .disconnect(invite.clone(), provisional_connection)
+            .await,
+        Err(RoomError::UnknownConnection)
+    ));
+    let room = registry
+        .room_view(invite)
+        .await
+        .expect("runner-owned room survives late close");
+    assert!(room.players[0].control_connected);
 }
 
 #[tokio::test]
@@ -299,7 +376,9 @@ async fn both_runner_claims_keep_epochs_stable_and_input_grants_usable() {
             PlayerIndex::ONE,
             guest_runner.room.room_epoch,
             guest_runner.room.session_epoch,
-            host_runner.input_socket_token,
+            host_runner
+                .input_socket_token
+                .expect("controller input token"),
             ConnectionId::new(),
         )
         .await
@@ -310,7 +389,9 @@ async fn both_runner_claims_keep_epochs_stable_and_input_grants_usable() {
             PlayerIndex::TWO,
             guest_runner.room.room_epoch,
             guest_runner.room.session_epoch,
-            guest_runner.input_socket_token,
+            guest_runner
+                .input_socket_token
+                .expect("controller input token"),
             ConnectionId::new(),
         )
         .await
@@ -393,4 +474,28 @@ fn descriptor() -> NetplaySessionDescriptor {
         "controller": { "inputDelayFrames": 3 }
     }))
     .expect("descriptor")
+}
+
+fn link_descriptor() -> NetplaySessionDescriptor {
+    serde_json::from_value(serde_json::json!({
+        "hostAppVersion": "0.3.0",
+        "mode": "linkCable",
+        "game": {
+            "systemId": "gba",
+            "title": "Pokemon Ruby",
+            "romSha256": "b".repeat(64),
+            "contentKey": "gba-pokemon-ruby"
+        },
+        "core": {
+            "coreId": "mgba"
+        },
+        "link": {
+            "systemFamily": "gba",
+            "linkProtocol": "gba-sio-multi-v1",
+            "runtimeProfile": "mgba-link-runtime-v1",
+            "maxPlayers": 2,
+            "transport": "relay"
+        }
+    }))
+    .expect("link descriptor")
 }

@@ -13,9 +13,9 @@ use crate::protocol::{
 use crate::rooms::{
     AdaptiveInputDelayPolicy, ClockSyncSampleRequestState, ConnectionId, GameplaySession,
     InviteCode, PlayerIndex, PlayerRuntimeState, PlayerSlot, PlayerSlotView, PlayerStatus,
-    ResumeTokenHash, RomRelayTransferState, RoomError, RoomId, RoomStatus, RoomView,
-    RoomVoiceState, SessionPauseStateTracker, SnapshotFileRelayTransferState,
-    SnapshotTransferState, StateRecoveryTransaction,
+    ResumeTokenHash, RomRelayTransferState, RoomError, RoomId, RoomScope, RoomScopeAllocator,
+    RoomStatus, RoomView, RoomVoiceState, ServerRoomScopeAllocator, SessionPauseStateTracker,
+    SnapshotFileRelayTransferState, SnapshotTransferState, StateRecoveryTransaction,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::time::Instant;
@@ -24,6 +24,8 @@ use std::time::Instant;
 #[derive(Clone, Debug)]
 pub struct NetplayRoom {
     room_id: RoomId,
+    #[cfg(test)]
+    room_scope: RoomScope,
     invite_code: InviteCode,
     protocol_version: u16,
     pub(super) session: NetplaySessionDescriptor,
@@ -119,6 +121,32 @@ impl NetplayRoom {
         host_input_socket_token_hash: ResumeTokenHash,
         now: Instant,
     ) -> Self {
+        Self::new_with_protocol_resume_and_scope(
+            host,
+            host_connection,
+            invite_code,
+            session,
+            protocol_version,
+            host_resume_token_hash,
+            host_input_socket_token_hash,
+            now,
+            ServerRoomScopeAllocator.allocate(),
+        )
+    }
+
+    /// Creates a room with its server-allocated private link namespace.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_protocol_resume_and_scope(
+        host: VerifiedLicense,
+        host_connection: ConnectionId,
+        invite_code: InviteCode,
+        session: NetplaySessionDescriptor,
+        protocol_version: u16,
+        host_resume_token_hash: ResumeTokenHash,
+        host_input_socket_token_hash: ResumeTokenHash,
+        now: Instant,
+        room_scope: RoomScope,
+    ) -> Self {
         let max_players = MVP_ROOM_CAPACITY;
         let mut players = Vec::with_capacity(usize::from(max_players));
         players.push(PlayerSlot::host(
@@ -134,18 +162,28 @@ impl NetplayRoom {
             players.push(PlayerSlot::empty(index));
         }
 
-        let gameplay_session = GameplaySession::new(&session);
+        let room_epoch = 1;
+        let session_epoch = 1;
+        let gameplay_session =
+            GameplaySession::new(&session, room_scope, room_epoch, session_epoch);
+        if let Some(link_cable) = gameplay_session.link_cable() {
+            link_cable
+                .bind_connection(PlayerIndex::ONE, host_connection)
+                .expect("reserved host connection binds to an empty link endpoint");
+        }
 
         Self {
             room_id: RoomId::new(),
+            #[cfg(test)]
+            room_scope,
             invite_code,
             protocol_version,
             session,
             max_players,
             players,
             status: RoomStatus::WaitingForGuest,
-            room_epoch: 1,
-            session_epoch: 1,
+            room_epoch,
+            session_epoch,
             compatibility: HashMap::new(),
             ready_players: HashSet::new(),
             deterministic_ready_players: HashSet::new(),
@@ -185,6 +223,12 @@ impl NetplayRoom {
     /// Returns the stable room id.
     pub fn room_id(&self) -> RoomId {
         self.room_id
+    }
+
+    /// Returns the stable namespace used only by the private link provider.
+    #[cfg(test)]
+    pub(crate) fn link_room_scope(&self) -> RoomScope {
+        self.room_scope
     }
 
     /// Returns the invite code used for lookups.
@@ -540,10 +584,25 @@ impl NetplayRoom {
 
     pub(super) fn bump_room_epoch(&mut self) {
         self.room_epoch = self.room_epoch.saturating_add(1);
+        self.synchronize_link_cable_epochs_or_close();
     }
 
     pub(super) fn bump_session_epoch(&mut self) {
         self.session_epoch = self.session_epoch.saturating_add(1);
+        self.synchronize_link_cable_epochs_or_close();
+    }
+
+    fn synchronize_link_cable_epochs_or_close(&mut self) {
+        let Some(link_cable) = self.gameplay_session.link_cable() else {
+            return;
+        };
+        if link_cable
+            .synchronize_epochs(self.room_epoch, self.session_epoch)
+            .is_err()
+        {
+            let _ = link_cable.close();
+            self.status = RoomStatus::Closed;
+        }
     }
 
     fn fingerprint_matches_session(&self, fingerprint: &CompatibilityFingerprint) -> bool {

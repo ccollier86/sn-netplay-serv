@@ -13,10 +13,11 @@ use crate::protocol::{
     StateHashReport, StateRecoveryPin, StrictInputBatch,
 };
 use crate::rooms::{
-    ClientTransportCapabilities, ConnectionId, HostFrameRelayOutcome, InviteCode, PlayerIndex,
-    RomRelayGrantPair, RomRelayTransferIntent, RoomDebugEvent, RoomError, RoomEvent,
-    RoomInputEvent, RoomJoin, RoomRegistrySnapshot, RoomView, RoomVoiceTokenRefresh,
-    ScheduledHostFrameReleaseOutcome, SnapshotFileRelayTransferIntent, StrictInputRelayOutcome,
+    ClientTransportCapabilities, ConnectionId, HostFrameRelayOutcome, InviteCode,
+    LinkCableAttachment, PlayerIndex, RomRelayGrantPair, RomRelayTransferIntent, RoomDebugEvent,
+    RoomError, RoomEvent, RoomInputEvent, RoomJoin, RoomRegistrySnapshot, RoomView,
+    RoomVoiceTokenRefresh, ScheduledHostFrameReleaseOutcome, SnapshotFileRelayTransferIntent,
+    StrictInputRelayOutcome,
 };
 use tokio::sync::broadcast;
 
@@ -150,6 +151,16 @@ pub trait RoomRegistry: Send + Sync {
 
     /// Subscribes to domain events for one active room.
     async fn subscribe(&self, invite_code: InviteCode) -> Result<RoomEventReceiver, RoomError>;
+
+    /// Claims the authenticated endpoint's private link-cable receiver.
+    ///
+    /// Controller rooms return `None`. Link packets and private grants never
+    /// enter the shared room-event broadcast channel.
+    async fn claim_link_cable_data_plane(
+        &self,
+        invite_code: InviteCode,
+        connection_id: ConnectionId,
+    ) -> Result<Option<LinkCableAttachment>, RoomError>;
 
     /// Subscribes to gameplay input events for one active room.
     async fn subscribe_input(
@@ -341,6 +352,8 @@ pub trait RoomRegistry: Send + Sync {
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        room_epoch: u64,
+        session_epoch: u64,
         packet: LinkCablePacket,
     ) -> Result<(), RoomError>;
 

@@ -4,12 +4,13 @@
 //! directly. They do not contain secrets or raw auth details.
 
 use crate::protocol::{
-    ClockSyncPong, ClockSyncSampleRequest, InputDelayChange, InputFrame, LinkCablePacket,
-    RomRelayBlocked as RomRelayBlockedPayload, RomRelayCancelled as RomRelayCancelledPayload,
-    RomRelayCompletion as RomRelayCompletionPayload, RomRelayFailure as RomRelayFailurePayload,
-    RomRelayGrant, RomRelayProgress as RomRelayProgressPayload, ScheduledSessionStart,
-    SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant, SnapshotManifest,
-    StateHashMismatchView, StateRecoveryView,
+    ClockSyncPong, ClockSyncSampleRequest, InputDelayChange, InputFrame, LinkCableDataPlaneGrant,
+    LinkCablePacket, RomRelayBlocked as RomRelayBlockedPayload,
+    RomRelayCancelled as RomRelayCancelledPayload, RomRelayCompletion as RomRelayCompletionPayload,
+    RomRelayFailure as RomRelayFailurePayload, RomRelayGrant,
+    RomRelayProgress as RomRelayProgressPayload, ScheduledSessionStart, SessionPauseView,
+    SnapshotChunk, SnapshotFileRelayGrant, SnapshotManifest, StateHashMismatchView,
+    StateRecoveryView,
 };
 use crate::rooms::{PlayerVoiceJoinGrant, RoomView};
 use serde::Serialize;
@@ -35,9 +36,15 @@ pub enum ServerMessage {
         /// Opaque token this player can use to reclaim the same slot.
         resume_token: String,
         /// Opaque token this player uses to attach the binary input socket.
-        input_socket_token: String,
+        ///
+        /// Absent for link-cable rooms, which use a dedicated private route.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_socket_token: Option<String>,
         /// Optional player-specific voice grant.
         voice: Option<PlayerVoiceJoinGrant>,
+        /// Private link route metadata, absent from every controller room.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        link_cable_grant: Option<LinkCableDataPlaneGrant>,
         /// Current room state.
         room: RoomView,
     },
@@ -97,6 +104,11 @@ pub enum ServerMessage {
     LinkCablePacket {
         /// Opaque virtual cable packet.
         packet: LinkCablePacket,
+    },
+    /// Private link route lifecycle changed for this authenticated endpoint.
+    LinkCableGrantUpdated {
+        /// Current private route and native-admission metadata.
+        grant: LinkCableDataPlaneGrant,
     },
     /// Snapshot chunk relayed from the host.
     SnapshotChunk {

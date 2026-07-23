@@ -1,16 +1,21 @@
 //! Link-cable operations for active rooms.
 //!
-//! This module keeps link compatibility and packet orchestration out of the
-//! general room state machine. It mutates only room-domain state and delegates
-//! packet validation to `LinkCableRoomState`.
+//! This module keeps link compatibility and private data-plane ownership out of
+//! the general room state machine.
 
 use crate::protocol::{
     LinkCableCompatibility, LinkCableDescriptor, LinkCablePacket, LinkCablePacketLimits,
 };
 use crate::rooms::{
-    ConnectionId, LinkCableSession, NetplayRoom, PlayerRuntimeState, PlayerStatus, RoomError,
-    RoomStatus,
+    ConnectionId, LinkCableAttachment, LinkCableDataPlaneError, LinkCableDataPlaneHandle,
+    LinkCableDataPlaneSnapshot, LinkCableSession, NetplayRoom, PlayerIndex, PlayerRuntimeState,
+    PlayerStatus, RoomError, RoomStatus,
 };
+
+/// Maps a private link-provider failure onto the stable room-domain vocabulary.
+pub(crate) fn map_link_cable_data_plane_error(error: LinkCableDataPlaneError) -> RoomError {
+    LinkCableSession::map_data_plane_error(error)
+}
 
 impl NetplayRoom {
     /// Stores link-cable compatibility details for a connected player.
@@ -83,23 +88,130 @@ impl NetplayRoom {
         Ok(())
     }
 
-    /// Validates and records a link-cable packet from one connection.
-    pub fn accept_link_cable_packet(
-        &mut self,
+    /// Returns a private data-plane route after authenticating a playing slot.
+    ///
+    /// Registry callers clone this handle under their read lock and invoke
+    /// `relay` only after releasing the registry lock.
+    pub(crate) fn link_cable_data_plane_handle_for_connection(
+        &self,
         connection_id: ConnectionId,
-        packet: &LinkCablePacket,
-        limits: LinkCablePacketLimits,
-    ) -> Result<(), RoomError> {
+    ) -> Result<(LinkCableDataPlaneHandle, PlayerIndex), RoomError> {
+        if self.status == RoomStatus::Closed {
+            return Err(RoomError::RoomClosed);
+        }
         if !self.is_link_cable() || self.status != RoomStatus::Playing {
             return Err(RoomError::NotPlaying);
+        }
+
+        let player_index = self
+            .player_index_for_connection(connection_id)
+            .ok_or(RoomError::UnknownConnection)?;
+        Ok((self.link_cable_session()?.data_plane_handle(), player_index))
+    }
+
+    /// Binds a current room connection to one exact link endpoint.
+    pub(crate) fn bind_link_cable_connection(
+        &self,
+        player_index: PlayerIndex,
+        connection_id: ConnectionId,
+    ) -> Result<LinkCableDataPlaneSnapshot, RoomError> {
+        let owned_index = self
+            .player_index_for_connection(connection_id)
+            .ok_or(RoomError::UnknownConnection)?;
+        if owned_index != player_index {
+            return Err(RoomError::SlotSpoofing(player_index));
+        }
+
+        self.link_cable_session()?
+            .bind_connection(player_index, connection_id)
+    }
+
+    /// Atomically replaces a currently owned connection during runner handoff.
+    pub(crate) fn replace_link_cable_connection(
+        &self,
+        player_index: PlayerIndex,
+        previous_connection_id: ConnectionId,
+        connection_id: ConnectionId,
+    ) -> Result<LinkCableDataPlaneSnapshot, RoomError> {
+        let owned_index = self
+            .player_index_for_connection(previous_connection_id)
+            .ok_or(RoomError::UnknownConnection)?;
+        if owned_index != player_index {
+            return Err(RoomError::SlotSpoofing(player_index));
+        }
+
+        self.link_cable_session()?.replace_connection(
+            player_index,
+            previous_connection_id,
+            connection_id,
+        )
+    }
+
+    /// Claims the one targeted receiver for a bound current connection.
+    pub(crate) fn claim_link_cable_receiver(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Result<Option<LinkCableAttachment>, RoomError> {
+        if !self.is_link_cable() {
+            return Ok(None);
+        }
+        if self.status == RoomStatus::Closed {
+            return Err(RoomError::RoomClosed);
         }
 
         let owned_index = self
             .player_index_for_connection(connection_id)
             .ok_or(RoomError::UnknownConnection)?;
+        let attachment = self.link_cable_session()?.claim_receiver(connection_id)?;
+        if attachment.snapshot.local_slot != owned_index {
+            let _ = self
+                .link_cable_session()?
+                .invalidate_connection(connection_id);
+            return Err(RoomError::SlotSpoofing(attachment.snapshot.local_slot));
+        }
 
-        self.link_cable_session_mut()?
-            .accept_packet(owned_index, packet, limits)
+        Ok(Some(attachment))
+    }
+
+    /// Invalidates one exact link endpoint connection.
+    ///
+    /// This deliberately does not consult player slots because lifecycle code
+    /// may call it immediately after clearing the room connection.
+    pub(crate) fn invalidate_link_cable_connection(
+        &self,
+        connection_id: ConnectionId,
+    ) -> Result<LinkCableDataPlaneSnapshot, RoomError> {
+        self.link_cable_session()?
+            .invalidate_connection(connection_id)
+    }
+
+    /// Permanently closes this room's private link provider.
+    pub(crate) fn close_link_cable_data_plane(&self) -> Result<(), RoomError> {
+        self.link_cable_session()?.close()
+    }
+
+    /// Validates and relays a link-cable packet through the bounded data plane.
+    ///
+    /// This compatibility entry point is retained for direct room callers. The
+    /// registry uses `link_cable_data_plane_handle_for_connection` so it never
+    /// performs decode or queue work while holding its global lock.
+    pub fn accept_link_cable_packet(
+        &self,
+        connection_id: ConnectionId,
+        packet: &LinkCablePacket,
+        _limits: LinkCablePacketLimits,
+    ) -> Result<(), RoomError> {
+        let (handle, owned_index) =
+            self.link_cable_data_plane_handle_for_connection(connection_id)?;
+        handle
+            .relay(
+                connection_id,
+                owned_index,
+                self.room_epoch,
+                self.session_epoch,
+                packet.clone(),
+            )
+            .map_err(map_link_cable_data_plane_error)
     }
 
     fn link_descriptor(&self) -> Result<&LinkCableDescriptor, RoomError> {

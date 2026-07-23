@@ -413,10 +413,11 @@ async fn join_lobby_assigns_second_player_and_status_hides_resume_token() {
 #[tokio::test]
 async fn create_room_accepts_link_cable_descriptor_when_provider_rollout_is_enabled() {
     let mut body = create_room_value();
+    body["linkContractVersion"] = json!(1);
     body["session"]["mode"] = json!("linkCable");
     body["session"]["link"] = json!({
         "systemFamily": "gba",
-        "linkProtocol": "gba-link-cable-v1",
+        "linkProtocol": "gba-sio-multi-v1",
         "runtimeProfile": "mgba-link-runtime-v1",
         "maxPlayers": 2,
         "transport": "relay"
@@ -457,7 +458,7 @@ async fn create_room_rejects_link_cable_descriptor_when_provider_rollout_is_disa
     body["session"]["mode"] = json!("linkCable");
     body["session"]["link"] = json!({
         "systemFamily": "gba",
-        "linkProtocol": "gba-link-cable-v1",
+        "linkProtocol": "gba-sio-multi-v1",
         "runtimeProfile": "mgba-link-runtime-v1",
         "maxPlayers": 2,
         "transport": "relay"
@@ -489,12 +490,85 @@ async fn create_room_rejects_link_cable_descriptor_when_provider_rollout_is_disa
 }
 
 #[tokio::test]
+async fn create_room_requires_completed_link_contract_when_rollout_is_enabled() {
+    let mut body = create_room_value();
+    body["session"]["mode"] = json!("linkCable");
+    body["session"]["game"]["systemId"] = json!("gbc");
+    body["session"]["core"]["coreId"] = json!("mgba");
+    body["session"]["link"] = json!({
+        "systemFamily": "gb",
+        "linkProtocol": "gb-serial-v1",
+        "runtimeProfile": "mgba-link-runtime-v1",
+        "maxPlayers": 2
+    });
+
+    let response = link_cable_app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/rooms")
+                .header("authorization", "Bearer valid")
+                .header("x-client-kind", "android")
+                .header("x-installation-id", "android-install-1")
+                .body(Body::from(body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let value = serde_json::from_slice::<Value>(&body).expect("json");
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(value["code"], "linkCableCapabilityRequired");
+}
+
+#[tokio::test]
+async fn create_room_rejects_unknown_link_contract_version() {
+    let mut body = create_room_value();
+    body["linkContractVersion"] = json!(2);
+    body["session"]["mode"] = json!("linkCable");
+    body["session"]["game"]["systemId"] = json!("gba");
+    body["session"]["core"]["coreId"] = json!("mgba");
+    body["session"]["link"] = json!({
+        "systemFamily": "gba",
+        "linkProtocol": "gba-sio-multi-v1",
+        "runtimeProfile": "mgba-link-runtime-v1",
+        "maxPlayers": 2
+    });
+
+    let response = link_cable_app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/rooms")
+                .header("authorization", "Bearer valid")
+                .header("x-client-kind", "android")
+                .header("x-installation-id", "android-install-1")
+                .body(Body::from(body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .expect("body");
+    let value = serde_json::from_slice::<Value>(&body).expect("json");
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(value["code"], "linkCableCapabilityUnsupported");
+}
+
+#[tokio::test]
 async fn create_room_rejects_link_cable_system_mismatch() {
     let mut body = create_room_value();
     body["session"]["mode"] = json!("linkCable");
     body["session"]["link"] = json!({
         "systemFamily": "gba",
-        "linkProtocol": "gba-link-cable-v1",
+        "linkProtocol": "gba-sio-multi-v1",
         "runtimeProfile": "mgba-link-runtime-v1",
         "maxPlayers": 2,
         "transport": "relay"

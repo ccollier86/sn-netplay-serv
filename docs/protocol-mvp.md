@@ -1,4 +1,4 @@
-# Netplay Protocol V4
+# Netplay Protocol V4/V5
 
 The relay coordinates invite-code sessions for ShadowBoy clients. It never
 runs emulator cores, never receives ROM data, and never streams gameplay video.
@@ -6,8 +6,9 @@ Clients run the emulators locally and use the relay for room discovery,
 compatibility checks, save-state snapshot relay, input relay, coordinated pause,
 heartbeat, and reconnect recovery.
 
-Protocol v3 is not backward compatible with v2. Clients must send protocol
-version `3` when creating a room and opening a room WebSocket.
+The relay accepts protocol versions `4` and `5`. Room creation negotiates one
+exact version from the client range, and every room WebSocket must repeat that
+room's selected version.
 
 ## HTTP
 
@@ -26,12 +27,6 @@ protocol range:
   "version": "0.1.0",
   "minSupportedProtocolVersion": 4,
   "maxSupportedProtocolVersion": 5
-}
-```
-
-```json
-{
-  "status": "ok"
 }
 ```
 
@@ -70,7 +65,7 @@ Body:
 
 ```json
 {
-  "desktopProtocolVersion": 3,
+  "desktopProtocolVersion": 4,
   "session": {
     "hostAppVersion": "0.3.0",
     "mode": "controllerNetplay",
@@ -106,27 +101,35 @@ Controller rooms require exact `romSha256` and compatible `stateFormat`. Host
 input delay is part of the room descriptor under `controller.inputDelayFrames`
 and must be used by guests instead of local defaults.
 
-> **Provisional and disabled:** the `mode: "linkCable"` JSON examples in this
-> document describe pre-foundation scaffolding only. They are not the final
-> SBLK contract and must not be enabled or extended in place. New link rooms
-> are rejected by default through `SB_NETPLAY_LINK_CABLE_ENABLED=false`. See
+> **Disabled until qualification:** the completed link descriptor, private
+> per-room data plane, and SBLK v1 codec are admitted only when the client explicitly sends
+> `linkContractVersion: 1` and the server has
+> `SB_NETPLAY_LINK_CABLE_ENABLED=true`. The switch defaults to false. Link
+> packets use targeted bounded queues and never enter shared room events,
+> public event sequencing, or debug history. Physical-device qualification
+> remains a production-enable blocker. See
 > `docs/mgba-link-provider-foundation.md`.
 
-Provisional link-cable rooms send `mode: "linkCable"` and a platform-neutral
-`link` descriptor:
+Link-cable room creation adds `"linkContractVersion": 1` beside
+`desktopProtocolVersion`, sets `mode: "linkCable"`, and uses exactly one of
+these platform-neutral descriptors:
 
 ```json
 {
   "systemFamily": "gba",
-  "linkProtocol": "gba-link-cable-v1",
+  "linkProtocol": "gba-sio-multi-v1",
   "runtimeProfile": "mgba-link-runtime-v1",
   "maxPlayers": 2,
   "transport": "relay"
 }
 ```
 
-Link rooms require matching link runtime profile and optional system-data hash.
-They do not require guest ROM hashes to match the host ROM hash.
+GB and GBC use `systemFamily: "gb"` with
+`linkProtocol: "gb-serial-v1"`. GBA uses `systemFamily: "gba"` with
+`linkProtocol: "gba-sio-multi-v1"`. Both require `coreId: "mgba"` and exactly
+two players. Link peers require matching runtime profile, core build id, and
+supported link mode. ROM, BIOS/system-data, save, RTC, and full-state hashes are
+not peer-equality fields, so the guest ROM does not have to match the host ROM.
 
 Room responses include `eventSeq`, `roomEpoch`, and `sessionEpoch`:
 
@@ -139,12 +142,57 @@ Room responses include `eventSeq`, `roomEpoch`, and `sessionEpoch`:
     "sessionEpoch": 1,
     "inviteCode": "AB23-CD",
     "protocol": {
-      "protocolVersion": 3,
-      "minSupportedProtocolVersion": 3
+      "protocolVersion": 4,
+      "minSupportedProtocolVersion": 4,
+      "maxSupportedProtocolVersion": 5,
+      "roomProtocolVersion": 4
     },
-    "session": {},
+    "session": {
+      "hostClientKind": "desktop",
+      "hostAppVersion": "0.3.0",
+      "roomMode": "directInvite",
+      "mode": "controllerNetplay",
+      "game": {
+        "systemId": "snes",
+        "title": "Super Mario Kart",
+        "romSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "contentKey": "snes-super-mario-kart-usa",
+        "region": "USA",
+        "revision": "Rev 1",
+        "discId": null
+      },
+      "core": {
+        "coreId": "snes9x",
+        "coreName": "Snes9x",
+        "coreVersion": "informational-build",
+        "coreOptionsSha256": null,
+        "stateFormat": "snes9x:snes:s9x-freeze-stream-v1"
+      },
+      "controller": {
+        "inputDelayFrames": 3
+      },
+      "link": null,
+      "voice": null,
+      "romIdentity": null,
+      "romRelayIntent": "exactMatchOnly",
+      "romRelay": null
+    },
+    "voice": null,
+    "romRelay": null,
     "maxPlayers": 2,
     "pause": null,
+    "frameClock": {
+      "canonicalFrame": 0,
+      "releasedFrame": null,
+      "nextReleaseFrame": 0,
+      "acceptedInputs": [
+        {
+          "playerIndex": 0,
+          "frame": null
+        }
+      ],
+      "pendingInputDelayChange": null
+    },
     "status": "waitingForGuest",
     "players": [
       {
@@ -154,6 +202,13 @@ Room responses include `eventSeq`, `roomEpoch`, and `sessionEpoch`:
         "status": "connected",
         "runtimeState": "connected",
         "occupied": true,
+        "controlConnected": false,
+        "inputConnected": false,
+        "supportsStateFileRelay": false,
+        "supportsRomFileRelay": false,
+        "supportsScheduledStart": false,
+        "supportsClockSync": false,
+        "supportsFastInputRelay": false,
         "lastSeenAgeMs": 20,
         "reconnectGraceRemainingMs": null
       }
@@ -169,6 +224,10 @@ all non-ping WebSocket messages.
 Player `runtimeState` values are relay-facing room view state. The relay may
 infer `stale` when a connected player has missed heartbeat acknowledgements but
 has not yet crossed the recovery timeout.
+
+For readability, later control-message examples use `"$roomView"` as a
+documentation macro for the complete `RoomView` object above. The wire value is
+always that object, never the literal string.
 
 ### `GET /v1/rooms/{invite_code}/status`
 
@@ -192,6 +251,12 @@ Guest:
 GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=4
 ```
 
+Link-room initial joins append the completed private-route contract:
+
+```text
+GET /v1/ws?inviteCode=AB23-CD&role=guest&protocolVersion=4&linkContractVersion=1
+```
+
 For a desktop-to-runner transfer, the protected provisional join adds:
 
 ```text
@@ -213,13 +278,49 @@ First successful socket message:
   "yourPlayerIndex": 1,
   "resumeToken": "<opaque-token>",
   "inputSocketToken": "<opaque-input-token>",
-  "room": {}
+  "voice": null,
+  "room": "$roomView"
 }
 ```
 
-The client must keep both tokens in memory for the current room. They are opaque
-capabilities and must not be logged, included in diagnostics, persisted beyond
-the session, or shown to users.
+Controller clients keep both tokens in memory for the current room. They are
+opaque capabilities and must not be logged, included in diagnostics, persisted
+beyond the session, or shown to users.
+
+A link room omits `inputSocketToken` and adds an authenticated private grant:
+
+```json
+{
+  "type": "roomJoined",
+  "eventSeq": 1,
+  "roomEpoch": 2,
+  "sessionEpoch": 2,
+  "yourPlayerIndex": 1,
+  "resumeToken": "<opaque-token>",
+  "voice": null,
+  "linkCableGrant": {
+    "contractVersion": 1,
+    "roomScope": "4815162342",
+    "roomEpoch": 2,
+    "sessionEpoch": 2,
+    "cableEpoch": 1,
+    "localSlot": 1,
+    "linkProtocol": "gba-sio-multi-v1",
+    "maximumEventBytes": 128,
+    "queueCapacity": 64,
+    "status": "ready"
+  },
+  "room": "$roomView"
+}
+```
+
+`roomScope` is a positive decimal string so its full 63-bit value is exact in
+JavaScript and native clients. It is private control-plane admission data and
+is not copied into SBLK, `RoomView`, public lobby output, room events, or logs.
+While only one endpoint is attached, `status` is `waitingForPeer` and
+`cableEpoch` may be zero. The server sends `linkCableGrantUpdated` after
+lifecycle changes; `aborted` and `closed` grants include a safe
+`failureReason`.
 
 When `runnerHandoff=true`, the relay arms the provisional slot only for the
 configured handoff grace period (60 seconds by default). The runner may claim
@@ -236,6 +337,11 @@ and the resume token from `roomJoined`:
 GET /v1/ws?inviteCode=AB23-CD&protocolVersion=4&playerIndex=1&roomEpoch=4&resumeToken=<opaque-token>
 ```
 
+Link-room reconnects must append `&linkContractVersion=1`. Missing and unknown
+link contract versions are rejected before either initial or reconnect
+admission. Controller-room initial joins and reconnects do not send this
+parameter.
+
 All three reconnect fields are required together. Partial reconnect queries are
 rejected. A complete reconnect is authorized by this room-scoped capability and
 does not use protected installation headers. A successful reconnect atomically
@@ -246,8 +352,8 @@ does not add another room/session epoch transition.
 
 ### Binary Input Socket
 
-The control connection's fresh `roomJoined.inputSocketToken` attaches the
-dedicated binary input socket:
+Controller rooms use the control connection's fresh
+`roomJoined.inputSocketToken` to attach the dedicated binary input socket:
 
 ```text
 GET /v1/ws/input?inviteCode=AB23-CD&protocolVersion=4&playerIndex=1&roomEpoch=4&sessionEpoch=4&inputSocketToken=<opaque-token>
@@ -276,7 +382,7 @@ State-carrying server messages include `eventSeq`, `roomEpoch`, and
   "eventSeq": 3,
   "roomEpoch": 2,
   "sessionEpoch": 2,
-  "room": {}
+  "room": "$roomView"
 }
 ```
 
@@ -291,6 +397,7 @@ Important server messages:
 - `snapshotComplete`
 - `inputFrame`
 - `linkCablePacket`
+- `linkCableGrantUpdated`
 - `sessionPauseScheduled`
 - `sessionPauseUpdated`
 - `sessionResumeScheduled`
@@ -308,7 +415,7 @@ Controller-netplay clients send compatibility when the relay requests it:
   "sessionEpoch": 2,
   "fingerprint": {
     "desktopVersion": "0.3.0",
-    "protocolVersion": 3,
+    "protocolVersion": 4,
     "systemId": "snes",
     "coreId": "snes9x",
     "coreBuild": "informational-build",
@@ -345,14 +452,21 @@ Link-cable clients send:
   "roomEpoch": 2,
   "sessionEpoch": 2,
   "compatibility": {
-    "protocolVersion": 3,
+    "protocolVersion": 4,
     "systemFamily": "gba",
-    "linkProtocol": "gba-link-cable-v1",
+    "linkProtocol": "gba-sio-multi-v1",
     "runtimeProfile": "mgba-link-runtime-v1",
-    "systemDataHash": null
+    "coreBuildId": "android-mgba-0.10.5-sb1",
+    "supportedModes": ["multi"]
   }
 }
 ```
+
+GB/GBC clients instead send `systemFamily: "gb"`,
+`linkProtocol: "gb-serial-v1"`, and `supportedModes: ["serial"]`. Initial and
+resume control WebSocket URLs for either family must also include
+`linkContractVersion=1`. This capability field is neither required nor emitted
+for controller rooms.
 
 ## Snapshot Sync And Ready
 
@@ -405,7 +519,7 @@ When every connected player is ready, the relay broadcasts:
   "roomEpoch": 2,
   "sessionEpoch": 2,
   "startFrame": 0,
-  "room": {}
+  "room": "$roomView"
 }
 ```
 
@@ -472,7 +586,7 @@ Validation rules:
 - Input is only accepted while the room is `playing` or inside the coordinated
   pause input-delay window.
 
-Provisional link-cable packet (not the final SBLK data plane):
+Link-cable SBLK packet:
 
 ```json
 {
@@ -480,17 +594,31 @@ Provisional link-cable packet (not the final SBLK data plane):
   "roomEpoch": 2,
   "sessionEpoch": 2,
   "packet": {
-    "playerIndex": 0,
-    "sequence": 123,
-    "emulatedTime": 582991,
-    "payload": [1, 2, 3]
+    "playerIndex": 1,
+    "sequence": 0,
+    "emulatedTime": 72623859790382856,
+    "payload": [
+      83, 66, 76, 75, 1, 1, 0, 0,
+      2, 0, 0, 0, 0, 0, 0, 0,
+      2, 0, 0, 0, 0, 0, 0, 0,
+      4, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0,
+      1, 13, 0,
+      2, 3, 32, 0, 0, 8, 7, 6, 5, 4, 3, 2, 1
+    ]
   }
 }
 ```
 
-Link packets are accepted only after a link room is `playing`; sequence numbers
-must increase per player. Packets are broadcast to the other connected player
-and are not echoed to the sender.
+`packet.payload` is one complete 48–128 byte SBLK v1 frame from the exact
+protocol namespace in the private grant. The JSON player, sequence, and
+emulated-time fields must agree with the decoded frame. Link packets are
+accepted only after a link room is `playing`; each sender sequence starts at
+zero and must be the exact next value for the current cable epoch. Packets enter
+only the opposite endpoint's bounded queue and are never echoed to the sender.
+Malformed, spoofed, out-of-order, or overflow traffic aborts the current cable
+generation and clears both per-room queues instead of dropping a required
+event.
 
 ## Coordinated Pause
 

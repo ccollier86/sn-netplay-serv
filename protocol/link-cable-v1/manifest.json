@@ -1,0 +1,320 @@
+{
+  "schemaVersion": 1,
+  "fixtureSet": "shadowboy-link-cable-v1",
+  "wireVersion": 1,
+  "endianness": "little",
+  "headerBytes": 43,
+  "maxFrameBytes": 128,
+  "headerFields": [
+    { "name": "magic", "offset": 0, "bytes": 4, "encoding": "ASCII", "value": "SBLK" },
+    { "name": "wireVersion", "offset": 4, "bytes": 1, "encoding": "u8" },
+    { "name": "eventKind", "offset": 5, "bytes": 1, "encoding": "u8", "scope": "protocol namespace" },
+    { "name": "flags", "offset": 6, "bytes": 2, "encoding": "u16le", "requiredValue": 0 },
+    { "name": "roomEpoch", "offset": 8, "bytes": 8, "encoding": "u64le", "constraint": "high bit zero" },
+    { "name": "sessionEpoch", "offset": 16, "bytes": 8, "encoding": "u64le", "constraint": "high bit zero" },
+    { "name": "cableEpoch", "offset": 24, "bytes": 8, "encoding": "u64le", "constraint": "high bit zero" },
+    { "name": "senderSequence", "offset": 32, "bytes": 8, "encoding": "u64le", "constraint": "high bit zero" },
+    { "name": "senderSlot", "offset": 40, "bytes": 1, "encoding": "u8" },
+    { "name": "bodyLength", "offset": 41, "bytes": 2, "encoding": "u16le" }
+  ],
+  "fixtures": [
+    {
+      "id": "gba-mode-set",
+      "file": "gba-mode-set.hex",
+      "protocol": "gba-sio-multi-v1",
+      "event": "MODE_SET",
+      "eventKind": 1,
+      "bodyBytes": 13,
+      "frameBytes": 56,
+      "fields": {
+        "header": {
+          "magic": "SBLK",
+          "wireVersion": 1,
+          "eventKind": 1,
+          "flags": 0,
+          "roomEpoch": "0x0000000000000002",
+          "sessionEpoch": "0x0000000000000003",
+          "cableEpoch": "0x0000000000000004",
+          "senderSequence": "0x0000000000000005",
+          "senderSlot": 1,
+          "bodyLength": 13
+        },
+        "body": {
+          "mode": 2,
+          "siocnt": "0x2003",
+          "rcnt": "0x0000",
+          "emulatedTime": "0x0102030405060708"
+        }
+      },
+      "expectedHex": "53 42 4c 4b 01 01 00 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 05 00 00 00 00 00 00 00 01 0d 00 02 03 20 00 00 08 07 06 05 04 03 02 01"
+    },
+    {
+      "id": "gba-transfer-start",
+      "file": "gba-transfer-start.hex",
+      "protocol": "gba-sio-multi-v1",
+      "event": "TRANSFER_START",
+      "eventKind": 2,
+      "bodyBytes": 17,
+      "frameBytes": 60,
+      "fields": {
+        "header": {
+          "magic": "SBLK",
+          "wireVersion": 1,
+          "eventKind": 2,
+          "flags": 0,
+          "roomEpoch": "0x0102030405060708",
+          "sessionEpoch": "0x0000000000000009",
+          "cableEpoch": "0x000000000000000a",
+          "senderSequence": "0x000000000000000b",
+          "senderSlot": 0,
+          "bodyLength": 17
+        },
+        "body": {
+          "transferId": "0x11223344",
+          "mode": 2,
+          "siocnt": "0x6001",
+          "parentWord": "0x99aa",
+          "emulatedTime": "0x0102030405060708"
+        }
+      },
+      "expectedHex": "53 42 4c 4b 01 02 00 00 08 07 06 05 04 03 02 01 09 00 00 00 00 00 00 00 0a 00 00 00 00 00 00 00 0b 00 00 00 00 00 00 00 00 11 00 44 33 22 11 02 01 60 aa 99 08 07 06 05 04 03 02 01"
+    },
+    {
+      "id": "gba-transfer-reply",
+      "file": "gba-transfer-reply.hex",
+      "protocol": "gba-sio-multi-v1",
+      "event": "TRANSFER_REPLY",
+      "eventKind": 3,
+      "bodyBytes": 14,
+      "frameBytes": 57,
+      "fields": {
+        "header": {
+          "magic": "SBLK",
+          "wireVersion": 1,
+          "eventKind": 3,
+          "flags": 0,
+          "roomEpoch": "0x0000000000000002",
+          "sessionEpoch": "0x0000000000000003",
+          "cableEpoch": "0x0000000000000004",
+          "senderSequence": "0x0000000000000005",
+          "senderSlot": 1,
+          "bodyLength": 14
+        },
+        "body": {
+          "transferId": "0x11223344",
+          "childWord": "0x99aa",
+          "emulatedTime": "0x0102030405060708"
+        }
+      },
+      "expectedHex": "53 42 4c 4b 01 03 00 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 05 00 00 00 00 00 00 00 01 0e 00 44 33 22 11 aa 99 08 07 06 05 04 03 02 01"
+    },
+    {
+      "id": "gba-transfer-commit",
+      "file": "gba-transfer-commit.hex",
+      "protocol": "gba-sio-multi-v1",
+      "event": "TRANSFER_COMMIT",
+      "eventKind": 4,
+      "bodyBytes": 12,
+      "frameBytes": 55,
+      "fields": {
+        "header": {
+          "magic": "SBLK",
+          "wireVersion": 1,
+          "eventKind": 4,
+          "flags": 0,
+          "roomEpoch": "0x0000000000000002",
+          "sessionEpoch": "0x0000000000000003",
+          "cableEpoch": "0x0000000000000004",
+          "senderSequence": "0x0000000000000005",
+          "senderSlot": 0,
+          "bodyLength": 12
+        },
+        "body": {
+          "transferId": "0x11223344",
+          "words": ["0xcafe", "0xbeef", "0xffff", "0xffff"]
+        }
+      },
+      "expectedHex": "53 42 4c 4b 01 04 00 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 05 00 00 00 00 00 00 00 00 0c 00 44 33 22 11 fe ca ef be ff ff ff ff"
+    },
+    {
+      "id": "gba-transfer-abort",
+      "file": "gba-transfer-abort.hex",
+      "protocol": "gba-sio-multi-v1",
+      "event": "TRANSFER_ABORT",
+      "eventKind": 5,
+      "bodyBytes": 5,
+      "frameBytes": 48,
+      "fields": {
+        "header": {
+          "magic": "SBLK",
+          "wireVersion": 1,
+          "eventKind": 5,
+          "flags": 0,
+          "roomEpoch": "0x0000000000000002",
+          "sessionEpoch": "0x0000000000000003",
+          "cableEpoch": "0x0000000000000004",
+          "senderSequence": "0x0000000000000005",
+          "senderSlot": 1,
+          "bodyLength": 5
+        },
+        "body": {
+          "transferId": "0x11223344",
+          "reason": 4,
+          "reasonName": "peerDisconnected"
+        }
+      },
+      "expectedHex": "53 42 4c 4b 01 05 00 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 05 00 00 00 00 00 00 00 01 05 00 44 33 22 11 04"
+    },
+    {
+      "id": "gb-serial-start-slot0",
+      "file": "gb-serial-start-slot0.hex",
+      "protocol": "gb-serial-v1",
+      "event": "SERIAL_START",
+      "eventKind": 2,
+      "bodyBytes": 15,
+      "frameBytes": 58,
+      "fields": {
+        "header": {
+          "magic": "SBLK",
+          "wireVersion": 1,
+          "eventKind": 2,
+          "flags": 0,
+          "roomEpoch": "0x0102030405060708",
+          "sessionEpoch": "0x1112131415161718",
+          "cableEpoch": "0x2122232425262728",
+          "senderSequence": "0x3132333435363738",
+          "senderSlot": 0,
+          "bodyLength": 15
+        },
+        "body": {
+          "transferId": "0x11223344",
+          "clockOwnerSlot": 0,
+          "scControl": "0x83",
+          "ownerByte": "0xa5",
+          "emulatedTime": "0x0a1b2c3d4e5f6071"
+        }
+      },
+      "expectedHex": "53 42 4c 4b 01 02 00 00 08 07 06 05 04 03 02 01 18 17 16 15 14 13 12 11 28 27 26 25 24 23 22 21 38 37 36 35 34 33 32 31 00 0f 00 44 33 22 11 00 83 a5 71 60 5f 4e 3d 2c 1b 0a"
+    },
+    {
+      "id": "gb-serial-start-slot1",
+      "file": "gb-serial-start-slot1.hex",
+      "protocol": "gb-serial-v1",
+      "event": "SERIAL_START",
+      "eventKind": 2,
+      "bodyBytes": 15,
+      "frameBytes": 58,
+      "fields": {
+        "header": {
+          "magic": "SBLK",
+          "wireVersion": 1,
+          "eventKind": 2,
+          "flags": 0,
+          "roomEpoch": "0x0102030405060708",
+          "sessionEpoch": "0x1112131415161718",
+          "cableEpoch": "0x2122232425262728",
+          "senderSequence": "0x4142434445464748",
+          "senderSlot": 1,
+          "bodyLength": 15
+        },
+        "body": {
+          "transferId": "0x55667788",
+          "clockOwnerSlot": 1,
+          "scControl": "0x81",
+          "ownerByte": "0x5a",
+          "emulatedTime": "0x1a2b3c4d5e6f7081"
+        }
+      },
+      "expectedHex": "53 42 4c 4b 01 02 00 00 08 07 06 05 04 03 02 01 18 17 16 15 14 13 12 11 28 27 26 25 24 23 22 21 48 47 46 45 44 43 42 41 01 0f 00 88 77 66 55 01 81 5a 81 70 6f 5e 4d 3c 2b 1a"
+    },
+    {
+      "id": "gb-serial-reply",
+      "file": "gb-serial-reply.hex",
+      "protocol": "gb-serial-v1",
+      "event": "SERIAL_REPLY",
+      "eventKind": 3,
+      "bodyBytes": 14,
+      "frameBytes": 57,
+      "fields": {
+        "header": {
+          "magic": "SBLK",
+          "wireVersion": 1,
+          "eventKind": 3,
+          "flags": 0,
+          "roomEpoch": "0x0102030405060708",
+          "sessionEpoch": "0x1112131415161718",
+          "cableEpoch": "0x2122232425262728",
+          "senderSequence": "0x5152535455565758",
+          "senderSlot": 1,
+          "bodyLength": 14
+        },
+        "body": {
+          "transferId": "0x11223344",
+          "clockOwnerSlot": 0,
+          "responderByte": "0x3c",
+          "emulatedTime": "0x2a3b4c5d6e7f1021"
+        }
+      },
+      "expectedHex": "53 42 4c 4b 01 03 00 00 08 07 06 05 04 03 02 01 18 17 16 15 14 13 12 11 28 27 26 25 24 23 22 21 58 57 56 55 54 53 52 51 01 0e 00 44 33 22 11 00 3c 21 10 7f 6e 5d 4c 3b 2a"
+    },
+    {
+      "id": "gb-serial-commit",
+      "file": "gb-serial-commit.hex",
+      "protocol": "gb-serial-v1",
+      "event": "SERIAL_COMMIT",
+      "eventKind": 4,
+      "bodyBytes": 7,
+      "frameBytes": 50,
+      "fields": {
+        "header": {
+          "magic": "SBLK",
+          "wireVersion": 1,
+          "eventKind": 4,
+          "flags": 0,
+          "roomEpoch": "0x0102030405060708",
+          "sessionEpoch": "0x1112131415161718",
+          "cableEpoch": "0x2122232425262728",
+          "senderSequence": "0x6162636465666768",
+          "senderSlot": 0,
+          "bodyLength": 7
+        },
+        "body": {
+          "transferId": "0x11223344",
+          "clockOwnerSlot": 0,
+          "slotBytes": ["0xa5", "0x3c"]
+        }
+      },
+      "expectedHex": "53 42 4c 4b 01 04 00 00 08 07 06 05 04 03 02 01 18 17 16 15 14 13 12 11 28 27 26 25 24 23 22 21 68 67 66 65 64 63 62 61 00 07 00 44 33 22 11 00 a5 3c"
+    },
+    {
+      "id": "gb-serial-abort",
+      "file": "gb-serial-abort.hex",
+      "protocol": "gb-serial-v1",
+      "event": "SERIAL_ABORT",
+      "eventKind": 5,
+      "bodyBytes": 6,
+      "frameBytes": 49,
+      "fields": {
+        "header": {
+          "magic": "SBLK",
+          "wireVersion": 1,
+          "eventKind": 5,
+          "flags": 0,
+          "roomEpoch": "0x0102030405060708",
+          "sessionEpoch": "0x1112131415161718",
+          "cableEpoch": "0x2122232425262728",
+          "senderSequence": "0x7172737475767778",
+          "senderSlot": 0,
+          "bodyLength": 6
+        },
+        "body": {
+          "transferId": "0x55667788",
+          "clockOwnerSlot": 1,
+          "reason": 2,
+          "reasonName": "protocolViolation"
+        }
+      },
+      "expectedHex": "53 42 4c 4b 01 05 00 00 08 07 06 05 04 03 02 01 18 17 16 15 14 13 12 11 28 27 26 25 24 23 22 21 78 77 76 75 74 73 72 71 00 06 00 88 77 66 55 01 02"
+    }
+  ]
+}

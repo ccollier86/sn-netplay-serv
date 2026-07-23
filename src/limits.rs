@@ -50,6 +50,12 @@ pub const MAX_SNAPSHOT_BYTES: u64 = 100 * 1024 * 1024;
 /// Maximum virtual link-cable packet payload relayed through the server.
 pub const MAX_LINK_CABLE_PACKET_BYTES: usize = 4 * 1024;
 
+/// Maximum required link events buffered for either endpoint in one room.
+///
+/// Link traffic is loss-intolerant: reaching this bound aborts the cable
+/// generation instead of dropping or overwriting an event.
+pub const LINK_CABLE_EVENT_QUEUE_CAPACITY: usize = 64;
+
 /// Time a room can wait for a guest before expiring.
 pub const ROOM_JOIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 

@@ -3,12 +3,13 @@
 //! Keeping socket message encoding and expectation loops here prevents the
 //! shared test-fixture module from becoming a catch-all.
 
-use super::SmokeClient;
+use super::{SmokeClient, SmokeLinkCableGrant};
 use futures_util::{SinkExt, StreamExt};
 use sb_netplay_serv::protocol::{
-    HostFrameOpen, InputCursorAck, InputCursorNack, InputFrame, InputFrameBatch,
-    ServerFrameReleaseV5, StrictInputBatch, decode_input_cursor_ack, decode_input_cursor_nack,
-    decode_input_frame_batch, decode_server_frame_release_v5, decode_strict_input_batch,
+    GbaSioMultiEvent, GbaSioMultiFrame, HostFrameOpen, InputCursorAck, InputCursorNack, InputFrame,
+    InputFrameBatch, LinkCableWireHeader, ServerFrameReleaseV5, StrictInputBatch,
+    decode_input_cursor_ack, decode_input_cursor_nack, decode_input_frame_batch,
+    decode_server_frame_release_v5, decode_strict_input_batch, encode_gba_sio_multi_frame,
     encode_host_frame_open, encode_input_frame_batch, encode_strict_input_batch,
 };
 use sb_netplay_serv::rooms::PlayerIndex;
@@ -258,6 +259,73 @@ impl SmokeClient {
         }
     }
 
+    pub async fn expect_link_grant_status(&mut self, expected_status: &str) -> SmokeLinkCableGrant {
+        loop {
+            if let Some(grant) = self.link_grant.as_ref()
+                && grant.status == expected_status
+            {
+                return grant.clone();
+            }
+
+            let message = self.next_json().await;
+            if message["type"] == "error" {
+                panic!(
+                    "unexpected netplay error while waiting for link grant status \
+                     {expected_status}: {message}"
+                );
+            }
+        }
+    }
+
+    pub async fn send_gba_mode_set(&mut self, emulated_time: u64) -> GbaSioMultiFrame {
+        let grant = self
+            .link_grant
+            .as_ref()
+            .expect("link data-plane grant")
+            .clone();
+        assert_eq!(grant.status, "ready");
+        assert_eq!(grant.contract_version, 1);
+        assert_eq!(grant.link_protocol, "gba-sio-multi-v1");
+        assert_eq!(grant.room_epoch, self.room_epoch);
+        assert_eq!(grant.session_epoch, self.session_epoch);
+        assert_eq!(Some(grant.local_slot), self.player_index);
+
+        let sender_sequence = self.next_link_sender_sequence;
+        let frame = GbaSioMultiFrame {
+            header: LinkCableWireHeader {
+                room_epoch: self.room_epoch,
+                session_epoch: self.session_epoch,
+                cable_epoch: grant.cable_epoch,
+                sender_sequence,
+                sender_slot: grant.local_slot,
+            },
+            event: GbaSioMultiEvent::ModeSet {
+                mode: 2,
+                siocnt: 0x2000,
+                rcnt: 0,
+                emulated_time,
+            },
+        };
+        let payload = encode_gba_sio_multi_frame(&frame).expect("valid GBA SIO MODE_SET");
+        assert!(payload.len() <= usize::from(grant.maximum_event_bytes));
+
+        self.send(json!({
+            "type": "linkCablePacket",
+            "packet": {
+                "playerIndex": grant.local_slot,
+                "sequence": sender_sequence,
+                "emulatedTime": emulated_time,
+                "payload": payload
+            }
+        }))
+        .await;
+        self.next_link_sender_sequence = sender_sequence
+            .checked_add(1)
+            .expect("link sender sequence remains in range");
+
+        frame
+    }
+
     fn attach_epochs(&self, payload: &mut Value) {
         let Some(object) = payload.as_object_mut() else {
             return;
@@ -317,5 +385,68 @@ impl SmokeClient {
         if message["type"] == "roomJoined" {
             self.player_index = message["yourPlayerIndex"].as_u64().map(|value| value as u8);
         }
+
+        let grant = match message["type"].as_str() {
+            Some("roomJoined") => message
+                .get("linkCableGrant")
+                .filter(|grant| !grant.is_null()),
+            Some("linkCableGrantUpdated") => message.get("grant"),
+            _ => None,
+        };
+        if let Some(grant) = grant {
+            assert!(
+                self.accepts_link_grants,
+                "controller smoke client received a private link grant: {message}"
+            );
+            self.update_link_grant(grant);
+        }
     }
+
+    fn update_link_grant(&mut self, grant: &Value) {
+        let parsed = SmokeLinkCableGrant {
+            contract_version: required_u16(grant, "contractVersion"),
+            room_scope: required_string(grant, "roomScope"),
+            room_epoch: required_u64(grant, "roomEpoch"),
+            session_epoch: required_u64(grant, "sessionEpoch"),
+            cable_epoch: required_u64(grant, "cableEpoch"),
+            local_slot: required_u8(grant, "localSlot"),
+            link_protocol: required_string(grant, "linkProtocol"),
+            maximum_event_bytes: required_u16(grant, "maximumEventBytes"),
+            queue_capacity: required_u16(grant, "queueCapacity"),
+            status: required_string(grant, "status"),
+        };
+        if self
+            .link_grant
+            .as_ref()
+            .is_none_or(|current| current.cable_epoch != parsed.cable_epoch)
+        {
+            self.next_link_sender_sequence = 0;
+        }
+        self.room_epoch = parsed.room_epoch;
+        self.session_epoch = parsed.session_epoch;
+        self.link_grant = Some(parsed);
+    }
+}
+
+fn required_u64(value: &Value, field: &str) -> u64 {
+    value[field]
+        .as_u64()
+        .unwrap_or_else(|| panic!("link grant field {field} must be an unsigned integer: {value}"))
+}
+
+fn required_u16(value: &Value, field: &str) -> u16 {
+    u16::try_from(required_u64(value, field))
+        .unwrap_or_else(|_| panic!("link grant field {field} exceeds u16: {value}"))
+}
+
+fn required_u8(value: &Value, field: &str) -> u8 {
+    u8::try_from(required_u64(value, field))
+        .unwrap_or_else(|_| panic!("link grant field {field} exceeds u8: {value}"))
+}
+
+fn required_string(value: &Value, field: &str) -> String {
+    value[field]
+        .as_str()
+        .unwrap_or_else(|| panic!("link grant field {field} must be a string: {value}"))
+        .to_string()
 }

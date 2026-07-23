@@ -4,11 +4,10 @@
 //! concepts inside the room domain model.
 
 use crate::protocol::{
-    FastInputFrame, InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket,
-    RomRelayCancelled, RomRelayCompletion, RomRelayFailure, RomRelayGrant, RomRelayProgress,
-    ScheduledSessionStart, ServerFrame, ServerFrameReleaseV5, SessionPauseView, SnapshotChunk,
-    SnapshotFileRelayGrant, SnapshotManifest, StateHashMismatchView, StateRecoveryView,
-    StrictInputBatch,
+    FastInputFrame, InputDelayChange, InputFrame, InputFrameBatch, RomRelayCancelled,
+    RomRelayCompletion, RomRelayFailure, RomRelayGrant, RomRelayProgress, ScheduledSessionStart,
+    ServerFrame, ServerFrameReleaseV5, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant,
+    SnapshotManifest, StateHashMismatchView, StateRecoveryView, StrictInputBatch,
 };
 use crate::rooms::{ConnectionId, RoomView};
 
@@ -66,13 +65,6 @@ pub enum RoomEvent {
         source: ConnectionId,
         /// Validated input frame.
         input: InputFrame,
-    },
-    /// Link-cable packet should be relayed to other subscribers.
-    LinkCablePacket {
-        /// Connection that supplied the packet.
-        source: ConnectionId,
-        /// Validated virtual link-cable packet.
-        packet: LinkCablePacket,
     },
     /// Snapshot chunk should be relayed to subscribers.
     SnapshotChunk {

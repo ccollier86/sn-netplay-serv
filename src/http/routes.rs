@@ -136,13 +136,14 @@ pub async fn create_room(
             .unwrap_or(request.desktop_protocol_version),
         request.desktop_protocol_version,
     )?;
+    let link_contract_version = request.link_contract_version;
     let mut session = request.session;
     session.host_client_kind = Some(client_kind);
     session.rom_relay = None;
     session.validate()?;
     services
         .link_cable_rollout
-        .validate_provider_availability(&session)?;
+        .validate_provider_admission(&session, link_contract_version)?;
     session.rom_relay = services
         .file_relay_policy
         .direct_rom_relay_capability(services.file_relay.as_ref(), &session);
@@ -191,7 +192,10 @@ pub async fn websocket_room(
             message: "runnerHandoff is valid only for an initial room join.",
         });
     }
-    validate_exact_room_protocol(&services, &invite_code, protocol_version).await?;
+    let room = validate_exact_room_protocol(&services, &invite_code, protocol_version).await?;
+    services
+        .link_cable_rollout
+        .validate_provider_admission(&room.session, query.link_contract_version)?;
     let intent = match reconnect {
         Some(reconnect) => WebSocketRoomJoinIntent::Resume {
             player_index: reconnect.player_index,
@@ -234,6 +238,7 @@ pub async fn websocket_room(
         supports_scheduled_start: query.supports_scheduled_start.unwrap_or(false),
         supports_clock_sync: query.supports_clock_sync.unwrap_or(false),
         supports_fast_input_relay: query.supports_fast_input_relay.unwrap_or(false),
+        link_contract_version: query.link_contract_version,
     };
 
     Ok(websocket
@@ -289,14 +294,16 @@ async fn validate_exact_room_protocol(
     services: &AppServices,
     invite_code: &InviteCode,
     protocol_version: u16,
-) -> Result<(), HttpError> {
+) -> Result<RoomView, HttpError> {
     let room = services.rooms.room_view(invite_code.clone()).await?;
     validate_room_protocol_version(protocol_version, room.protocol.room_protocol_version).map_err(
         |_| HttpError::InvalidRequest {
             code: "roomProtocolVersionMismatch",
             message: "Update ShadowBoy to join this netplay room.",
         },
-    )
+    )?;
+
+    Ok(room)
 }
 
 fn netplay_client_kind(client_kind: crate::auth::ClientKind) -> NetplayClientKind {
@@ -561,6 +568,9 @@ pub struct CreateRoomRequest {
     /// Oldest netplay protocol version supported by this client.
     #[serde(default)]
     pub minimum_protocol_version: Option<u16>,
+    /// Explicit completed link-cable control/wire contract, required only for link rooms.
+    #[serde(default)]
+    pub link_contract_version: Option<u16>,
     /// Game/core details for invite preview and ROM matching.
     pub session: NetplaySessionDescriptor,
 }
@@ -591,6 +601,8 @@ pub struct WebSocketRoomQuery {
     supports_clock_sync: Option<bool>,
     #[serde(default)]
     supports_fast_input_relay: Option<bool>,
+    #[serde(default)]
+    link_contract_version: Option<u16>,
 }
 
 #[derive(Deserialize)]

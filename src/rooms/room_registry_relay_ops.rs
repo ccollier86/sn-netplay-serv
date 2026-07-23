@@ -6,12 +6,13 @@
 use super::InMemoryRoomRegistry;
 use crate::protocol::{
     ClientNetworkQualityReport, ClientRuntimeState, FastInputBatch, InputFrame, InputFrameBatch,
-    InputFrameLimits, LinkCablePacket, LinkCablePacketLimits, SessionPauseReason, SnapshotLimits,
-    StateHashReport, StateRecoveryPin,
+    InputFrameLimits, LinkCablePacket, SessionPauseReason, SnapshotLimits, StateHashReport,
+    StateRecoveryPin,
 };
 use crate::rooms::{
     ConnectionId, InputFrameAcceptance, InputFrameCursor, InviteCode, RoomError, RoomView,
     SessionPauseReachedOutcome, SessionResumeOutcome, StateHashEvaluation,
+    map_link_cable_data_plane_error,
 };
 
 impl InMemoryRoomRegistry {
@@ -130,28 +131,34 @@ impl InMemoryRoomRegistry {
         Ok(())
     }
 
-    /// Validates and broadcasts one virtual link-cable packet.
+    /// Validates and targets one SBLK event without holding the registry lock.
     pub(super) async fn relay_link_cable_packet_impl(
         &self,
         invite_code: InviteCode,
         connection_id: ConnectionId,
+        room_epoch: u64,
+        session_epoch: u64,
         packet: LinkCablePacket,
     ) -> Result<(), RoomError> {
-        let mut rooms = self.invite_codes.write().await;
-        let stored_room = rooms
-            .get_mut(invite_code.normalized())
-            .ok_or(RoomError::NotFound)?;
+        let (data_plane, player_index) = {
+            let rooms = self.invite_codes.read().await;
+            let stored_room = rooms
+                .get(invite_code.normalized())
+                .ok_or(RoomError::NotFound)?;
+            stored_room
+                .room
+                .link_cable_data_plane_handle_for_connection(connection_id)?
+        };
 
-        stored_room.room.accept_link_cable_packet(
-            connection_id,
-            &packet,
-            LinkCablePacketLimits::default(),
-        )?;
-        let now = self.clock.now();
-        stored_room.emit_link_cable_packet(now, connection_id, packet);
-        self.record_recent_events(stored_room.debug_events(1));
-
-        Ok(())
+        data_plane
+            .relay(
+                connection_id,
+                player_index,
+                room_epoch,
+                session_epoch,
+                packet,
+            )
+            .map_err(map_link_cable_data_plane_error)
     }
 
     /// Records a deterministic state hash and triggers resync on true drift.

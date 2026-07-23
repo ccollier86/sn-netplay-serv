@@ -39,32 +39,43 @@ coordinated-pause, scheduled-start, recovery, or controller-frame operations.
 The final link data plane must never enter controller event, input, recovery,
 or debug buffers.
 
-The current JSON `mode: "linkCable"` and `linkCablePacket` types are provisional
-scaffolding. They are not the final SBLK wire contract and must not be
-reinterpreted in place. Final link grants and traffic require:
+The JSON `mode: "linkCable"` control-plane shape is admitted only with the
+explicit completed-contract version. The existing JSON `linkCablePacket`
+envelope carries a frozen, language-neutral SBLK v1 frame with canonical
+GB/GBC and GBA fixtures. The server data plane now provides:
 
-- an authenticated, server-issued `roomScope`;
-- explicit room, session, and cable epochs;
-- a link capability/version gate;
-- bounded per-room queues and pressure behavior;
-- forwarding outside the registry-wide room lock;
-- separate link control-plane and high-frequency data-plane events.
+- an authenticated per-player `linkCableGrant` with stable server-issued
+  `roomScope` serialized as an exact decimal string, exact
+  room/session/cable epochs, local slot, protocol, and bounded-queue limits;
+- private `linkCableGrantUpdated` lifecycle messages for attach, abort,
+  reconnect, and close;
+- the explicit `linkContractVersion: 1` admission gate;
+- two fixed-capacity queues owned by each link room, with no sender echo and no
+  cross-room queue budget;
+- exact slot, epoch, sequence-from-zero, SBLK namespace/body, and timestamp
+  validation before forwarding;
+- stateful GB/GBC and GBA transfer validation for mode readiness, exact
+  transfer ids, sender phases, collision prevention, and committed data;
+- fail-closed protocol, disconnect, provider, and queue-overflow behavior; and
+- forwarding after the registry read lock has been released.
 
-The provisional packet relay still publishes through the shared `RoomEvent`
-channel, records every packet in the shared debug log, and forwards while the
-registry-wide write lock is held. That known scaffold is covered by tests but
-is an explicit production-enable blocker, not an acceptable rollout path.
+Link packets and grants never enter the shared `RoomEvent` channel, never
+increment public `eventSeq`, and never enter room debug history. The control
+WebSocket selects over the ordinary room channel and its authenticated
+single-consumer link receiver independently.
 
 ## Rollout
 
 `SB_NETPLAY_LINK_CABLE_ENABLED` gates creation of new link rooms and defaults to
 `false`. When disabled, a valid link create request fails before registry room
-construction with `linkCableUnavailable`. Controller rooms are never subject to
-this gate.
+construction with `linkCableUnavailable`. When enabled, link create and control
+WebSocket admission require exact `linkContractVersion: 1`; missing or unknown
+versions fail closed. Controller rooms are never subject to this gate.
 
 Enabling the environment variable is not sufficient to ship the feature. It
-may be enabled only after the final capability, SBLK, `roomScope`, per-room data
-plane, reconnect, and cross-platform qualification slices pass.
+may be enabled only after Android consumes the private grants, reconnect is
+qualified through the native bridge, and the GB/GBC/GBA physical-device matrix
+passes.
 
 ## Required regression gates
 
@@ -76,18 +87,22 @@ Before every link-provider server checkpoint:
 3. Link creation is rejected by default and accepted only with explicit test
    opt-in.
 4. Provider-selection tests prove that a room cannot own both providers.
-5. Link-specific load tests prove that one saturated room cannot hold the
-   registry-wide lock or consume another room's queue budget.
+5. Link-specific tests prove that queue overflow clears only the owning room's
+   queues, wakes both endpoints, and cannot mutate shared event/debug state.
 
 ## Remaining server slices
 
-1. Freeze controller v4/v5 goldens and the default-off provider boundary.
-2. Replace provisional link JSON relay with the frozen SBLK contract.
-3. Allocate and authorize `roomScope` plus room/session/cable epochs.
-4. Add a bounded per-room link data plane with explicit overload and disconnect
-   behavior.
-5. Add reconnect/resume ownership and stale-epoch rejection.
-6. Run two-client GB, GBC, and GBA qualification before enabling any rollout.
+The server foundation now includes the private grant, frozen SBLK validation,
+bounded targeted relay, endpoint ownership, stale-epoch rejection, and
+reconnect generation changes. Remaining release work is:
+
+1. Consume `linkCableGrant` / `linkCableGrantUpdated` in the Android transport
+   actor and configure the native bridge with the exact granted identity.
+2. Exercise disconnect/reconnect through two real Android processes and prove a
+   strictly newer cable epoch is required before traffic resumes.
+3. Run two-client GB, GBC, and GBA qualification before enabling any rollout.
+4. Add multi-room saturation/load qualification before production capacity is
+   raised.
 
 Future PSP and Nintendo 3DS multiplayer integrate as separate external-network
 providers. PSP may initially allocate logical sessions on one shared service;

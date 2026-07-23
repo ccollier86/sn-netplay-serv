@@ -31,7 +31,10 @@ async fn input_loss_starts_bounded_control_recovery_and_requires_fresh_grants() 
         .expect("playing room")
         .room_epoch;
     let original_resume_token = host_join.resume_token.clone();
-    let original_input_token = host_join.input_socket_token.clone();
+    let original_input_token = host_join
+        .input_socket_token
+        .clone()
+        .expect("controller input token");
 
     let recovering = registry
         .disconnect_input_socket(invite.clone(), host_input_connection)
@@ -72,7 +75,10 @@ async fn input_loss_starts_bounded_control_recovery_and_requires_fresh_grants() 
             PlayerIndex::ONE,
             resumed.room.room_epoch,
             resumed.room.session_epoch,
-            resumed.input_socket_token.clone(),
+            resumed
+                .input_socket_token
+                .clone()
+                .expect("controller input token"),
             ConnectionId::new(),
         )
         .await
@@ -83,7 +89,7 @@ async fn input_loss_starts_bounded_control_recovery_and_requires_fresh_grants() 
             PlayerIndex::ONE,
             resumed.room.room_epoch,
             resumed.room.session_epoch,
-            resumed.input_socket_token,
+            resumed.input_socket_token.expect("controller input token"),
             ConnectionId::new(),
         )
         .await;
@@ -155,7 +161,10 @@ async fn playing_room() -> (
             PlayerIndex::ONE,
             input_epoch.room_epoch,
             input_epoch.session_epoch,
-            host_join.input_socket_token.clone(),
+            host_join
+                .input_socket_token
+                .clone()
+                .expect("controller input token"),
             host_input,
         )
         .await
@@ -166,7 +175,9 @@ async fn playing_room() -> (
             PlayerIndex::TWO,
             input_epoch.room_epoch,
             input_epoch.session_epoch,
-            guest_join.input_socket_token,
+            guest_join
+                .input_socket_token
+                .expect("controller input token"),
             ConnectionId::new(),
         )
         .await

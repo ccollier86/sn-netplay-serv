@@ -17,7 +17,9 @@ mod input_delay_change;
 mod input_frame;
 mod link_cable_compatibility;
 mod link_cable_descriptor;
+mod link_cable_grant;
 mod link_cable_packet;
+mod link_cable_wire;
 mod lobby_file_relay;
 mod lobby_messages;
 mod netplay_protocol;
@@ -59,8 +61,22 @@ pub use input_batch::{
 pub use input_delay_change::{InputDelayChange, InputDelayChangeReason};
 pub use input_frame::{InputFrame, InputFrameLimits};
 pub use link_cable_compatibility::LinkCableCompatibility;
-pub use link_cable_descriptor::{LinkCableDescriptor, LinkCableTransport};
+pub use link_cable_descriptor::{
+    LINK_CABLE_CONTRACT_VERSION, LinkCableDescriptor, LinkCableMode, LinkCableTransport,
+};
+pub use link_cable_grant::{
+    LinkCableDataPlaneGrant, LinkCableGrantFailureReason, LinkCableGrantStatus,
+};
 pub use link_cable_packet::{LinkCablePacket, LinkCablePacketError, LinkCablePacketLimits};
+pub use link_cable_wire::{
+    GB_SERIAL_FAST_CLOCK_CONTROL, GB_SERIAL_NORMAL_CLOCK_CONTROL, GBA_MULTI_DISCONNECTED_WORD,
+    GBA_SIO_MULTI_WIRE_MODE, GbSerialEvent, GbSerialFrame, GbaSioMultiEvent, GbaSioMultiFrame,
+    LINK_CABLE_WIRE_HEADER_BYTES, LINK_CABLE_WIRE_VERSION, LinkCableAbortReason,
+    LinkCableWireCodecError, LinkCableWireFrame, LinkCableWireHeader, LinkCableWireProtocol,
+    MAX_LINK_CABLE_WIRE_BYTES, decode_gb_serial_frame, decode_gba_sio_multi_frame,
+    decode_link_cable_wire_frame, encode_gb_serial_frame, encode_gba_sio_multi_frame,
+    encode_link_cable_wire_frame,
+};
 pub use lobby_file_relay::{
     LobbyFileRelayGrant, LobbyFileRelayGrantPair, LobbyFileRelayGrantRole,
     LobbyFileRelayMaterialKind, LobbyStartupStateRestorePolicy, LobbyStartupStateTransferMetadata,

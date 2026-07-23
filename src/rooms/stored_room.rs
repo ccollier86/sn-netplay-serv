@@ -6,9 +6,9 @@
 
 use crate::protocol::{
     ClientNetworkQualityReport, ClientRuntimeState, ClockSyncSampleRequest, FastInputFrame,
-    InputDelayChange, InputFrame, InputFrameBatch, LinkCablePacket, RomRelayCancelled,
-    RomRelayCompletion, RomRelayFailure, RomRelayGrant, RomRelayProgress, ScheduledSessionStart,
-    ServerFrame, ServerFrameReleaseV5, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant,
+    InputDelayChange, InputFrame, InputFrameBatch, RomRelayCancelled, RomRelayCompletion,
+    RomRelayFailure, RomRelayGrant, RomRelayProgress, ScheduledSessionStart, ServerFrame,
+    ServerFrameReleaseV5, SessionPauseView, SnapshotChunk, SnapshotFileRelayGrant,
     SnapshotManifest, StateHashMismatchView, StateRecoveryView, StrictInputBatch,
 };
 use crate::rooms::{
@@ -664,19 +664,6 @@ impl StoredRoom {
         self.fast_input_relay_buffer = FastInputRelayBuffer::default();
         self.relay_room_epoch = self.room.room_epoch;
         self.relay_session_epoch = self.room.session_epoch;
-    }
-
-    /// Emits a validated link-cable packet.
-    pub(super) fn emit_link_cable_packet(
-        &mut self,
-        now: Instant,
-        source: ConnectionId,
-        packet: LinkCablePacket,
-    ) {
-        self.record_event(now, "linkCablePacket", "link-cable packet relayed");
-        let _ = self
-            .events
-            .send(RoomEvent::LinkCablePacket { source, packet });
     }
 
     fn record_event(&mut self, now: Instant, kind: &str, detail: &str) -> RoomView {

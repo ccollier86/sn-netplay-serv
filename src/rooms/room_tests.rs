@@ -6,16 +6,17 @@
 use super::{NetplayRoom, RoomStatus};
 use crate::auth::VerifiedLicense;
 use crate::protocol::{
-    ClientNetworkQualityReport, ClientRuntimeState, CompatibilityFingerprint, InputFrame,
-    InputFrameLimits, LEGACY_NETPLAY_PROTOCOL_VERSION, LinkCableCompatibility, LinkCablePacket,
-    LinkCablePacketLimits, NetplaySessionDescriptor, RomIdentity, RomRelayBlockReason,
+    ClientNetworkQualityReport, ClientRuntimeState, CompatibilityFingerprint, GbaSioMultiEvent,
+    GbaSioMultiFrame, InputFrame, InputFrameLimits, LEGACY_NETPLAY_PROTOCOL_VERSION,
+    LinkCableCompatibility, LinkCableMode, LinkCablePacket, LinkCablePacketLimits,
+    LinkCableWireHeader, NetplaySessionDescriptor, RomIdentity, RomRelayBlockReason,
     RomRelayCompletion, RomRelayGrant, RomRelayGrantRole, SessionPauseReason, SessionPauseState,
     SnapshotChunk, SnapshotFileRelayGrant, SnapshotFileRelayGrantPair, SnapshotFileRelayGrantRole,
-    SnapshotLimits, SnapshotManifest, StateHashReport,
+    SnapshotLimits, SnapshotManifest, StateHashReport, encode_gba_sio_multi_frame,
 };
 use crate::rooms::{
-    ConnectionId, InputFrameAcceptance, InviteCode, PlayerIndex, PlayerStatus, RomRelayGrantPair,
-    RoomError, SessionResumeOutcome, StateHashEvaluation,
+    ConnectionId, InputFrameAcceptance, InviteCode, LinkCableDataPlaneSnapshot, PlayerIndex,
+    PlayerStatus, RomRelayGrantPair, RoomError, SessionResumeOutcome, StateHashEvaluation,
 };
 use sha2::{Digest, Sha256};
 
@@ -824,16 +825,22 @@ fn link_compatibility_enters_syncing_state() {
     room.join_guest(license("guest"), guest_connection)
         .expect("guest joins");
 
-    room.set_link_cable_compatibility_for_connection(host_connection, link_compatibility(None))
-        .expect("host link compatibility");
-    room.set_link_cable_compatibility_for_connection(guest_connection, link_compatibility(None))
-        .expect("guest link compatibility");
+    room.set_link_cable_compatibility_for_connection(
+        host_connection,
+        link_compatibility("android-mgba-0.10.5-sb1"),
+    )
+    .expect("host link compatibility");
+    room.set_link_cable_compatibility_for_connection(
+        guest_connection,
+        link_compatibility("android-mgba-0.10.5-sb1"),
+    )
+    .expect("guest link compatibility");
 
     assert_eq!(room.view().status, RoomStatus::SyncingState);
 }
 
 #[test]
-fn link_compatibility_rejects_mismatched_system_data() {
+fn link_compatibility_rejects_mismatched_core_build() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = link_room(host_connection);
@@ -842,12 +849,12 @@ fn link_compatibility_rejects_mismatched_system_data() {
 
     room.set_link_cable_compatibility_for_connection(
         host_connection,
-        link_compatibility(Some("bios-a")),
+        link_compatibility("android-mgba-0.10.5-sb1"),
     )
     .expect("host link compatibility");
     let result = room.set_link_cable_compatibility_for_connection(
         guest_connection,
-        link_compatibility(Some("bios-b")),
+        link_compatibility("android-mgba-0.10.5-sb2"),
     );
 
     assert!(matches!(result, Err(RoomError::CompatibilityMismatch)));
@@ -861,18 +868,24 @@ fn rejected_link_protocol_retry_clears_stale_compatibility() {
     room.join_guest(license("guest"), guest_connection)
         .expect("guest joins");
 
-    room.set_link_cable_compatibility_for_connection(host_connection, link_compatibility(None))
-        .expect("initial host compatibility");
+    room.set_link_cable_compatibility_for_connection(
+        host_connection,
+        link_compatibility("android-mgba-0.10.5-sb1"),
+    )
+    .expect("initial host compatibility");
 
-    let mut invalid_retry = link_compatibility(None);
+    let mut invalid_retry = link_compatibility("android-mgba-0.10.5-sb1");
     invalid_retry.protocol_version = room.protocol_version().saturating_add(1);
     assert_eq!(
         room.set_link_cable_compatibility_for_connection(host_connection, invalid_retry),
         Err(RoomError::CompatibilityMismatch)
     );
 
-    room.set_link_cable_compatibility_for_connection(guest_connection, link_compatibility(None))
-        .expect("guest compatibility alone remains pending");
+    room.set_link_cable_compatibility_for_connection(
+        guest_connection,
+        link_compatibility("android-mgba-0.10.5-sb1"),
+    )
+    .expect("guest compatibility alone remains pending");
     assert_eq!(room.status(), RoomStatus::CheckingCompatibility);
 }
 
@@ -881,7 +894,15 @@ fn link_packets_relay_only_after_link_room_is_playing() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
     let mut room = compatible_link_room(host_connection, guest_connection);
-    let packet = link_packet(PlayerIndex::ONE, 1);
+    let host_attachment = room
+        .claim_link_cable_receiver(host_connection)
+        .expect("host claim")
+        .expect("link room");
+    let guest_attachment = room
+        .claim_link_cable_receiver(guest_connection)
+        .expect("guest claim")
+        .expect("link room");
+    let packet = link_packet(PlayerIndex::ONE, 0, guest_attachment.snapshot);
 
     assert!(matches!(
         room.accept_link_cable_packet(host_connection, &packet, LinkCablePacketLimits::default(),),
@@ -897,21 +918,30 @@ fn link_packets_relay_only_after_link_room_is_playing() {
         room.accept_link_cable_packet(host_connection, &packet, LinkCablePacketLimits::default(),)
             .is_ok()
     );
+    let _ = (host_attachment.receiver, guest_attachment.receiver);
 }
 
 #[test]
 fn link_packet_cannot_spoof_player_slot() {
     let host_connection = ConnectionId::new();
     let guest_connection = ConnectionId::new();
-    let mut room = ready_link_room(host_connection, guest_connection);
+    let room = ready_link_room(host_connection, guest_connection);
+    let host_attachment = room
+        .claim_link_cable_receiver(host_connection)
+        .expect("host claim")
+        .expect("link room");
+    let guest_attachment = room
+        .claim_link_cable_receiver(guest_connection)
+        .expect("guest claim")
+        .expect("link room");
+    let mut packet = link_packet(PlayerIndex::ONE, 0, guest_attachment.snapshot);
+    packet.player_index = PlayerIndex::TWO;
 
-    let result = room.accept_link_cable_packet(
-        host_connection,
-        &link_packet(PlayerIndex::TWO, 1),
-        LinkCablePacketLimits::default(),
-    );
+    let result =
+        room.accept_link_cable_packet(host_connection, &packet, LinkCablePacketLimits::default());
 
     assert!(matches!(result, Err(RoomError::SlotSpoofing(_))));
+    let _ = (host_attachment.receiver, guest_attachment.receiver);
 }
 
 #[test]
@@ -1179,10 +1209,16 @@ fn compatible_link_room(
     let mut room = link_room(host_connection);
     room.join_guest(license("guest"), guest_connection)
         .expect("guest joins");
-    room.set_link_cable_compatibility_for_connection(host_connection, link_compatibility(None))
-        .expect("host link compatibility");
-    room.set_link_cable_compatibility_for_connection(guest_connection, link_compatibility(None))
-        .expect("guest link compatibility");
+    room.set_link_cable_compatibility_for_connection(
+        host_connection,
+        link_compatibility("android-mgba-0.10.5-sb1"),
+    )
+    .expect("host link compatibility");
+    room.set_link_cable_compatibility_for_connection(
+        guest_connection,
+        link_compatibility("android-mgba-0.10.5-sb1"),
+    )
+    .expect("guest link compatibility");
     room
 }
 
@@ -1371,7 +1407,7 @@ fn link_descriptor() -> NetplaySessionDescriptor {
         },
         "link": {
             "systemFamily": "gba",
-            "linkProtocol": "gba-link-cable-v1",
+            "linkProtocol": "gba-sio-multi-v1",
             "runtimeProfile": "mgba-link-runtime-v1",
             "maxPlayers": 2
         }
@@ -1452,22 +1488,44 @@ fn fingerprint(content_hash: &str) -> CompatibilityFingerprint {
     }
 }
 
-fn link_compatibility(system_data_hash: Option<&str>) -> LinkCableCompatibility {
+fn link_compatibility(core_build_id: &str) -> LinkCableCompatibility {
     LinkCableCompatibility {
         protocol_version: LEGACY_NETPLAY_PROTOCOL_VERSION,
         system_family: "gba".to_string(),
-        link_protocol: "gba-link-cable-v1".to_string(),
+        link_protocol: "gba-sio-multi-v1".to_string(),
         runtime_profile: "mgba-link-runtime-v1".to_string(),
-        system_data_hash: system_data_hash.map(str::to_string),
+        core_build_id: core_build_id.to_string(),
+        supported_modes: vec![LinkCableMode::Multi],
     }
 }
 
-fn link_packet(player_index: PlayerIndex, sequence: u64) -> LinkCablePacket {
+fn link_packet(
+    player_index: PlayerIndex,
+    sequence: u64,
+    snapshot: LinkCableDataPlaneSnapshot,
+) -> LinkCablePacket {
+    let emulated_time = (sequence + 1) * 16;
+    let frame = GbaSioMultiFrame {
+        header: LinkCableWireHeader {
+            room_epoch: snapshot.room_epoch,
+            session_epoch: snapshot.session_epoch,
+            cable_epoch: snapshot.cable_epoch,
+            sender_sequence: sequence,
+            sender_slot: player_index.zero_based(),
+        },
+        event: GbaSioMultiEvent::ModeSet {
+            mode: 2,
+            siocnt: 0x2000,
+            rcnt: 0,
+            emulated_time,
+        },
+    };
+
     LinkCablePacket {
         player_index,
         sequence,
-        emulated_time: sequence * 16,
-        payload: vec![1, 2, 3],
+        emulated_time,
+        payload: encode_gba_sio_multi_frame(&frame).expect("valid test SBLK"),
     }
 }
 

@@ -1145,9 +1145,15 @@ async fn compatible_room() -> (InMemoryRoomRegistry, InviteCode, ConnectionId, C
         &registry,
         &invite,
         host_connection,
-        &host_join.input_socket_token,
+        host_join
+            .input_socket_token
+            .as_deref()
+            .expect("controller input token"),
         guest_connection,
-        &guest_join.input_socket_token,
+        guest_join
+            .input_socket_token
+            .as_deref()
+            .expect("controller input token"),
     )
     .await;
 
@@ -1239,9 +1245,15 @@ async fn reconnectable_room() -> (
         &registry,
         &invite,
         host_connection,
-        &host_join.input_socket_token,
+        host_join
+            .input_socket_token
+            .as_deref()
+            .expect("controller input token"),
         guest_connection,
-        &guest_join.input_socket_token,
+        guest_join
+            .input_socket_token
+            .as_deref()
+            .expect("controller input token"),
     )
     .await;
     complete_snapshot(&registry, &invite, host_connection).await;

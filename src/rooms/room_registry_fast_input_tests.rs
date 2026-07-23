@@ -122,9 +122,15 @@ async fn configured_room(
         &registry,
         &invite,
         host_connection,
-        &host_join.input_socket_token,
+        host_join
+            .input_socket_token
+            .as_deref()
+            .expect("controller input token"),
         guest_connection,
-        &guest_join.input_socket_token,
+        guest_join
+            .input_socket_token
+            .as_deref()
+            .expect("controller input token"),
     )
     .await;
 
