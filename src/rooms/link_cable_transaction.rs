@@ -4,7 +4,9 @@
 //! proves that the frame is possible in the selected protocol's transaction
 //! sequence before the private data plane forwards it to the peer.
 
-use crate::protocol::{GbSerialEvent, GbaSioMultiEvent, LinkCableWireFrame, LinkCableWireProtocol};
+use crate::protocol::{
+    GbSerialEvent, GbaSioMultiEvent, GbaSioMultiFrame, LinkCableWireFrame, LinkCableWireProtocol,
+};
 
 const GBA_MULTI_MODE: u8 = 2;
 
@@ -20,6 +22,9 @@ pub(crate) enum LinkCableTransactionError {
     /// GBA left MULTI mode while a transfer boundary was stalled.
     #[error("GBA left MULTI mode while a link transfer was pending")]
     GbaModeChangedDuringTransfer,
+    /// A v2 mode acknowledgement referenced an unknown or future opposite-slot mode.
+    #[error("GBA mode acknowledgement exceeded the latest opposite-slot mode publication")]
+    GbaModeAcknowledgementMismatch,
     /// Another transfer was already pending.
     #[error("a link cable transfer is already pending")]
     TransferAlreadyPending,
@@ -51,11 +56,19 @@ enum ProtocolTransactionState {
     Gb(GbTransactionState),
 }
 
-#[derive(Default)]
 struct GbaTransactionState {
+    version: GbaTransactionVersion,
     modes: [Option<u8>; 2],
+    latest_mode_sequences: [Option<u64>; 2],
+    pending_mode_acknowledgements: [Option<u64>; 2],
     next_transfer_id: TransferIdSequence,
     pending: Option<GbaPendingTransfer>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GbaTransactionVersion {
+    V1,
+    V2,
 }
 
 enum GbaPendingTransfer {
@@ -67,6 +80,9 @@ enum GbaPendingTransfer {
         transfer_id: u32,
         parent_word: u16,
         child_word: u16,
+    },
+    AwaitingFinishAck {
+        transfer_id: u32,
     },
 }
 
@@ -121,7 +137,10 @@ impl LinkCableTransactionState {
     pub(crate) fn new(protocol: LinkCableWireProtocol) -> Self {
         let state = match protocol {
             LinkCableWireProtocol::GbaSioMultiV1 => {
-                ProtocolTransactionState::Gba(GbaTransactionState::default())
+                ProtocolTransactionState::Gba(GbaTransactionState::new(GbaTransactionVersion::V1))
+            }
+            LinkCableWireProtocol::GbaSioMultiV2 => {
+                ProtocolTransactionState::Gba(GbaTransactionState::new(GbaTransactionVersion::V2))
             }
             LinkCableWireProtocol::GbSerialV1 => {
                 ProtocolTransactionState::Gb(GbTransactionState::default())
@@ -147,7 +166,10 @@ impl LinkCableTransactionState {
 
         match (&mut self.state, frame) {
             (ProtocolTransactionState::Gba(state), LinkCableWireFrame::GbaSioMulti(frame)) => {
-                state.validate_and_apply(frame.header.sender_slot, &frame.event)
+                state.validate_and_apply(frame)
+            }
+            (ProtocolTransactionState::Gba(state), LinkCableWireFrame::GbaSioMultiV2(frame)) => {
+                state.validate_and_apply(frame)
             }
             (ProtocolTransactionState::Gb(state), LinkCableWireFrame::GbSerial(frame)) => {
                 state.validate_and_apply(frame.header.sender_slot, &frame.event)
@@ -158,21 +180,63 @@ impl LinkCableTransactionState {
 }
 
 impl GbaTransactionState {
+    fn new(version: GbaTransactionVersion) -> Self {
+        Self {
+            version,
+            modes: [None, None],
+            latest_mode_sequences: [None, None],
+            pending_mode_acknowledgements: [None, None],
+            next_transfer_id: TransferIdSequence::default(),
+            pending: None,
+        }
+    }
+
     fn validate_and_apply(
         &mut self,
-        sender_slot: u8,
-        event: &GbaSioMultiEvent,
+        frame: &GbaSioMultiFrame,
     ) -> Result<(), LinkCableTransactionError> {
-        match event {
+        let sender_slot = usize::from(frame.header.sender_slot);
+        match &frame.event {
             GbaSioMultiEvent::ModeSet { mode, .. } => {
                 // mGBA can republish SIOCNT/RCNT snapshots while one physical
                 // transfer is pending. Those snapshots are idempotent as long
-                // as the endpoint remains in MULTI mode; leaving or changing
-                // mode would invalidate the in-flight transfer.
-                if self.pending.is_some() && *mode != GBA_MULTI_MODE {
+                // as the endpoint remains in MULTI mode. V2 additionally treats
+                // a slot-1 mode exit crossed with an unacknowledged START as a
+                // rejected proposal, not as a failed cable generation.
+                let cancels_crossed_start = self.version == GbaTransactionVersion::V2
+                    && sender_slot == 1
+                    && *mode != GBA_MULTI_MODE
+                    && matches!(self.pending, Some(GbaPendingTransfer::Started { .. }));
+                if cancels_crossed_start {
+                    self.pending = None;
+                } else if self.pending.is_some() && *mode != GBA_MULTI_MODE {
                     return Err(LinkCableTransactionError::GbaModeChangedDuringTransfer);
                 }
-                self.modes[usize::from(sender_slot)] = Some(*mode);
+
+                self.modes[sender_slot] = Some(*mode);
+                if self.version == GbaTransactionVersion::V2 {
+                    self.latest_mode_sequences[sender_slot] = Some(frame.header.sender_sequence);
+                    self.pending_mode_acknowledgements[sender_slot] =
+                        Some(frame.header.sender_sequence);
+                }
+            }
+            GbaSioMultiEvent::ModeAck {
+                acknowledged_mode_sender_sequence,
+                ..
+            } => {
+                if self.version != GbaTransactionVersion::V2 {
+                    return Err(LinkCableTransactionError::UnexpectedTransactionPhase);
+                }
+                let acknowledged_slot = 1 - sender_slot;
+                let Some(latest_sequence) = self.latest_mode_sequences[acknowledged_slot] else {
+                    return Err(LinkCableTransactionError::GbaModeAcknowledgementMismatch);
+                };
+                if *acknowledged_mode_sender_sequence > latest_sequence {
+                    return Err(LinkCableTransactionError::GbaModeAcknowledgementMismatch);
+                }
+                if *acknowledged_mode_sender_sequence == latest_sequence {
+                    self.pending_mode_acknowledgements[acknowledged_slot] = None;
+                }
             }
             GbaSioMultiEvent::TransferStart {
                 transfer_id,
@@ -182,10 +246,24 @@ impl GbaTransactionState {
                 if self.pending.is_some() {
                     return Err(LinkCableTransactionError::TransferAlreadyPending);
                 }
-                if self.modes != [Some(GBA_MULTI_MODE), Some(GBA_MULTI_MODE)] {
+                if self.version == GbaTransactionVersion::V2 {
+                    self.next_transfer_id.accept(*transfer_id)?;
+                    if self.modes != [Some(GBA_MULTI_MODE), Some(GBA_MULTI_MODE)]
+                        || self
+                            .pending_mode_acknowledgements
+                            .iter()
+                            .any(Option::is_some)
+                    {
+                        // A START crossed a mode transition or its apply ACK.
+                        // Consume/forward the exact-next proposal but remain
+                        // idle so both endpoint transfer-id floors converge.
+                        return Ok(());
+                    }
+                } else if self.modes != [Some(GBA_MULTI_MODE), Some(GBA_MULTI_MODE)] {
                     return Err(LinkCableTransactionError::GbaMultiModeNotReady);
+                } else {
+                    self.next_transfer_id.accept(*transfer_id)?;
                 }
-                self.next_transfer_id.accept(*transfer_id)?;
                 self.pending = Some(GbaPendingTransfer::Started {
                     transfer_id: *transfer_id,
                     parent_word: *parent_word,
@@ -235,6 +313,30 @@ impl GbaTransactionState {
                     return Err(LinkCableTransactionError::CommitPayloadMismatch);
                 }
 
+                self.pending = if self.version == GbaTransactionVersion::V2 {
+                    Some(GbaPendingTransfer::AwaitingFinishAck {
+                        transfer_id: *transfer_id,
+                    })
+                } else {
+                    None
+                };
+            }
+            GbaSioMultiEvent::FinishAck { transfer_id, .. } => {
+                if self.version != GbaTransactionVersion::V2 {
+                    return Err(LinkCableTransactionError::UnexpectedTransactionPhase);
+                }
+                let Some(GbaPendingTransfer::AwaitingFinishAck {
+                    transfer_id: pending_id,
+                }) = self.pending.as_ref()
+                else {
+                    return Err(match self.pending {
+                        Some(_) => LinkCableTransactionError::UnexpectedTransactionPhase,
+                        None => LinkCableTransactionError::NoPendingTransfer,
+                    });
+                };
+                if transfer_id != pending_id {
+                    return Err(LinkCableTransactionError::TransferIdMismatch);
+                }
                 self.pending = None;
             }
             GbaSioMultiEvent::TransferAbort { transfer_id, .. } => {
@@ -256,7 +358,8 @@ impl GbaTransactionState {
     fn pending_transfer_id(&self) -> Option<u32> {
         match self.pending.as_ref()? {
             GbaPendingTransfer::Started { transfer_id, .. }
-            | GbaPendingTransfer::Replied { transfer_id, .. } => Some(*transfer_id),
+            | GbaPendingTransfer::Replied { transfer_id, .. }
+            | GbaPendingTransfer::AwaitingFinishAck { transfer_id } => Some(*transfer_id),
         }
     }
 }
@@ -480,6 +583,99 @@ mod tests {
     }
 
     #[test]
+    fn gba_v2_requires_mode_apply_and_native_finish_acknowledgements() {
+        let mut state = LinkCableTransactionState::new(LinkCableWireProtocol::GbaSioMultiV2);
+
+        accept(&mut state, gba_v2(0, 0, mode_set(2)));
+        accept(&mut state, gba_v2(0, 1, mode_set(2)));
+        accept(&mut state, gba_v2(1, 0, mode_ack(0)));
+        assert_eq!(
+            state.validate_and_apply(&gba_v2(1, 0, mode_ack(99))),
+            Err(LinkCableTransactionError::GbaModeAcknowledgementMismatch)
+        );
+        accept(&mut state, gba_v2(1, 2, mode_set(2)));
+        accept(&mut state, gba_v2(0, 2, mode_ack(2)));
+
+        // Slot zero's stale ACK did not release its superseding MODE_SET, so
+        // this exact-next START is forwarded as a canceled proposal.
+        accept(&mut state, gba_v2(0, 3, start(1, 0x1111)));
+        assert_eq!(
+            state.validate_and_apply(&gba_v2(1, 3, reply(1, 0x2222))),
+            Err(LinkCableTransactionError::NoPendingTransfer)
+        );
+        accept(&mut state, gba_v2(1, 3, mode_ack(1)));
+
+        accept(&mut state, gba_v2(0, 4, start(2, 0x1111)));
+        accept(&mut state, gba_v2(1, 4, reply(2, 0x2222)));
+        accept(
+            &mut state,
+            gba_v2(0, 5, commit(2, [0x1111, 0x2222, 0xffff, 0xffff])),
+        );
+        assert_eq!(
+            state.validate_and_apply(&gba_v2(0, 6, start(3, 0x3333))),
+            Err(LinkCableTransactionError::TransferAlreadyPending)
+        );
+        assert_eq!(
+            state.validate_and_apply(&gba_v2(1, 5, finish_ack(1))),
+            Err(LinkCableTransactionError::TransferIdMismatch)
+        );
+        accept(&mut state, gba_v2(1, 5, finish_ack(2)));
+        accept(&mut state, gba_v2(0, 6, start(3, 0x3333)));
+    }
+
+    #[test]
+    fn gba_v2_nonfatally_cancels_both_start_mode_crossing_orders_before_reply() {
+        let mut start_first = ready_gba_v2();
+        accept(&mut start_first, gba_v2(0, 2, start(1, 0x1111)));
+        accept(&mut start_first, gba_v2(1, 2, mode_set(0)));
+        assert_eq!(
+            start_first.validate_and_apply(&gba_v2(1, 3, reply(1, 0x2222))),
+            Err(LinkCableTransactionError::NoPendingTransfer)
+        );
+        accept(&mut start_first, gba_v2(0, 3, mode_ack(2)));
+        accept(&mut start_first, gba_v2(0, 4, start(2, 0x3333)));
+        assert_eq!(
+            start_first.validate_and_apply(&gba_v2(1, 4, reply(2, 0x4444))),
+            Err(LinkCableTransactionError::NoPendingTransfer)
+        );
+
+        let mut mode_first = ready_gba_v2();
+        accept(&mut mode_first, gba_v2(1, 2, mode_set(0)));
+        accept(&mut mode_first, gba_v2(1, 3, mode_set(2)));
+        accept(&mut mode_first, gba_v2(0, 2, mode_ack(2)));
+        accept(&mut mode_first, gba_v2(0, 3, start(1, 0x1111)));
+        accept(&mut mode_first, gba_v2(0, 4, mode_ack(3)));
+        assert_eq!(
+            mode_first.validate_and_apply(&gba_v2(0, 5, start(1, 0x2222))),
+            Err(LinkCableTransactionError::TransferIdMismatch)
+        );
+        accept(&mut mode_first, gba_v2(0, 5, start(2, 0x2222)));
+    }
+
+    #[test]
+    fn gba_v2_mode_exit_remains_fatal_after_reply_or_commit() {
+        let mut after_reply = ready_gba_v2();
+        accept(&mut after_reply, gba_v2(0, 2, start(1, 0x1111)));
+        accept(&mut after_reply, gba_v2(1, 2, reply(1, 0x2222)));
+        assert_eq!(
+            after_reply.validate_and_apply(&gba_v2(1, 3, mode_set(0))),
+            Err(LinkCableTransactionError::GbaModeChangedDuringTransfer)
+        );
+
+        let mut after_commit = ready_gba_v2();
+        accept(&mut after_commit, gba_v2(0, 2, start(1, 0x1111)));
+        accept(&mut after_commit, gba_v2(1, 2, reply(1, 0x2222)));
+        accept(
+            &mut after_commit,
+            gba_v2(0, 3, commit(1, [0x1111, 0x2222, 0xffff, 0xffff])),
+        );
+        assert_eq!(
+            after_commit.validate_and_apply(&gba_v2(1, 3, mode_set(0))),
+            Err(LinkCableTransactionError::GbaModeChangedDuringTransfer)
+        );
+    }
+
+    #[test]
     fn gb_happy_paths_keep_independent_owner_id_sequences() {
         let mut state = LinkCableTransactionState::new(LinkCableWireProtocol::GbSerialV1);
 
@@ -563,6 +759,15 @@ mod tests {
         state
     }
 
+    fn ready_gba_v2() -> LinkCableTransactionState {
+        let mut state = LinkCableTransactionState::new(LinkCableWireProtocol::GbaSioMultiV2);
+        accept(&mut state, gba_v2(0, 0, mode_set(2)));
+        accept(&mut state, gba_v2(1, 0, mode_ack(0)));
+        accept(&mut state, gba_v2(1, 1, mode_set(2)));
+        accept(&mut state, gba_v2(0, 1, mode_ack(1)));
+        state
+    }
+
     fn accept(state: &mut LinkCableTransactionState, frame: LinkCableWireFrame) {
         state
             .validate_and_apply(&frame)
@@ -585,6 +790,16 @@ mod tests {
             event,
         }
         .into()
+    }
+
+    fn gba_v2(
+        sender_slot: u8,
+        sender_sequence: u64,
+        event: GbaSioMultiEvent,
+    ) -> LinkCableWireFrame {
+        let mut header = header(sender_slot);
+        header.sender_sequence = sender_sequence;
+        LinkCableWireFrame::GbaSioMultiV2(GbaSioMultiFrame { header, event })
     }
 
     fn gb(sender_slot: u8, event: GbSerialEvent) -> LinkCableWireFrame {
@@ -623,6 +838,20 @@ mod tests {
 
     fn commit(transfer_id: u32, words: [u16; 4]) -> GbaSioMultiEvent {
         GbaSioMultiEvent::TransferCommit { transfer_id, words }
+    }
+
+    fn mode_ack(acknowledged_mode_sender_sequence: u64) -> GbaSioMultiEvent {
+        GbaSioMultiEvent::ModeAck {
+            acknowledged_mode_sender_sequence,
+            emulated_time: 0,
+        }
+    }
+
+    fn finish_ack(transfer_id: u32) -> GbaSioMultiEvent {
+        GbaSioMultiEvent::FinishAck {
+            transfer_id,
+            emulated_time: 0,
+        }
     }
 
     fn gb_start(transfer_id: u32, owner: u8, owner_byte: u8) -> GbSerialEvent {

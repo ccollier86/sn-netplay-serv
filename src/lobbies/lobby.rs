@@ -399,7 +399,7 @@ impl Lobby {
         now_ms: u128,
     ) -> Result<LobbyLinkCablePlayerSlotView, LobbyError> {
         validate_game_candidate(&game)?;
-        if link_protocol_family_for_game(&game) != Some(protocol_family) {
+        if !game_supports_link_protocol_family(&game, protocol_family) {
             return Err(LobbyError::LinkCableFamilyMismatch);
         }
         let player_index = self.player_index_for_connection(connection_id)?;
@@ -1062,14 +1062,22 @@ fn initial_link_player_slots(now_ms: u128) -> Vec<LobbyLinkCablePlayerSlotView> 
         .collect()
 }
 
-fn link_protocol_family_for_game(game: &LobbyGameCandidate) -> Option<LobbyLinkProtocolFamily> {
+fn game_supports_link_protocol_family(
+    game: &LobbyGameCandidate,
+    protocol_family: LobbyLinkProtocolFamily,
+) -> bool {
     if !game.core_id.trim().eq_ignore_ascii_case("mgba") {
-        return None;
+        return false;
     }
-    match game.system_id.trim().to_ascii_lowercase().as_str() {
-        "gb" | "gbc" => Some(LobbyLinkProtocolFamily::GbSerialV1),
-        "gba" => Some(LobbyLinkProtocolFamily::GbaMultiV1),
-        _ => None,
+    match (
+        game.system_id.trim().to_ascii_lowercase().as_str(),
+        protocol_family,
+    ) {
+        ("gb" | "gbc", LobbyLinkProtocolFamily::GbSerialV1)
+        | ("gba", LobbyLinkProtocolFamily::GbaMultiV1 | LobbyLinkProtocolFamily::GbaMultiV2) => {
+            true
+        }
+        _ => false,
     }
 }
 

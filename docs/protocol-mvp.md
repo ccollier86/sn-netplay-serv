@@ -117,7 +117,7 @@ these platform-neutral descriptors:
 ```json
 {
   "systemFamily": "gba",
-  "linkProtocol": "gba-sio-multi-v1",
+  "linkProtocol": "gba-sio-multi-v2",
   "runtimeProfile": "mgba-link-runtime-v1",
   "maxPlayers": 2,
   "transport": "relay"
@@ -126,10 +126,12 @@ these platform-neutral descriptors:
 
 GB and GBC use `systemFamily: "gb"` with
 `linkProtocol: "gb-serial-v1"`. GBA uses `systemFamily: "gba"` with
-`linkProtocol: "gba-sio-multi-v1"`. Both require `coreId: "mgba"` and exactly
+`linkProtocol: "gba-sio-multi-v2"`. Both require `coreId: "mgba"` and exactly
 two players. Link peers require matching runtime profile, core build id, and
 supported link mode. ROM, BIOS/system-data, save, RTC, and full-state hashes are
 not peer-equality fields, so the guest ROM does not have to match the host ROM.
+The relay continues to decode the frozen `gba-sio-multi-v1` namespace for
+explicit legacy descriptors, but normal GBA lobby negotiation selects v2.
 
 Room responses include `eventSeq`, `roomEpoch`, and `sessionEpoch`:
 
@@ -305,7 +307,7 @@ A link room omits `inputSocketToken` and adds an authenticated private grant:
     "sessionEpoch": 2,
     "cableEpoch": 1,
     "localSlot": 1,
-    "linkProtocol": "gba-sio-multi-v1",
+    "linkProtocol": "gba-sio-multi-v2",
     "maximumEventBytes": 128,
     "queueCapacity": 64,
     "status": "ready"
@@ -454,7 +456,7 @@ Link-cable clients send:
   "compatibility": {
     "protocolVersion": 4,
     "systemFamily": "gba",
-    "linkProtocol": "gba-sio-multi-v1",
+    "linkProtocol": "gba-sio-multi-v2",
     "runtimeProfile": "mgba-link-runtime-v1",
     "coreBuildId": "android-mgba-0.10.5-sb1",
     "supportedModes": ["multi"]
@@ -610,22 +612,38 @@ Link-cable SBLK packet:
 }
 ```
 
-`packet.payload` is one complete 48–128 byte SBLK v1 frame from the exact
-protocol namespace in the private grant. The JSON player, sequence, and
-emulated-time fields must agree with the decoded frame. Link packets are
-accepted only after a link room is `playing`; each sender sequence starts at
-zero and must be the exact next value for the current cable epoch. Packets enter
-only the opposite endpoint's bounded queue and are never echoed to the sender.
-Malformed, spoofed, out-of-order, or overflow traffic aborts the current cable
-generation and clears both per-room queues instead of dropping a required
-event. While a GBA transfer is pending, repeated `MODE_SET` snapshots are
-accepted only when they continue to report MULTI mode; their SIOCNT, RCNT, and
-emulated-time snapshots may change. A valid GBA or GB/GBC `TRANSFER_ABORT` is
-terminal for its cable generation: no later packet is admitted, the exact abort
-frame is written to the peer first, and only then does the server clear all
-remaining packet/transaction state and publish the private `aborted` grant to
-both attached endpoints. Continuing link traffic requires reattachment and a
-strictly newer `cableEpoch`.
+`packet.payload` is one complete 48–128 byte SBLK frame from the exact protocol
+namespace in the private grant. GBA v2 retains SBLK wire version 1 and its
+43-byte header. The JSON player, sequence, and emulated-time fields must agree
+with the decoded frame. Link packets are accepted only after a link room is
+`playing`; each sender sequence starts at zero and must be the exact next value
+for the current cable epoch. Packets enter only the opposite endpoint's bounded
+queue and are never echoed to the sender. Malformed, spoofed, out-of-order, or
+overflow traffic aborts the current cable generation and clears both per-room
+queues instead of dropping a required event.
+
+In `gba-sio-multi-v2`, every `MODE_SET` records that sender's latest mode
+sequence. Ordered newer mode snapshots supersede older ones. The opposite slot
+sends `MODE_ACK` kind 6 after native application; an ACK for an older sequence
+is a valid no-op, while only the exact latest ACK releases that mode barrier.
+`TRANSFER_START` is admitted only when both current snapshots report MULTI and
+both latest snapshots are acknowledged. The first player may therefore wait in
+MULTI indefinitely for the second player while the provider remains live; the
+server does not impose a rendezvous timeout.
+
+A slot-1 non-MULTI snapshot crossed with `TRANSFER_START` before
+`TRANSFER_REPLY` nonfatally cancels that proposal in either server arrival
+order. The exact-next transfer id is still consumed and both frames are
+forwarded. A mode exit after REPLY remains a protocol violation. A valid COMMIT
+enters a finish barrier; slot 1 sends `FINISH_ACK` kind 7 only after applying
+the commit and firing native multiplayer completion. The transaction becomes
+idle only after that exact transfer id is acknowledged.
+
+A valid GBA or GB/GBC `TRANSFER_ABORT` is terminal for its cable generation: no
+later packet is admitted, the exact abort frame is written to the peer first,
+and only then does the server clear all remaining packet/transaction state and
+publish the private `aborted` grant to both attached endpoints. Continuing link
+traffic requires reattachment and a strictly newer `cableEpoch`.
 
 ## Coordinated Pause
 

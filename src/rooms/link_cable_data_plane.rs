@@ -1185,6 +1185,9 @@ const fn link_cable_transaction_error_class(error: LinkCableTransactionError) ->
         LinkCableTransactionError::GbaModeChangedDuringTransfer => {
             "transactionGbaModeChangedDuringTransfer"
         }
+        LinkCableTransactionError::GbaModeAcknowledgementMismatch => {
+            "transactionGbaModeAcknowledgementMismatch"
+        }
         LinkCableTransactionError::TransferAlreadyPending => "transactionTransferAlreadyPending",
         LinkCableTransactionError::NoPendingTransfer => "transactionNoPendingTransfer",
         LinkCableTransactionError::UnexpectedTransactionPhase => "transactionUnexpectedPhase",
@@ -1196,14 +1199,17 @@ const fn link_cable_transaction_error_class(error: LinkCableTransactionError) ->
 
 fn event_emulated_time(frame: &LinkCableWireFrame) -> Option<u64> {
     match frame {
-        LinkCableWireFrame::GbaSioMulti(frame) => match &frame.event {
-            GbaSioMultiEvent::ModeSet { emulated_time, .. }
-            | GbaSioMultiEvent::TransferStart { emulated_time, .. }
-            | GbaSioMultiEvent::TransferReply { emulated_time, .. } => Some(*emulated_time),
-            GbaSioMultiEvent::TransferCommit { .. } | GbaSioMultiEvent::TransferAbort { .. } => {
-                None
+        LinkCableWireFrame::GbaSioMulti(frame) | LinkCableWireFrame::GbaSioMultiV2(frame) => {
+            match &frame.event {
+                GbaSioMultiEvent::ModeSet { emulated_time, .. }
+                | GbaSioMultiEvent::TransferStart { emulated_time, .. }
+                | GbaSioMultiEvent::TransferReply { emulated_time, .. }
+                | GbaSioMultiEvent::ModeAck { emulated_time, .. }
+                | GbaSioMultiEvent::FinishAck { emulated_time, .. } => Some(*emulated_time),
+                GbaSioMultiEvent::TransferCommit { .. }
+                | GbaSioMultiEvent::TransferAbort { .. } => None,
             }
-        },
+        }
         LinkCableWireFrame::GbSerial(frame) => match &frame.event {
             GbSerialEvent::Start { emulated_time, .. }
             | GbSerialEvent::Reply { emulated_time, .. } => Some(*emulated_time),
@@ -1214,10 +1220,12 @@ fn event_emulated_time(frame: &LinkCableWireFrame) -> Option<u64> {
 
 fn terminal_abort_reason(frame: &LinkCableWireFrame) -> Option<LinkCableAbortReason> {
     match frame {
-        LinkCableWireFrame::GbaSioMulti(frame) => match &frame.event {
-            GbaSioMultiEvent::TransferAbort { reason, .. } => Some(*reason),
-            _ => None,
-        },
+        LinkCableWireFrame::GbaSioMulti(frame) | LinkCableWireFrame::GbaSioMultiV2(frame) => {
+            match &frame.event {
+                GbaSioMultiEvent::TransferAbort { reason, .. } => Some(*reason),
+                _ => None,
+            }
+        }
         LinkCableWireFrame::GbSerial(frame) => match &frame.event {
             GbSerialEvent::Abort { reason, .. } => Some(*reason),
             _ => None,
@@ -1236,7 +1244,7 @@ mod tests {
         GB_SERIAL_NORMAL_CLOCK_CONTROL, GbSerialEvent, GbSerialFrame, GbaSioMultiEvent,
         GbaSioMultiFrame, LinkCableAbortReason, LinkCablePacket, LinkCableWireCodecError,
         LinkCableWireHeader, LinkCableWireProtocol, encode_gb_serial_frame,
-        encode_gba_sio_multi_frame,
+        encode_gba_sio_multi_frame, encode_gba_sio_multi_v2_frame,
     };
     use crate::rooms::{ConnectionId, LinkCableTransactionError, PlayerIndex, RoomScope};
     use std::time::Duration;
@@ -1708,6 +1716,554 @@ mod tests {
                 "transaction abort must clear every previously queued event"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn gba_mode_exit_after_queued_start_exposes_cross_socket_apply_gap() {
+        let (handle, connection_zero, connection_one, mut receiver_zero, mut receiver_one, cable) =
+            active_pair(8).await;
+        establish_gba_multi_modes(
+            &handle,
+            connection_zero,
+            connection_one,
+            &mut receiver_zero,
+            &mut receiver_one,
+            cable,
+        )
+        .await;
+
+        let start = gba_packet(
+            PlayerIndex::ONE,
+            1,
+            cable,
+            GbaSioMultiEvent::TransferStart {
+                transfer_id: 1,
+                siocnt: 0x2000,
+                parent_word: 0x1111,
+                emulated_time: 3,
+            },
+            3,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                start,
+            )
+            .expect("GBA start admission");
+
+        // Admission advances the authoritative room FSM before the opposite
+        // WebSocket has dequeued, written, or natively applied the start. This
+        // reproduces the distributed ordering gap that an explicit apply
+        // barrier must close; weakening the transaction FSM would only hide it.
+        let result = handle.relay(
+            connection_one,
+            PlayerIndex::TWO,
+            ROOM_EPOCH,
+            SESSION_EPOCH,
+            gba_packet(
+                PlayerIndex::TWO,
+                1,
+                cable,
+                GbaSioMultiEvent::ModeSet {
+                    mode: 0,
+                    siocnt: 0,
+                    rcnt: 0,
+                    emulated_time: 4,
+                },
+                4,
+            ),
+        );
+        assert_eq!(
+            result,
+            Err(LinkCableDataPlaneError::Transaction(
+                LinkCableTransactionError::GbaModeChangedDuringTransfer
+            ))
+        );
+
+        for receiver in [&mut receiver_zero, &mut receiver_one] {
+            let lifecycle = assert_lifecycle(receiver, LinkCableDataPlaneStatus::Aborted).await;
+            assert_eq!(
+                lifecycle.abort_reason,
+                Some(LinkCableAbortReason::ProtocolViolation)
+            );
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), receiver.recv())
+                    .await
+                    .is_err(),
+                "the queued start must be cleared by the transaction abort"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn gba_commit_admission_tracks_reply_ingress_before_host_socket_delivery() {
+        let (handle, connection_zero, connection_one, mut receiver_zero, mut receiver_one, cable) =
+            active_pair(8).await;
+        establish_gba_multi_modes(
+            &handle,
+            connection_zero,
+            connection_one,
+            &mut receiver_zero,
+            &mut receiver_one,
+            cable,
+        )
+        .await;
+
+        let start = gba_packet(
+            PlayerIndex::ONE,
+            1,
+            cable,
+            GbaSioMultiEvent::TransferStart {
+                transfer_id: 1,
+                siocnt: 0x2000,
+                parent_word: 0x1111,
+                emulated_time: 3,
+            },
+            3,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                start.clone(),
+            )
+            .expect("GBA start");
+        assert_eq!(
+            receiver_one.recv().await.expect("GBA start delivery"),
+            LinkCableDataPlaneEvent::Packet(start)
+        );
+
+        let reply = gba_packet(
+            PlayerIndex::TWO,
+            1,
+            cable,
+            GbaSioMultiEvent::TransferReply {
+                transfer_id: 1,
+                child_word: 0x2222,
+                emulated_time: 4,
+            },
+            4,
+        );
+        handle
+            .relay(
+                connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                reply.clone(),
+            )
+            .expect("GBA reply admission");
+
+        // The room FSM has accepted the reply even though slot zero's
+        // independent target queue has not been consumed. Consequently the
+        // server can validate a commit from ingress order alone. A faithful
+        // distributed lockstep contract needs a native apply/finish signal;
+        // merely delaying the relay's queue write cannot provide that proof.
+        let commit = gba_packet(
+            PlayerIndex::ONE,
+            2,
+            cable,
+            GbaSioMultiEvent::TransferCommit {
+                transfer_id: 1,
+                words: [0x1111, 0x2222, 0xffff, 0xffff],
+            },
+            0,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                commit.clone(),
+            )
+            .expect("commit follows reply ingress");
+
+        assert_eq!(
+            receiver_one.recv().await.expect("GBA commit delivery"),
+            LinkCableDataPlaneEvent::Packet(commit)
+        );
+        assert_eq!(
+            receiver_zero
+                .recv()
+                .await
+                .expect("delayed GBA reply delivery"),
+            LinkCableDataPlaneEvent::Packet(reply)
+        );
+        assert_eq!(
+            handle
+                .snapshot(PlayerIndex::ONE)
+                .expect("active snapshot")
+                .status,
+            LinkCableDataPlaneStatus::Active
+        );
+    }
+
+    #[tokio::test]
+    async fn gba_v2_either_multi_endpoint_waits_for_the_other_without_route_timeout() {
+        for first_player in [PlayerIndex::ONE, PlayerIndex::TWO] {
+            assert_gba_v2_delayed_rendezvous(first_player).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn gba_v2_crossed_mode_exit_and_start_are_nonfatal_in_both_ingress_orders() {
+        let (
+            start_first,
+            start_first_zero,
+            start_first_one,
+            mut start_first_receiver_zero,
+            mut start_first_receiver_one,
+            start_first_cable,
+        ) = active_pair_for(8, LinkCableWireProtocol::GbaSioMultiV2).await;
+        establish_gba_v2_multi_modes(
+            &start_first,
+            start_first_zero,
+            start_first_one,
+            &mut start_first_receiver_zero,
+            &mut start_first_receiver_one,
+            start_first_cable,
+        )
+        .await;
+
+        let start = gba_v2_packet(
+            PlayerIndex::ONE,
+            2,
+            start_first_cable,
+            GbaSioMultiEvent::TransferStart {
+                transfer_id: 1,
+                siocnt: 0x2000,
+                parent_word: 0x1111,
+                emulated_time: 5,
+            },
+            5,
+        );
+        start_first
+            .relay(
+                start_first_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                start.clone(),
+            )
+            .expect("queued v2 start");
+        let exit = gba_v2_packet(
+            PlayerIndex::TWO,
+            2,
+            start_first_cable,
+            GbaSioMultiEvent::ModeSet {
+                mode: 0,
+                siocnt: 0,
+                rcnt: 0,
+                emulated_time: 6,
+            },
+            6,
+        );
+        start_first
+            .relay(
+                start_first_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                exit.clone(),
+            )
+            .expect("slot-one exit cancels queued start");
+        assert_eq!(
+            start_first
+                .snapshot(PlayerIndex::ONE)
+                .expect("active crossed-start snapshot")
+                .status,
+            LinkCableDataPlaneStatus::Active
+        );
+        assert_eq!(
+            start_first_receiver_one
+                .recv()
+                .await
+                .expect("delayed start delivery"),
+            LinkCableDataPlaneEvent::Packet(start)
+        );
+        assert_eq!(
+            start_first_receiver_zero
+                .recv()
+                .await
+                .expect("crossed mode-exit delivery"),
+            LinkCableDataPlaneEvent::Packet(exit)
+        );
+
+        let (
+            mode_first,
+            mode_first_zero,
+            mode_first_one,
+            mut mode_first_receiver_zero,
+            mut mode_first_receiver_one,
+            mode_first_cable,
+        ) = active_pair_for(8, LinkCableWireProtocol::GbaSioMultiV2).await;
+        establish_gba_v2_multi_modes(
+            &mode_first,
+            mode_first_zero,
+            mode_first_one,
+            &mut mode_first_receiver_zero,
+            &mut mode_first_receiver_one,
+            mode_first_cable,
+        )
+        .await;
+
+        for (sequence, mode, emulated_time) in [(2, 0, 6), (3, 2, 7)] {
+            mode_first
+                .relay(
+                    mode_first_one,
+                    PlayerIndex::TWO,
+                    ROOM_EPOCH,
+                    SESSION_EPOCH,
+                    gba_v2_packet(
+                        PlayerIndex::TWO,
+                        sequence,
+                        mode_first_cable,
+                        GbaSioMultiEvent::ModeSet {
+                            mode,
+                            siocnt: if mode == 2 { 0x2000 } else { 0 },
+                            rcnt: 0,
+                            emulated_time,
+                        },
+                        emulated_time,
+                    ),
+                )
+                .expect("ordered superseding responder mode");
+        }
+        mode_first
+            .relay(
+                mode_first_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                gba_v2_packet(
+                    PlayerIndex::ONE,
+                    2,
+                    mode_first_cable,
+                    GbaSioMultiEvent::TransferStart {
+                        transfer_id: 1,
+                        siocnt: 0x2000,
+                        parent_word: 0x2222,
+                        emulated_time: 8,
+                    },
+                    8,
+                ),
+            )
+            .expect("late start is consumed as canceled");
+        mode_first
+            .relay(
+                mode_first_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                gba_v2_packet(
+                    PlayerIndex::ONE,
+                    3,
+                    mode_first_cable,
+                    GbaSioMultiEvent::ModeAck {
+                        acknowledged_mode_sender_sequence: 2,
+                        emulated_time: 9,
+                    },
+                    9,
+                ),
+            )
+            .expect("stale mode acknowledgement is a no-op");
+        mode_first
+            .relay(
+                mode_first_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                gba_v2_packet(
+                    PlayerIndex::ONE,
+                    4,
+                    mode_first_cable,
+                    GbaSioMultiEvent::ModeAck {
+                        acknowledged_mode_sender_sequence: 3,
+                        emulated_time: 10,
+                    },
+                    10,
+                ),
+            )
+            .expect("latest mode acknowledgement releases barrier");
+        let next_start = gba_v2_packet(
+            PlayerIndex::ONE,
+            5,
+            mode_first_cable,
+            GbaSioMultiEvent::TransferStart {
+                transfer_id: 2,
+                siocnt: 0x2000,
+                parent_word: 0x3333,
+                emulated_time: 11,
+            },
+            11,
+        );
+        mode_first
+            .relay(
+                mode_first_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                next_start,
+            )
+            .expect("latest acknowledged MULTI snapshot permits next start");
+        assert_eq!(
+            mode_first
+                .snapshot(PlayerIndex::ONE)
+                .expect("active mode-first snapshot")
+                .status,
+            LinkCableDataPlaneStatus::Active
+        );
+    }
+
+    #[tokio::test]
+    async fn gba_v2_finish_ack_completes_barrier_before_the_next_start() {
+        let (handle, connection_zero, connection_one, mut receiver_zero, mut receiver_one, cable) =
+            active_pair_for(8, LinkCableWireProtocol::GbaSioMultiV2).await;
+        establish_gba_v2_multi_modes(
+            &handle,
+            connection_zero,
+            connection_one,
+            &mut receiver_zero,
+            &mut receiver_one,
+            cable,
+        )
+        .await;
+
+        let start = gba_v2_packet(
+            PlayerIndex::ONE,
+            2,
+            cable,
+            GbaSioMultiEvent::TransferStart {
+                transfer_id: 1,
+                siocnt: 0x2000,
+                parent_word: 0x1111,
+                emulated_time: 5,
+            },
+            5,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                start.clone(),
+            )
+            .expect("v2 start");
+        assert_eq!(
+            receiver_one.recv().await.expect("v2 start delivery"),
+            LinkCableDataPlaneEvent::Packet(start)
+        );
+
+        let reply = gba_v2_packet(
+            PlayerIndex::TWO,
+            2,
+            cable,
+            GbaSioMultiEvent::TransferReply {
+                transfer_id: 1,
+                child_word: 0x2222,
+                emulated_time: 6,
+            },
+            6,
+        );
+        handle
+            .relay(
+                connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                reply.clone(),
+            )
+            .expect("v2 reply");
+        assert_eq!(
+            receiver_zero.recv().await.expect("v2 reply delivery"),
+            LinkCableDataPlaneEvent::Packet(reply)
+        );
+
+        let commit = gba_v2_packet(
+            PlayerIndex::ONE,
+            3,
+            cable,
+            GbaSioMultiEvent::TransferCommit {
+                transfer_id: 1,
+                words: [0x1111, 0x2222, 0xffff, 0xffff],
+            },
+            0,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                commit.clone(),
+            )
+            .expect("v2 commit");
+        assert_eq!(
+            receiver_one.recv().await.expect("v2 commit delivery"),
+            LinkCableDataPlaneEvent::Packet(commit)
+        );
+
+        let finish_ack = gba_v2_packet(
+            PlayerIndex::TWO,
+            3,
+            cable,
+            GbaSioMultiEvent::FinishAck {
+                transfer_id: 1,
+                emulated_time: 7,
+            },
+            7,
+        );
+        handle
+            .relay(
+                connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                finish_ack.clone(),
+            )
+            .expect("native finish acknowledgement");
+        assert_eq!(
+            receiver_zero
+                .recv()
+                .await
+                .expect("finish acknowledgement delivery"),
+            LinkCableDataPlaneEvent::Packet(finish_ack)
+        );
+
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                gba_v2_packet(
+                    PlayerIndex::ONE,
+                    4,
+                    cable,
+                    GbaSioMultiEvent::TransferStart {
+                        transfer_id: 2,
+                        siocnt: 0x2000,
+                        parent_word: 0x3333,
+                        emulated_time: 8,
+                    },
+                    8,
+                ),
+            )
+            .expect("next transfer after native finish");
+        assert_eq!(
+            handle
+                .snapshot(PlayerIndex::ONE)
+                .expect("active post-finish snapshot")
+                .status,
+            LinkCableDataPlaneStatus::Active
+        );
     }
 
     #[tokio::test]
@@ -2431,6 +2987,374 @@ mod tests {
         )
     }
 
+    async fn establish_gba_multi_modes(
+        handle: &LinkCableDataPlaneHandle,
+        connection_zero: ConnectionId,
+        connection_one: ConnectionId,
+        receiver_zero: &mut LinkCableDataPlaneReceiver,
+        receiver_one: &mut LinkCableDataPlaneReceiver,
+        cable_epoch: u64,
+    ) {
+        let mode_zero = gba_packet(
+            PlayerIndex::ONE,
+            0,
+            cable_epoch,
+            GbaSioMultiEvent::ModeSet {
+                mode: 2,
+                siocnt: 0x2000,
+                rcnt: 0,
+                emulated_time: 1,
+            },
+            1,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                mode_zero.clone(),
+            )
+            .expect("slot zero mode");
+        assert_eq!(
+            receiver_one.recv().await.expect("slot zero mode delivery"),
+            LinkCableDataPlaneEvent::Packet(mode_zero)
+        );
+
+        let mode_one = gba_packet(
+            PlayerIndex::TWO,
+            0,
+            cable_epoch,
+            GbaSioMultiEvent::ModeSet {
+                mode: 2,
+                siocnt: 0x2000,
+                rcnt: 0,
+                emulated_time: 2,
+            },
+            2,
+        );
+        handle
+            .relay(
+                connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                mode_one.clone(),
+            )
+            .expect("slot one mode");
+        assert_eq!(
+            receiver_zero.recv().await.expect("slot one mode delivery"),
+            LinkCableDataPlaneEvent::Packet(mode_one)
+        );
+    }
+
+    async fn establish_gba_v2_multi_modes(
+        handle: &LinkCableDataPlaneHandle,
+        connection_zero: ConnectionId,
+        connection_one: ConnectionId,
+        receiver_zero: &mut LinkCableDataPlaneReceiver,
+        receiver_one: &mut LinkCableDataPlaneReceiver,
+        cable_epoch: u64,
+    ) {
+        let mode_zero = gba_v2_packet(
+            PlayerIndex::ONE,
+            0,
+            cable_epoch,
+            GbaSioMultiEvent::ModeSet {
+                mode: 2,
+                siocnt: 0x2000,
+                rcnt: 0,
+                emulated_time: 1,
+            },
+            1,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                mode_zero.clone(),
+            )
+            .expect("slot zero v2 mode");
+        assert_eq!(
+            receiver_one
+                .recv()
+                .await
+                .expect("slot zero v2 mode delivery"),
+            LinkCableDataPlaneEvent::Packet(mode_zero)
+        );
+
+        let mode_zero_ack = gba_v2_packet(
+            PlayerIndex::TWO,
+            0,
+            cable_epoch,
+            GbaSioMultiEvent::ModeAck {
+                acknowledged_mode_sender_sequence: 0,
+                emulated_time: 2,
+            },
+            2,
+        );
+        handle
+            .relay(
+                connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                mode_zero_ack.clone(),
+            )
+            .expect("slot zero v2 mode acknowledgement");
+        assert_eq!(
+            receiver_zero
+                .recv()
+                .await
+                .expect("slot zero v2 mode acknowledgement delivery"),
+            LinkCableDataPlaneEvent::Packet(mode_zero_ack)
+        );
+
+        let mode_one = gba_v2_packet(
+            PlayerIndex::TWO,
+            1,
+            cable_epoch,
+            GbaSioMultiEvent::ModeSet {
+                mode: 2,
+                siocnt: 0x2000,
+                rcnt: 0,
+                emulated_time: 3,
+            },
+            3,
+        );
+        handle
+            .relay(
+                connection_one,
+                PlayerIndex::TWO,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                mode_one.clone(),
+            )
+            .expect("slot one v2 mode");
+        assert_eq!(
+            receiver_zero
+                .recv()
+                .await
+                .expect("slot one v2 mode delivery"),
+            LinkCableDataPlaneEvent::Packet(mode_one)
+        );
+
+        let mode_one_ack = gba_v2_packet(
+            PlayerIndex::ONE,
+            1,
+            cable_epoch,
+            GbaSioMultiEvent::ModeAck {
+                acknowledged_mode_sender_sequence: 1,
+                emulated_time: 4,
+            },
+            4,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                mode_one_ack.clone(),
+            )
+            .expect("slot one v2 mode acknowledgement");
+        assert_eq!(
+            receiver_one
+                .recv()
+                .await
+                .expect("slot one v2 mode acknowledgement delivery"),
+            LinkCableDataPlaneEvent::Packet(mode_one_ack)
+        );
+    }
+
+    async fn assert_gba_v2_delayed_rendezvous(first_player: PlayerIndex) {
+        let (handle, connection_zero, connection_one, mut receiver_zero, mut receiver_one, cable) =
+            active_pair_for(8, LinkCableWireProtocol::GbaSioMultiV2).await;
+        let second_player = if first_player == PlayerIndex::ONE {
+            PlayerIndex::TWO
+        } else {
+            PlayerIndex::ONE
+        };
+        let first_connection = if first_player == PlayerIndex::ONE {
+            connection_zero
+        } else {
+            connection_one
+        };
+        let second_connection = if second_player == PlayerIndex::ONE {
+            connection_zero
+        } else {
+            connection_one
+        };
+
+        let first_mode = gba_v2_packet(
+            first_player,
+            0,
+            cable,
+            GbaSioMultiEvent::ModeSet {
+                mode: 2,
+                siocnt: 0x2000,
+                rcnt: 0,
+                emulated_time: 1,
+            },
+            1,
+        );
+        handle
+            .relay(
+                first_connection,
+                first_player,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                first_mode.clone(),
+            )
+            .expect("first endpoint enters MULTI");
+        assert_eq!(
+            recv_for_player(second_player, &mut receiver_zero, &mut receiver_one)
+                .await
+                .expect("first mode delivery"),
+            LinkCableDataPlaneEvent::Packet(first_mode)
+        );
+
+        let first_ack = gba_v2_packet(
+            second_player,
+            0,
+            cable,
+            GbaSioMultiEvent::ModeAck {
+                acknowledged_mode_sender_sequence: 0,
+                emulated_time: 2,
+            },
+            2,
+        );
+        handle
+            .relay(
+                second_connection,
+                second_player,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                first_ack.clone(),
+            )
+            .expect("first endpoint mode applied");
+        assert_eq!(
+            recv_for_player(first_player, &mut receiver_zero, &mut receiver_one)
+                .await
+                .expect("first mode ACK delivery"),
+            LinkCableDataPlaneEvent::Packet(first_ack)
+        );
+
+        assert_eq!(
+            handle
+                .snapshot(first_player)
+                .expect("waiting rendezvous snapshot")
+                .status,
+            LinkCableDataPlaneStatus::Active
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), receiver_zero.recv())
+                .await
+                .is_err(),
+            "the live provider must not manufacture a slot-zero rendezvous timeout"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), receiver_one.recv())
+                .await
+                .is_err(),
+            "the live provider must not manufacture a slot-one rendezvous timeout"
+        );
+
+        let second_mode = gba_v2_packet(
+            second_player,
+            1,
+            cable,
+            GbaSioMultiEvent::ModeSet {
+                mode: 2,
+                siocnt: 0x2000,
+                rcnt: 0,
+                emulated_time: 3,
+            },
+            3,
+        );
+        handle
+            .relay(
+                second_connection,
+                second_player,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                second_mode.clone(),
+            )
+            .expect("second endpoint enters later");
+        assert_eq!(
+            recv_for_player(first_player, &mut receiver_zero, &mut receiver_one)
+                .await
+                .expect("second mode delivery"),
+            LinkCableDataPlaneEvent::Packet(second_mode)
+        );
+
+        let second_ack = gba_v2_packet(
+            first_player,
+            1,
+            cable,
+            GbaSioMultiEvent::ModeAck {
+                acknowledged_mode_sender_sequence: 1,
+                emulated_time: 4,
+            },
+            4,
+        );
+        handle
+            .relay(
+                first_connection,
+                first_player,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                second_ack.clone(),
+            )
+            .expect("second endpoint mode applied");
+        assert_eq!(
+            recv_for_player(second_player, &mut receiver_zero, &mut receiver_one)
+                .await
+                .expect("second mode ACK delivery"),
+            LinkCableDataPlaneEvent::Packet(second_ack)
+        );
+
+        let start = gba_v2_packet(
+            PlayerIndex::ONE,
+            2,
+            cable,
+            GbaSioMultiEvent::TransferStart {
+                transfer_id: 1,
+                siocnt: 0x2000,
+                parent_word: 0x1111,
+                emulated_time: 5,
+            },
+            5,
+        );
+        handle
+            .relay(
+                connection_zero,
+                PlayerIndex::ONE,
+                ROOM_EPOCH,
+                SESSION_EPOCH,
+                start.clone(),
+            )
+            .expect("both current MULTI snapshots release the rendezvous");
+        assert_eq!(
+            receiver_one.recv().await.expect("released start delivery"),
+            LinkCableDataPlaneEvent::Packet(start)
+        );
+    }
+
+    async fn recv_for_player(
+        player_index: PlayerIndex,
+        receiver_zero: &mut LinkCableDataPlaneReceiver,
+        receiver_one: &mut LinkCableDataPlaneReceiver,
+    ) -> Result<LinkCableDataPlaneEvent, LinkCableDataPlaneError> {
+        if player_index == PlayerIndex::ONE {
+            receiver_zero.recv().await
+        } else {
+            receiver_one.recv().await
+        }
+    }
+
     fn packet(
         player_index: PlayerIndex,
         sequence: u64,
@@ -2474,6 +3398,26 @@ mod tests {
             event,
         })
         .expect("encode GBA test frame");
+        LinkCablePacket {
+            player_index,
+            sequence,
+            emulated_time,
+            payload,
+        }
+    }
+
+    fn gba_v2_packet(
+        player_index: PlayerIndex,
+        sequence: u64,
+        cable_epoch: u64,
+        event: GbaSioMultiEvent,
+        emulated_time: u64,
+    ) -> LinkCablePacket {
+        let payload = encode_gba_sio_multi_v2_frame(&GbaSioMultiFrame {
+            header: test_header(player_index, sequence, cable_epoch),
+            event,
+        })
+        .expect("encode GBA v2 test frame");
         LinkCablePacket {
             player_index,
             sequence,

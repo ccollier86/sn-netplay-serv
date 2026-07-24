@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "fixtureSet": "shadowboy-link-cable-v2",
+  "wireVersion": 1,
+  "protocol": "gba-sio-multi-v2",
+  "endianness": "little",
+  "headerBytes": 43,
+  "maxFrameBytes": 128,
+  "headerFields": [
+    { "name": "magic", "offset": 0, "bytes": 4, "encoding": "ASCII", "value": "SBLK" },
+    { "name": "wireVersion", "offset": 4, "bytes": 1, "encoding": "u8", "requiredValue": 1 },
+    { "name": "eventKind", "offset": 5, "bytes": 1, "encoding": "u8" },
+    { "name": "flags", "offset": 6, "bytes": 2, "encoding": "u16le", "requiredValue": 0 },
+    { "name": "roomEpoch", "offset": 8, "bytes": 8, "encoding": "u64le", "constraint": "high bit zero" },
+    { "name": "sessionEpoch", "offset": 16, "bytes": 8, "encoding": "u64le", "constraint": "high bit zero" },
+    { "name": "cableEpoch", "offset": 24, "bytes": 8, "encoding": "u64le", "constraint": "high bit zero" },
+    { "name": "senderSequence", "offset": 32, "bytes": 8, "encoding": "u64le", "constraint": "high bit zero" },
+    { "name": "senderSlot", "offset": 40, "bytes": 1, "encoding": "u8", "constraint": "0 or 1" },
+    { "name": "bodyLength", "offset": 41, "bytes": 2, "encoding": "u16le" }
+  ],
+  "fixtures": [
+    {
+      "id": "gba-mode-set",
+      "file": "gba-mode-set.hex",
+      "event": "MODE_SET",
+      "eventKind": 1,
+      "bodyBytes": 13,
+      "frameBytes": 56,
+      "fields": {
+        "senderSlot": 1,
+        "senderSequence": "0x0000000000000005",
+        "mode": 2,
+        "siocnt": "0x2003",
+        "rcnt": "0x0000",
+        "emulatedTime": "0x0102030405060708"
+      },
+      "expectedHex": "53 42 4c 4b 01 01 00 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 05 00 00 00 00 00 00 00 01 0d 00 02 03 20 00 00 08 07 06 05 04 03 02 01"
+    },
+    {
+      "id": "gba-transfer-start",
+      "file": "gba-transfer-start.hex",
+      "event": "TRANSFER_START",
+      "eventKind": 2,
+      "bodyBytes": 17,
+      "frameBytes": 60,
+      "fields": {
+        "senderSlot": 0,
+        "senderSequence": "0x000000000000000b",
+        "transferId": "0x11223344",
+        "mode": 2,
+        "siocnt": "0x6001",
+        "parentWord": "0x99aa",
+        "emulatedTime": "0x0102030405060708"
+      },
+      "expectedHex": "53 42 4c 4b 01 02 00 00 08 07 06 05 04 03 02 01 09 00 00 00 00 00 00 00 0a 00 00 00 00 00 00 00 0b 00 00 00 00 00 00 00 00 11 00 44 33 22 11 02 01 60 aa 99 08 07 06 05 04 03 02 01"
+    },
+    {
+      "id": "gba-transfer-reply",
+      "file": "gba-transfer-reply.hex",
+      "event": "TRANSFER_REPLY",
+      "eventKind": 3,
+      "bodyBytes": 14,
+      "frameBytes": 57,
+      "fields": {
+        "senderSlot": 1,
+        "senderSequence": "0x0000000000000005",
+        "transferId": "0x11223344",
+        "childWord": "0x99aa",
+        "emulatedTime": "0x0102030405060708"
+      },
+      "expectedHex": "53 42 4c 4b 01 03 00 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 05 00 00 00 00 00 00 00 01 0e 00 44 33 22 11 aa 99 08 07 06 05 04 03 02 01"
+    },
+    {
+      "id": "gba-transfer-commit",
+      "file": "gba-transfer-commit.hex",
+      "event": "TRANSFER_COMMIT",
+      "eventKind": 4,
+      "bodyBytes": 12,
+      "frameBytes": 55,
+      "fields": {
+        "senderSlot": 0,
+        "senderSequence": "0x0000000000000005",
+        "transferId": "0x11223344",
+        "words": ["0xcafe", "0xbeef", "0xffff", "0xffff"]
+      },
+      "expectedHex": "53 42 4c 4b 01 04 00 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 05 00 00 00 00 00 00 00 00 0c 00 44 33 22 11 fe ca ef be ff ff ff ff"
+    },
+    {
+      "id": "gba-transfer-abort",
+      "file": "gba-transfer-abort.hex",
+      "event": "TRANSFER_ABORT",
+      "eventKind": 5,
+      "bodyBytes": 5,
+      "frameBytes": 48,
+      "fields": {
+        "senderSlot": 1,
+        "senderSequence": "0x0000000000000005",
+        "transferId": "0x11223344",
+        "reason": 4
+      },
+      "expectedHex": "53 42 4c 4b 01 05 00 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 05 00 00 00 00 00 00 00 01 05 00 44 33 22 11 04"
+    },
+    {
+      "id": "gba-mode-ack",
+      "file": "gba-mode-ack.hex",
+      "event": "MODE_ACK",
+      "eventKind": 6,
+      "bodyBytes": 16,
+      "frameBytes": 59,
+      "fields": {
+        "senderSlot": 0,
+        "senderSequence": "0x0000000000000006",
+        "ackedModeSenderSequence": "0x0000000000000005",
+        "emulatedTime": "0x0102030405060708"
+      },
+      "expectedHex": "53 42 4c 4b 01 06 00 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 06 00 00 00 00 00 00 00 00 10 00 05 00 00 00 00 00 00 00 08 07 06 05 04 03 02 01"
+    },
+    {
+      "id": "gba-finish-ack",
+      "file": "gba-finish-ack.hex",
+      "event": "FINISH_ACK",
+      "eventKind": 7,
+      "bodyBytes": 12,
+      "frameBytes": 55,
+      "fields": {
+        "senderSlot": 1,
+        "senderSequence": "0x0000000000000006",
+        "transferId": "0x11223344",
+        "emulatedTime": "0x0102030405060708"
+      },
+      "expectedHex": "53 42 4c 4b 01 07 00 00 02 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 06 00 00 00 00 00 00 00 01 0c 00 44 33 22 11 08 07 06 05 04 03 02 01"
+    }
+  ]
+}

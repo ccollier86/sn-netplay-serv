@@ -692,7 +692,7 @@ async fn link_lobby_accepts_different_player_roms_and_independent_launch_order()
             invite.clone(),
             host_connection,
             link_game("Host GBA", "gba", 'a'),
-            LobbyLinkProtocolFamily::GbaMultiV1,
+            LobbyLinkProtocolFamily::GbaMultiV2,
             Some(InviteCode::parse("EF45-GH").expect("room invite")),
         )
         .await
@@ -719,7 +719,7 @@ async fn link_lobby_accepts_different_player_roms_and_independent_launch_order()
             invite.clone(),
             guest_connection,
             link_game("Guest GBA", "gba", 'b'),
-            LobbyLinkProtocolFamily::GbaMultiV1,
+            LobbyLinkProtocolFamily::GbaMultiV2,
             None,
         )
         .await
@@ -803,6 +803,91 @@ async fn link_lobby_accepts_different_player_roms_and_independent_launch_order()
 }
 
 #[tokio::test]
+async fn authoritative_gba_v1_link_lobby_accepts_player_game_reselection() {
+    let registry = registry();
+    let host_join = registry
+        .create_lobby(license("host"), create_link_params())
+        .await
+        .expect("created");
+    let invite = InviteCode::parse(host_join.lobby.invite_code).expect("invite");
+    let host_connection = ConnectionId::new();
+    let guest_connection = ConnectionId::new();
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("host"),
+            join_link_params(),
+            host_connection,
+        )
+        .await
+        .expect("host connected");
+    registry
+        .connect_lobby(
+            invite.clone(),
+            license("guest"),
+            join_link_params(),
+            guest_connection,
+        )
+        .await
+        .expect("guest connected");
+
+    registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            host_connection,
+            link_game("Host GBA v1", "gba", 'a'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            Some(InviteCode::parse("EF45-GH").expect("room invite")),
+        )
+        .await
+        .expect("host established authoritative GBA v1 family");
+    let first_guest_selection = registry
+        .select_lobby_link_cable_game(
+            invite.clone(),
+            guest_connection,
+            link_game("Guest GBA v1", "gba", 'b'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            None,
+        )
+        .await
+        .expect("guest selected in authoritative GBA v1 family");
+    let first_generation = first_guest_selection
+        .multiplayer_extension
+        .as_ref()
+        .and_then(|extension| extension.link_cable.as_ref())
+        .expect("GBA v1 extension")
+        .players[1]
+        .selection_generation;
+
+    let reselected = registry
+        .select_lobby_link_cable_game(
+            invite,
+            guest_connection,
+            link_game("Guest GBA v1 replacement", "gba", 'c'),
+            LobbyLinkProtocolFamily::GbaMultiV1,
+            None,
+        )
+        .await
+        .expect("guest reselected in authoritative GBA v1 family");
+    let link = reselected
+        .multiplayer_extension
+        .as_ref()
+        .and_then(|extension| extension.link_cable.as_ref())
+        .expect("GBA v1 extension");
+
+    assert_eq!(link.protocol_family, LobbyLinkProtocolFamily::GbaMultiV1);
+    assert!(link.players[1].selection_generation > first_generation);
+    assert_eq!(
+        link.players[1]
+            .selected_game
+            .as_ref()
+            .expect("replacement game")
+            .title,
+        "Guest GBA v1 replacement"
+    );
+}
+
+#[tokio::test]
 async fn rotating_link_room_invalidates_every_occupied_player_launch_generation() {
     let (registry, invite, host_connection, guest_connection, _, selected) =
         selected_link_lobby().await;
@@ -837,7 +922,7 @@ async fn rotating_link_room_invalidates_every_occupied_player_launch_generation(
             invite.clone(),
             host_connection,
             link_game("Host GBA", "gba", 'a'),
-            LobbyLinkProtocolFamily::GbaMultiV1,
+            LobbyLinkProtocolFamily::GbaMultiV2,
             Some(InviteCode::parse("JK67-LM").expect("new room invite")),
         )
         .await
@@ -937,7 +1022,7 @@ async fn intentional_link_guest_leave_clears_route_and_interrupts_remaining_play
             invite.clone(),
             replacement_connection,
             link_game("Replacement GBA", "gba", 'c'),
-            LobbyLinkProtocolFamily::GbaMultiV1,
+            LobbyLinkProtocolFamily::GbaMultiV2,
             None,
         )
         .await
@@ -1109,7 +1194,7 @@ async fn gb_and_gbc_share_one_link_family_but_gba_does_not() {
             invite,
             guest_connection,
             link_game("Emerald", "gba", 'c'),
-            LobbyLinkProtocolFamily::GbaMultiV1,
+            LobbyLinkProtocolFamily::GbaMultiV2,
             None,
         )
         .await
@@ -1150,7 +1235,7 @@ async fn link_resolution_rejects_legacy_or_third_players_without_changing_contro
             invite.clone(),
             host_connection,
             link_game("Host GBA", "gba", 'a'),
-            LobbyLinkProtocolFamily::GbaMultiV1,
+            LobbyLinkProtocolFamily::GbaMultiV2,
             Some(InviteCode::parse("EF45-GH").expect("room invite")),
         )
         .await
@@ -1168,7 +1253,7 @@ async fn link_resolution_rejects_legacy_or_third_players_without_changing_contro
             invite.clone(),
             host_connection,
             link_game("Host GBA", "gba", 'a'),
-            LobbyLinkProtocolFamily::GbaMultiV1,
+            LobbyLinkProtocolFamily::GbaMultiV2,
             Some(InviteCode::parse("EF45-GH").expect("room invite")),
         )
         .await
@@ -2020,6 +2105,7 @@ fn link_lobby_capabilities() -> LobbyClientCapabilities {
             protocol_families: vec![
                 LobbyLinkProtocolFamily::GbSerialV1,
                 LobbyLinkProtocolFamily::GbaMultiV1,
+                LobbyLinkProtocolFamily::GbaMultiV2,
             ],
         }),
         ..LobbyClientCapabilities::desktop_default()
@@ -2076,7 +2162,7 @@ async fn selected_link_lobby() -> (
             invite.clone(),
             host_connection,
             link_game("Host GBA", "gba", 'a'),
-            LobbyLinkProtocolFamily::GbaMultiV1,
+            LobbyLinkProtocolFamily::GbaMultiV2,
             Some(InviteCode::parse("EF45-GH").expect("room invite")),
         )
         .await
@@ -2086,7 +2172,7 @@ async fn selected_link_lobby() -> (
             invite.clone(),
             guest_connection,
             link_game("Guest GBA", "gba", 'b'),
-            LobbyLinkProtocolFamily::GbaMultiV1,
+            LobbyLinkProtocolFamily::GbaMultiV2,
             None,
         )
         .await

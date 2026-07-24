@@ -16,12 +16,16 @@ const EVENT_TRANSFER_START: u8 = 2;
 const EVENT_TRANSFER_REPLY: u8 = 3;
 const EVENT_TRANSFER_COMMIT: u8 = 4;
 const EVENT_TRANSFER_ABORT: u8 = 5;
+const EVENT_MODE_ACK: u8 = 6;
+const EVENT_FINISH_ACK: u8 = 7;
 
 const GBA_MODE_SET_BODY_BYTES: usize = 13;
 const GBA_TRANSFER_START_BODY_BYTES: usize = 17;
 const GBA_TRANSFER_REPLY_BODY_BYTES: usize = 14;
 const GBA_TRANSFER_COMMIT_BODY_BYTES: usize = 12;
 const GBA_TRANSFER_ABORT_BODY_BYTES: usize = 5;
+const GBA_MODE_ACK_BODY_BYTES: usize = 16;
+const GBA_FINISH_ACK_BODY_BYTES: usize = 12;
 
 const GB_SERIAL_START_BODY_BYTES: usize = 15;
 const GB_SERIAL_REPLY_BODY_BYTES: usize = 14;
@@ -34,7 +38,12 @@ pub fn encode_link_cable_wire_frame(
 ) -> Result<Vec<u8>, LinkCableWireCodecError> {
     validate_wire_frame(frame)?;
     match frame {
-        LinkCableWireFrame::GbaSioMulti(frame) => encode_valid_gba_frame(frame),
+        LinkCableWireFrame::GbaSioMulti(frame) => {
+            encode_valid_gba_frame(LinkCableWireProtocol::GbaSioMultiV1, frame)
+        }
+        LinkCableWireFrame::GbaSioMultiV2(frame) => {
+            encode_valid_gba_frame(LinkCableWireProtocol::GbaSioMultiV2, frame)
+        }
         LinkCableWireFrame::GbSerial(frame) => encode_valid_gb_frame(frame),
     }
 }
@@ -48,6 +57,9 @@ pub fn decode_link_cable_wire_frame(
         LinkCableWireProtocol::GbaSioMultiV1 => {
             decode_gba_sio_multi_frame(payload).map(LinkCableWireFrame::GbaSioMulti)
         }
+        LinkCableWireProtocol::GbaSioMultiV2 => {
+            decode_gba_sio_multi_v2_frame(payload).map(LinkCableWireFrame::GbaSioMultiV2)
+        }
         LinkCableWireProtocol::GbSerialV1 => {
             decode_gb_serial_frame(payload).map(LinkCableWireFrame::GbSerial)
         }
@@ -58,12 +70,34 @@ pub fn decode_link_cable_wire_frame(
 pub fn encode_gba_sio_multi_frame(
     frame: &GbaSioMultiFrame,
 ) -> Result<Vec<u8>, LinkCableWireCodecError> {
-    validate_gba_frame(frame)?;
-    encode_valid_gba_frame(frame)
+    validate_gba_frame(LinkCableWireProtocol::GbaSioMultiV1, frame)?;
+    encode_valid_gba_frame(LinkCableWireProtocol::GbaSioMultiV1, frame)
+}
+
+/// Encodes one `gba-sio-multi-v2` frame.
+pub fn encode_gba_sio_multi_v2_frame(
+    frame: &GbaSioMultiFrame,
+) -> Result<Vec<u8>, LinkCableWireCodecError> {
+    validate_gba_frame(LinkCableWireProtocol::GbaSioMultiV2, frame)?;
+    encode_valid_gba_frame(LinkCableWireProtocol::GbaSioMultiV2, frame)
 }
 
 /// Decodes one frame in the `gba-sio-multi-v1` body namespace.
 pub fn decode_gba_sio_multi_frame(
+    payload: &[u8],
+) -> Result<GbaSioMultiFrame, LinkCableWireCodecError> {
+    decode_gba_sio_multi_frame_for(LinkCableWireProtocol::GbaSioMultiV1, payload)
+}
+
+/// Decodes one frame in the `gba-sio-multi-v2` body namespace.
+pub fn decode_gba_sio_multi_v2_frame(
+    payload: &[u8],
+) -> Result<GbaSioMultiFrame, LinkCableWireCodecError> {
+    decode_gba_sio_multi_frame_for(LinkCableWireProtocol::GbaSioMultiV2, payload)
+}
+
+fn decode_gba_sio_multi_frame_for(
+    protocol: LinkCableWireProtocol,
     payload: &[u8],
 ) -> Result<GbaSioMultiFrame, LinkCableWireCodecError> {
     let (header, event_kind, body) = decode_header(payload)?;
@@ -116,10 +150,24 @@ pub fn decode_gba_sio_multi_frame(
                 reason: LinkCableAbortReason::try_from(body[4])?,
             }
         }
+        EVENT_MODE_ACK if protocol == LinkCableWireProtocol::GbaSioMultiV2 => {
+            require_body_length(body, GBA_MODE_ACK_BODY_BYTES)?;
+            GbaSioMultiEvent::ModeAck {
+                acknowledged_mode_sender_sequence: read_u64(body, 0)?,
+                emulated_time: read_u64(body, 8)?,
+            }
+        }
+        EVENT_FINISH_ACK if protocol == LinkCableWireProtocol::GbaSioMultiV2 => {
+            require_body_length(body, GBA_FINISH_ACK_BODY_BYTES)?;
+            GbaSioMultiEvent::FinishAck {
+                transfer_id: read_u32(body, 0),
+                emulated_time: read_u64(body, 4)?,
+            }
+        }
         _ => return Err(LinkCableWireCodecError::UnsupportedEventKind),
     };
     let frame = GbaSioMultiFrame { header, event };
-    validate_gba_frame(&frame)?;
+    validate_gba_frame(protocol, &frame)?;
     Ok(frame)
 }
 
@@ -175,7 +223,10 @@ pub fn decode_gb_serial_frame(payload: &[u8]) -> Result<GbSerialFrame, LinkCable
     Ok(frame)
 }
 
-fn encode_valid_gba_frame(frame: &GbaSioMultiFrame) -> Result<Vec<u8>, LinkCableWireCodecError> {
+fn encode_valid_gba_frame(
+    protocol: LinkCableWireProtocol,
+    frame: &GbaSioMultiFrame,
+) -> Result<Vec<u8>, LinkCableWireCodecError> {
     let (event_kind, body_length) = match &frame.event {
         GbaSioMultiEvent::ModeSet { .. } => (EVENT_MODE_SET, GBA_MODE_SET_BODY_BYTES),
         GbaSioMultiEvent::TransferStart { .. } => {
@@ -190,7 +241,16 @@ fn encode_valid_gba_frame(frame: &GbaSioMultiFrame) -> Result<Vec<u8>, LinkCable
         GbaSioMultiEvent::TransferAbort { .. } => {
             (EVENT_TRANSFER_ABORT, GBA_TRANSFER_ABORT_BODY_BYTES)
         }
+        GbaSioMultiEvent::ModeAck { .. } => (EVENT_MODE_ACK, GBA_MODE_ACK_BODY_BYTES),
+        GbaSioMultiEvent::FinishAck { .. } => (EVENT_FINISH_ACK, GBA_FINISH_ACK_BODY_BYTES),
     };
+    debug_assert!(
+        protocol == LinkCableWireProtocol::GbaSioMultiV2
+            || !matches!(
+                frame.event,
+                GbaSioMultiEvent::ModeAck { .. } | GbaSioMultiEvent::FinishAck { .. }
+            )
+    );
     let mut encoded = encode_header(frame.header, event_kind, body_length)?;
 
     match &frame.event {
@@ -238,6 +298,20 @@ fn encode_valid_gba_frame(frame: &GbaSioMultiFrame) -> Result<Vec<u8>, LinkCable
         } => {
             push_u32(&mut encoded, *transfer_id);
             encoded.push(reason.wire_value());
+        }
+        GbaSioMultiEvent::ModeAck {
+            acknowledged_mode_sender_sequence,
+            emulated_time,
+        } => {
+            push_u64(&mut encoded, *acknowledged_mode_sender_sequence);
+            push_u64(&mut encoded, *emulated_time);
+        }
+        GbaSioMultiEvent::FinishAck {
+            transfer_id,
+            emulated_time,
+        } => {
+            push_u32(&mut encoded, *transfer_id);
+            push_u64(&mut encoded, *emulated_time);
         }
     }
 

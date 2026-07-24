@@ -417,7 +417,7 @@ async fn create_room_accepts_link_cable_descriptor_when_provider_rollout_is_enab
     body["session"]["mode"] = json!("linkCable");
     body["session"]["link"] = json!({
         "systemFamily": "gba",
-        "linkProtocol": "gba-sio-multi-v1",
+        "linkProtocol": "gba-sio-multi-v2",
         "runtimeProfile": "mgba-link-runtime-v1",
         "maxPlayers": 2,
         "transport": "relay"
@@ -446,6 +446,10 @@ async fn create_room_accepts_link_cable_descriptor_when_provider_rollout_is_enab
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(value["room"]["session"]["mode"], "linkCable");
+    assert_eq!(
+        value["room"]["session"]["link"]["linkProtocol"],
+        "gba-sio-multi-v2"
+    );
     assert_eq!(
         value["room"]["session"]["link"]["runtimeProfile"],
         "mgba-link-runtime-v1"

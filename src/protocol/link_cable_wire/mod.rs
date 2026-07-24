@@ -1,11 +1,13 @@
-//! Frozen `SBLK` v1 emulator-event frame codec.
+//! Negotiated `SBLK` emulator-event frame codec.
 //!
 //! The 43-byte common header intentionally omits a family discriminator. The
-//! authoritative link-session descriptor selects `gba-sio-multi-v1` or
-//! `gb-serial-v1` before decoding. This module validates byte shape and
-//! event-local invariants only; a room provider must additionally validate the
-//! authenticated route and slot, authoritative epochs, exact-next sequence,
-//! and transaction state before enqueueing a decoded event.
+//! authoritative link-session descriptor selects `gba-sio-multi-v1`,
+//! `gba-sio-multi-v2`, or `gb-serial-v1` before decoding. V2 retains wire
+//! version 1 and adds GBA mode-apply and native-finish acknowledgement bodies.
+//! This module validates byte shape and event-local invariants only; a room
+//! provider must additionally validate the authenticated route and slot,
+//! authoritative epochs, exact-next sequence, and transaction state before
+//! enqueueing a decoded event.
 
 mod codec;
 mod error;
@@ -13,8 +15,9 @@ mod model;
 mod validation;
 
 pub use codec::{
-    decode_gb_serial_frame, decode_gba_sio_multi_frame, decode_link_cable_wire_frame,
-    encode_gb_serial_frame, encode_gba_sio_multi_frame, encode_link_cable_wire_frame,
+    decode_gb_serial_frame, decode_gba_sio_multi_frame, decode_gba_sio_multi_v2_frame,
+    decode_link_cable_wire_frame, encode_gb_serial_frame, encode_gba_sio_multi_frame,
+    encode_gba_sio_multi_v2_frame, encode_link_cable_wire_frame,
 };
 pub use error::LinkCableWireCodecError;
 pub use model::{

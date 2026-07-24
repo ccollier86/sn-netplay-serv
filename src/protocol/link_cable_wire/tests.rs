@@ -1,6 +1,7 @@
 use super::*;
 
 const MANIFEST: &str = include_str!("../../../protocol/link-cable-v1/manifest.json");
+const GBA_V2_MANIFEST: &str = include_str!("../../../protocol/link-cable-v2/manifest.json");
 
 #[test]
 fn copied_manifest_and_hex_inventory_are_cross_checked_independently() {
@@ -87,6 +88,20 @@ fn every_typed_encoder_and_decoder_matches_external_goldens() {
                     fixture.id
                 );
             }
+            LinkCableWireFrame::GbaSioMultiV2(frame) => {
+                assert_eq!(
+                    encode_gba_sio_multi_v2_frame(frame),
+                    Ok(expected.clone()),
+                    "{}: GBA v2 encoder",
+                    fixture.id
+                );
+                assert_eq!(
+                    decode_gba_sio_multi_v2_frame(&expected),
+                    Ok(frame.clone()),
+                    "{}: GBA v2 decoder",
+                    fixture.id
+                );
+            }
             LinkCableWireFrame::GbSerial(frame) => {
                 assert_eq!(
                     encode_gb_serial_frame(frame),
@@ -102,6 +117,63 @@ fn every_typed_encoder_and_decoder_matches_external_goldens() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn every_gba_v2_encoder_and_decoder_matches_the_shared_external_goldens() {
+    let manifest: serde_json::Value =
+        serde_json::from_str(GBA_V2_MANIFEST).expect("canonical GBA v2 manifest");
+    assert_eq!(manifest["fixtureSet"], "shadowboy-link-cable-v2");
+    assert_eq!(manifest["protocol"], "gba-sio-multi-v2");
+    assert_eq!(manifest["wireVersion"], u64::from(LINK_CABLE_WIRE_VERSION));
+
+    let fixtures = manifest["fixtures"].as_array().expect("v2 fixtures");
+    let cases = gba_v2_fixture_cases();
+    assert_eq!(fixtures.len(), cases.len());
+    for (fixture, case) in fixtures.iter().zip(cases) {
+        assert_eq!(fixture["id"], case.id);
+        assert_eq!(fixture["file"], case.file);
+        let expected = v2_fixture_hex(case.file);
+        assert_eq!(
+            fixture["expectedHex"]
+                .as_str()
+                .map(decode_hex)
+                .expect("v2 expected hex"),
+            expected,
+            "{}: manifest bytes",
+            case.id
+        );
+        assert_eq!(
+            fixture["frameBytes"].as_u64(),
+            u64::try_from(expected.len()).ok(),
+            "{}: frame bytes",
+            case.id
+        );
+        assert_eq!(
+            encode_gba_sio_multi_v2_frame(&case.frame),
+            Ok(expected.clone()),
+            "{}: v2 encoder",
+            case.id
+        );
+        assert_eq!(
+            encode_link_cable_wire_frame(&LinkCableWireFrame::GbaSioMultiV2(case.frame.clone())),
+            Ok(expected.clone()),
+            "{}: generic v2 encoder",
+            case.id
+        );
+        assert_eq!(
+            decode_gba_sio_multi_v2_frame(&expected),
+            Ok(case.frame.clone()),
+            "{}: v2 decoder",
+            case.id
+        );
+        assert_eq!(
+            decode_link_cable_wire_frame(LinkCableWireProtocol::GbaSioMultiV2, &expected),
+            Ok(LinkCableWireFrame::GbaSioMultiV2(case.frame)),
+            "{}: generic v2 decoder",
+            case.id
+        );
     }
 }
 
@@ -385,7 +457,9 @@ fn decoder_rejects_gb_body_invariants_and_dynamic_role_violations() {
 fn encoder_enforces_the_same_header_body_and_role_invariants() {
     let mut gba = match fixture_case("gba-transfer-reply").frame {
         LinkCableWireFrame::GbaSioMulti(frame) => frame,
-        LinkCableWireFrame::GbSerial(_) => panic!("GBA fixture"),
+        LinkCableWireFrame::GbaSioMultiV2(_) | LinkCableWireFrame::GbSerial(_) => {
+            panic!("GBA v1 fixture")
+        }
     };
     gba.header.room_epoch = 1_u64 << 63;
     assert_eq!(
@@ -430,7 +504,9 @@ fn encoder_enforces_the_same_header_body_and_role_invariants() {
 
     let mut gb = match fixture_case("gb-serial-start-slot0").frame {
         LinkCableWireFrame::GbSerial(frame) => frame,
-        LinkCableWireFrame::GbaSioMulti(_) => panic!("GB fixture"),
+        LinkCableWireFrame::GbaSioMulti(_) | LinkCableWireFrame::GbaSioMultiV2(_) => {
+            panic!("GB fixture")
+        }
     };
     gb.event = GbSerialEvent::Start {
         transfer_id: 1,
@@ -477,10 +553,74 @@ fn maximum_v1_integer_values_round_trip_without_unsigned_reinterpretation() {
 }
 
 #[test]
+fn gba_v2_barrier_events_use_exact_little_endian_bodies_and_v1_rejects_them() {
+    let mode_ack = GbaSioMultiFrame {
+        header: gba_header(9, 1),
+        event: GbaSioMultiEvent::ModeAck {
+            acknowledged_mode_sender_sequence: 0x0102_0304_0506_0708,
+            emulated_time: 0x1112_1314_1516_1718,
+        },
+    };
+    let encoded_mode =
+        encode_gba_sio_multi_v2_frame(&mode_ack).expect("encode v2 mode acknowledgement");
+    assert_eq!(encoded_mode[5], 6);
+    assert_eq!(&encoded_mode[41..43], &[16, 0]);
+    assert_eq!(
+        &encoded_mode[43..],
+        &[
+            0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13,
+            0x12, 0x11,
+        ]
+    );
+    assert_eq!(
+        decode_gba_sio_multi_v2_frame(&encoded_mode),
+        Ok(mode_ack.clone())
+    );
+    assert_eq!(
+        decode_gba_sio_multi_frame(&encoded_mode),
+        Err(LinkCableWireCodecError::UnsupportedEventKind)
+    );
+    assert_eq!(
+        encode_gba_sio_multi_frame(&mode_ack),
+        Err(LinkCableWireCodecError::UnsupportedEventKind)
+    );
+
+    let finish_ack = GbaSioMultiFrame {
+        header: gba_header(10, 1),
+        event: GbaSioMultiEvent::FinishAck {
+            transfer_id: 0x1122_3344,
+            emulated_time: 0x2122_2324_2526_2728,
+        },
+    };
+    let encoded_finish =
+        encode_gba_sio_multi_v2_frame(&finish_ack).expect("encode v2 finish acknowledgement");
+    assert_eq!(encoded_finish[5], 7);
+    assert_eq!(&encoded_finish[41..43], &[12, 0]);
+    assert_eq!(
+        &encoded_finish[43..],
+        &[
+            0x44, 0x33, 0x22, 0x11, 0x28, 0x27, 0x26, 0x25, 0x24, 0x23, 0x22, 0x21,
+        ]
+    );
+    assert_eq!(
+        decode_link_cable_wire_frame(LinkCableWireProtocol::GbaSioMultiV2, &encoded_finish),
+        Ok(LinkCableWireFrame::GbaSioMultiV2(finish_ack))
+    );
+    assert_eq!(
+        decode_link_cable_wire_frame(LinkCableWireProtocol::GbaSioMultiV1, &encoded_finish),
+        Err(LinkCableWireCodecError::UnsupportedEventKind)
+    );
+}
+
+#[test]
 fn protocol_and_abort_discriminators_reject_unknown_values() {
     assert_eq!(
         LinkCableWireProtocol::try_from("gba-sio-multi-v1"),
         Ok(LinkCableWireProtocol::GbaSioMultiV1)
+    );
+    assert_eq!(
+        LinkCableWireProtocol::try_from("gba-sio-multi-v2"),
+        Ok(LinkCableWireProtocol::GbaSioMultiV2)
     );
     assert_eq!(
         LinkCableWireProtocol::try_from("gb-serial-v1"),
@@ -574,6 +714,73 @@ fn fixture_case(id: &str) -> FixtureCase {
         .into_iter()
         .find(|fixture| fixture.id == id)
         .unwrap_or_else(|| panic!("unknown fixture: {id}"))
+}
+
+fn v2_fixture_hex(file: &str) -> Vec<u8> {
+    decode_hex(match file {
+        "gba-mode-set.hex" => {
+            include_str!("../../../protocol/link-cable-v2/gba-mode-set.hex")
+        }
+        "gba-transfer-start.hex" => {
+            include_str!("../../../protocol/link-cable-v2/gba-transfer-start.hex")
+        }
+        "gba-transfer-reply.hex" => {
+            include_str!("../../../protocol/link-cable-v2/gba-transfer-reply.hex")
+        }
+        "gba-transfer-commit.hex" => {
+            include_str!("../../../protocol/link-cable-v2/gba-transfer-commit.hex")
+        }
+        "gba-transfer-abort.hex" => {
+            include_str!("../../../protocol/link-cable-v2/gba-transfer-abort.hex")
+        }
+        "gba-mode-ack.hex" => {
+            include_str!("../../../protocol/link-cable-v2/gba-mode-ack.hex")
+        }
+        "gba-finish-ack.hex" => {
+            include_str!("../../../protocol/link-cable-v2/gba-finish-ack.hex")
+        }
+        _ => panic!("unknown GBA v2 fixture file: {file}"),
+    })
+}
+
+fn gba_v2_fixture_cases() -> Vec<GbaV2FixtureCase> {
+    const GBA_TIME: u64 = 0x0102_0304_0506_0708;
+    let mut cases = fixture_cases()
+        .into_iter()
+        .filter_map(|fixture| match fixture.frame {
+            LinkCableWireFrame::GbaSioMulti(frame) => Some(GbaV2FixtureCase {
+                id: fixture.id,
+                file: fixture.file,
+                frame,
+            }),
+            LinkCableWireFrame::GbaSioMultiV2(_) | LinkCableWireFrame::GbSerial(_) => None,
+        })
+        .collect::<Vec<_>>();
+    cases.extend([
+        GbaV2FixtureCase {
+            id: "gba-mode-ack",
+            file: "gba-mode-ack.hex",
+            frame: GbaSioMultiFrame {
+                header: gba_header(6, 0),
+                event: GbaSioMultiEvent::ModeAck {
+                    acknowledged_mode_sender_sequence: 5,
+                    emulated_time: GBA_TIME,
+                },
+            },
+        },
+        GbaV2FixtureCase {
+            id: "gba-finish-ack",
+            file: "gba-finish-ack.hex",
+            frame: GbaSioMultiFrame {
+                header: gba_header(6, 1),
+                event: GbaSioMultiEvent::FinishAck {
+                    transfer_id: 0x1122_3344,
+                    emulated_time: GBA_TIME,
+                },
+            },
+        },
+    ]);
+    cases
 }
 
 fn fixture_cases() -> Vec<FixtureCase> {
@@ -798,4 +1005,10 @@ struct FixtureCase {
     file: &'static str,
     protocol: LinkCableWireProtocol,
     frame: LinkCableWireFrame,
+}
+
+struct GbaV2FixtureCase {
+    id: &'static str,
+    file: &'static str,
+    frame: GbaSioMultiFrame,
 }

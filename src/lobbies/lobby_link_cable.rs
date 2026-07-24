@@ -19,6 +19,8 @@ pub enum LobbyLinkProtocolFamily {
     GbSerialV1,
     /// GBA two-device multiplayer SIO exchange.
     GbaMultiV1,
+    /// GBA exchange with mode-apply and native-finish barriers.
+    GbaMultiV2,
 }
 
 /// Link-cable behavior supported by one lobby client.
@@ -127,6 +129,7 @@ mod tests {
             protocol_families: vec![
                 LobbyLinkProtocolFamily::GbSerialV1,
                 LobbyLinkProtocolFamily::GbaMultiV1,
+                LobbyLinkProtocolFamily::GbaMultiV2,
             ],
         };
 
@@ -138,7 +141,7 @@ mod tests {
                 "contractVersion": 1,
                 "runtimeProfile": "mgba-link-runtime-v1",
                 "coreBuildId": "android-mgba-link-v1",
-                "protocolFamilies": ["gbSerialV1", "gbaMultiV1"]
+                "protocolFamilies": ["gbSerialV1", "gbaMultiV1", "gbaMultiV2"]
             })
         );
         assert_eq!(

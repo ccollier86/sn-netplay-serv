@@ -74,8 +74,8 @@ pub use link_cable_wire::{
     LINK_CABLE_WIRE_HEADER_BYTES, LINK_CABLE_WIRE_VERSION, LinkCableAbortReason,
     LinkCableWireCodecError, LinkCableWireFrame, LinkCableWireHeader, LinkCableWireProtocol,
     MAX_LINK_CABLE_WIRE_BYTES, decode_gb_serial_frame, decode_gba_sio_multi_frame,
-    decode_link_cable_wire_frame, encode_gb_serial_frame, encode_gba_sio_multi_frame,
-    encode_link_cable_wire_frame,
+    decode_gba_sio_multi_v2_frame, decode_link_cable_wire_frame, encode_gb_serial_frame,
+    encode_gba_sio_multi_frame, encode_gba_sio_multi_v2_frame, encode_link_cable_wire_frame,
 };
 pub use lobby_file_relay::{
     LobbyFileRelayGrant, LobbyFileRelayGrantPair, LobbyFileRelayGrantRole,

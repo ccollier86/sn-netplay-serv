@@ -3,7 +3,7 @@
 use super::{
     GB_SERIAL_FAST_CLOCK_CONTROL, GB_SERIAL_NORMAL_CLOCK_CONTROL, GBA_MULTI_DISCONNECTED_WORD,
     GbSerialEvent, GbSerialFrame, GbaSioMultiEvent, GbaSioMultiFrame, LinkCableWireCodecError,
-    LinkCableWireFrame, LinkCableWireHeader,
+    LinkCableWireFrame, LinkCableWireHeader, LinkCableWireProtocol,
 };
 
 const MAX_SIGNED_U64: u64 = i64::MAX as u64;
@@ -16,12 +16,20 @@ pub(super) fn validate_wire_frame(
     frame: &LinkCableWireFrame,
 ) -> Result<(), LinkCableWireCodecError> {
     match frame {
-        LinkCableWireFrame::GbaSioMulti(frame) => validate_gba_frame(frame),
+        LinkCableWireFrame::GbaSioMulti(frame) => {
+            validate_gba_frame(LinkCableWireProtocol::GbaSioMultiV1, frame)
+        }
+        LinkCableWireFrame::GbaSioMultiV2(frame) => {
+            validate_gba_frame(LinkCableWireProtocol::GbaSioMultiV2, frame)
+        }
         LinkCableWireFrame::GbSerial(frame) => validate_gb_frame(frame),
     }
 }
 
-pub(super) fn validate_gba_frame(frame: &GbaSioMultiFrame) -> Result<(), LinkCableWireCodecError> {
+pub(super) fn validate_gba_frame(
+    protocol: LinkCableWireProtocol,
+    frame: &GbaSioMultiFrame,
+) -> Result<(), LinkCableWireCodecError> {
     validate_header(&frame.header)?;
 
     match &frame.event {
@@ -77,6 +85,29 @@ pub(super) fn validate_gba_frame(frame: &GbaSioMultiFrame) -> Result<(), LinkCab
         }
         GbaSioMultiEvent::TransferAbort { transfer_id, .. } => {
             validate_transfer_id(*transfer_id)?;
+        }
+        GbaSioMultiEvent::ModeAck {
+            acknowledged_mode_sender_sequence,
+            emulated_time,
+        } => {
+            if protocol != LinkCableWireProtocol::GbaSioMultiV2 {
+                return Err(LinkCableWireCodecError::UnsupportedEventKind);
+            }
+            validate_non_negative_u64(*acknowledged_mode_sender_sequence)?;
+            validate_non_negative_u64(*emulated_time)?;
+        }
+        GbaSioMultiEvent::FinishAck {
+            transfer_id,
+            emulated_time,
+        } => {
+            if protocol != LinkCableWireProtocol::GbaSioMultiV2 {
+                return Err(LinkCableWireCodecError::UnsupportedEventKind);
+            }
+            validate_transfer_id(*transfer_id)?;
+            validate_non_negative_u64(*emulated_time)?;
+            if frame.header.sender_slot != 1 {
+                return Err(LinkCableWireCodecError::InvalidEventRole);
+            }
         }
     }
 

@@ -2,11 +2,13 @@
 
 use super::LinkCableWireCodecError;
 
-/// Frozen body namespace selected by the authoritative link session.
+/// Body namespace selected by the authoritative link session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LinkCableWireProtocol {
     /// Two-player GBA SIO multiplayer events.
     GbaSioMultiV1,
+    /// Two-player GBA SIO multiplayer events with apply/finish barriers.
+    GbaSioMultiV2,
     /// Two-player GB/GBC serial events.
     GbSerialV1,
 }
@@ -16,6 +18,7 @@ impl LinkCableWireProtocol {
     pub const fn wire_value(self) -> &'static str {
         match self {
             Self::GbaSioMultiV1 => "gba-sio-multi-v1",
+            Self::GbaSioMultiV2 => "gba-sio-multi-v2",
             Self::GbSerialV1 => "gb-serial-v1",
         }
     }
@@ -27,6 +30,7 @@ impl TryFrom<&str> for LinkCableWireProtocol {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
             "gba-sio-multi-v1" => Ok(Self::GbaSioMultiV1),
+            "gba-sio-multi-v2" => Ok(Self::GbaSioMultiV2),
             "gb-serial-v1" => Ok(Self::GbSerialV1),
             _ => Err(LinkCableWireCodecError::UnsupportedProtocol),
         }
@@ -51,8 +55,10 @@ pub struct LinkCableWireHeader {
 /// SBLK v1 frame decoded with its authoritative protocol namespace.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LinkCableWireFrame {
-    /// GBA SIO multiplayer namespace.
+    /// Frozen GBA SIO multiplayer v1 namespace.
     GbaSioMulti(GbaSioMultiFrame),
+    /// GBA SIO multiplayer v2 namespace with causal barriers.
+    GbaSioMultiV2(GbaSioMultiFrame),
     /// GB/GBC serial namespace.
     GbSerial(GbSerialFrame),
 }
@@ -62,6 +68,7 @@ impl LinkCableWireFrame {
     pub const fn protocol(&self) -> LinkCableWireProtocol {
         match self {
             Self::GbaSioMulti(_) => LinkCableWireProtocol::GbaSioMultiV1,
+            Self::GbaSioMultiV2(_) => LinkCableWireProtocol::GbaSioMultiV2,
             Self::GbSerial(_) => LinkCableWireProtocol::GbSerialV1,
         }
     }
@@ -69,7 +76,7 @@ impl LinkCableWireFrame {
     /// Shared SBLK v1 header.
     pub const fn header(&self) -> &LinkCableWireHeader {
         match self {
-            Self::GbaSioMulti(frame) => &frame.header,
+            Self::GbaSioMulti(frame) | Self::GbaSioMultiV2(frame) => &frame.header,
             Self::GbSerial(frame) => &frame.header,
         }
     }
@@ -87,7 +94,7 @@ impl From<GbSerialFrame> for LinkCableWireFrame {
     }
 }
 
-/// One typed `gba-sio-multi-v1` SBLK frame.
+/// One typed `gba-sio-multi-v1` or `gba-sio-multi-v2` SBLK frame.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GbaSioMultiFrame {
     /// Shared SBLK v1 header.
@@ -96,7 +103,7 @@ pub struct GbaSioMultiFrame {
     pub event: GbaSioMultiEvent,
 }
 
-/// Event bodies in the `gba-sio-multi-v1` namespace.
+/// Event bodies shared by the GBA SIO namespaces. Barrier events are v2-only.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GbaSioMultiEvent {
     /// Once-per-epoch baseline or a subsequent GBA SIO mode transition.
@@ -143,6 +150,20 @@ pub enum GbaSioMultiEvent {
         transfer_id: u32,
         /// Frozen cross-family abort reason.
         reason: LinkCableAbortReason,
+    },
+    /// The opposite endpoint applied one v2 mode snapshot.
+    ModeAck {
+        /// Sender sequence of the exact opposite-slot `MODE_SET`.
+        acknowledged_mode_sender_sequence: u64,
+        /// Acknowledging endpoint's non-negative emulated cycle timestamp.
+        emulated_time: u64,
+    },
+    /// Slot 1 completed the native multiplayer event for one v2 commit.
+    FinishAck {
+        /// Nonzero transfer identifier from the applied commit.
+        transfer_id: u32,
+        /// Responder's non-negative native-completion cycle timestamp.
+        emulated_time: u64,
     },
 }
 

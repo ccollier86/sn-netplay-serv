@@ -698,12 +698,14 @@ fn validate_link_cable_room_descriptor(
     let (expected_system_family, expected_link_protocol) = match protocol_family {
         LobbyLinkProtocolFamily::GbSerialV1 => ("gb", "gb-serial-v1"),
         LobbyLinkProtocolFamily::GbaMultiV1 => ("gba", "gba-sio-multi-v1"),
+        LobbyLinkProtocolFamily::GbaMultiV2 => ("gba", "gba-sio-multi-v2"),
     };
     let game_system_matches = match protocol_family {
         LobbyLinkProtocolFamily::GbSerialV1 => {
             matches!(session.game.system_id.as_str(), "gb" | "gbc")
         }
         LobbyLinkProtocolFamily::GbaMultiV1 => session.game.system_id == "gba",
+        LobbyLinkProtocolFamily::GbaMultiV2 => session.game.system_id == "gba",
     };
     let valid = room_status == RoomStatus::WaitingForGuest
         && room_max_players == MAX_LINK_CABLE_LOBBY_PLAYERS
@@ -895,12 +897,12 @@ mod tests {
 
     #[test]
     fn link_lobby_room_descriptor_requires_open_exact_mgba_provider_mapping() {
-        let gba = link_session("gba", "gba", "gba-sio-multi-v1");
+        let gba = link_session("gba", "gba", "gba-sio-multi-v2");
         validate_link_cable_room_descriptor(
             RoomStatus::WaitingForGuest,
             2,
             &gba,
-            LobbyLinkProtocolFamily::GbaMultiV1,
+            LobbyLinkProtocolFamily::GbaMultiV2,
             "mgba-link-runtime-v1",
         )
         .expect("exact GBA room accepted");
@@ -920,7 +922,7 @@ mod tests {
                 RoomStatus::Playing,
                 2,
                 &gba,
-                LobbyLinkProtocolFamily::GbaMultiV1,
+                LobbyLinkProtocolFamily::GbaMultiV2,
                 "mgba-link-runtime-v1",
             )
             .is_err()
@@ -930,7 +932,7 @@ mod tests {
                 RoomStatus::WaitingForGuest,
                 4,
                 &gba,
-                LobbyLinkProtocolFamily::GbaMultiV1,
+                LobbyLinkProtocolFamily::GbaMultiV2,
                 "mgba-link-runtime-v1",
             )
             .is_err()
@@ -940,7 +942,7 @@ mod tests {
                 RoomStatus::WaitingForGuest,
                 2,
                 &gba,
-                LobbyLinkProtocolFamily::GbaMultiV1,
+                LobbyLinkProtocolFamily::GbaMultiV2,
                 "other-runtime",
             )
             .is_err()
@@ -964,7 +966,7 @@ mod tests {
                 RoomStatus::WaitingForGuest,
                 2,
                 &controller,
-                LobbyLinkProtocolFamily::GbaMultiV1,
+                LobbyLinkProtocolFamily::GbaMultiV2,
                 "mgba-link-runtime-v1",
             )
             .is_err()
@@ -1007,7 +1009,7 @@ mod tests {
             session_kind: LobbyMultiplayerSessionKind::LinkCable,
             generation: 1,
             link_cable: Some(LobbyLinkCableView {
-                protocol_family: LobbyLinkProtocolFamily::GbaMultiV1,
+                protocol_family: LobbyLinkProtocolFamily::GbaMultiV2,
                 max_players: 2,
                 room_invite_code: Some("EF45-GH".to_string()),
                 cable_epoch: None,
@@ -1032,7 +1034,7 @@ mod tests {
                     contract_version: 1,
                     runtime_profile: "mgba-link-runtime-v1".to_string(),
                     core_build_id: "android-mgba-link-v1".to_string(),
-                    protocol_families: vec![LobbyLinkProtocolFamily::GbaMultiV1],
+                    protocol_families: vec![LobbyLinkProtocolFamily::GbaMultiV2],
                 }),
                 ..LobbyClientCapabilities::default()
             },

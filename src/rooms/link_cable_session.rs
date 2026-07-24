@@ -30,6 +30,7 @@ impl LinkCableSession {
         let protocol = match (link.system_family.as_str(), link.link_protocol.as_str()) {
             ("gb", "gb-serial-v1") => LinkCableWireProtocol::GbSerialV1,
             ("gba", "gba-sio-multi-v1") => LinkCableWireProtocol::GbaSioMultiV1,
+            ("gba", "gba-sio-multi-v2") => LinkCableWireProtocol::GbaSioMultiV2,
             _ => panic!("validated link-cable descriptor selected an unsupported wire protocol"),
         };
         let data_plane = LinkCableDataPlaneHandle::new(

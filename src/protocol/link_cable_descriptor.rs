@@ -36,7 +36,7 @@ pub enum LinkCableTransport {
 pub struct LinkCableDescriptor {
     /// Console family for the virtual cable: `gb` or `gba`.
     pub system_family: String,
-    /// Frozen event protocol: `gb-serial-v1` or `gba-sio-multi-v1`.
+    /// Negotiated event protocol, such as `gb-serial-v1` or `gba-sio-multi-v2`.
     pub link_protocol: String,
     /// Runtime compatibility key shared by clients that can exchange packets.
     pub runtime_profile: String,
@@ -75,7 +75,7 @@ impl LinkCableDescriptor {
     pub fn required_mode(&self) -> Option<LinkCableMode> {
         match (self.system_family.as_str(), self.link_protocol.as_str()) {
             ("gb", "gb-serial-v1") => Some(LinkCableMode::Serial),
-            ("gba", "gba-sio-multi-v1") => Some(LinkCableMode::Multi),
+            ("gba", "gba-sio-multi-v1" | "gba-sio-multi-v2") => Some(LinkCableMode::Multi),
             _ => None,
         }
     }
@@ -96,8 +96,13 @@ mod tests {
             descriptor("gba", "gba-sio-multi-v1").required_mode(),
             Some(LinkCableMode::Multi)
         );
+        assert_eq!(
+            descriptor("gba", "gba-sio-multi-v2").required_mode(),
+            Some(LinkCableMode::Multi)
+        );
         assert!(descriptor("gb", "gb-serial-v1").validate().is_ok());
         assert!(descriptor("gba", "gba-sio-multi-v1").validate().is_ok());
+        assert!(descriptor("gba", "gba-sio-multi-v2").validate().is_ok());
     }
 
     #[test]

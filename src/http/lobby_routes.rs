@@ -470,6 +470,7 @@ fn link_cable_capabilities(
         let family = match raw_family.trim() {
             "gbSerialV1" => LobbyLinkProtocolFamily::GbSerialV1,
             "gbaMultiV1" => LobbyLinkProtocolFamily::GbaMultiV1,
+            "gbaMultiV2" => LobbyLinkProtocolFamily::GbaMultiV2,
             _ => return Err(invalid_link_cable_capability()),
         };
         if !protocol_families.contains(&family) {
@@ -520,7 +521,7 @@ mod tests {
         query.link_cable_contract_version = Some(1);
         query.link_cable_runtime_profile = Some("mgba-link-runtime-v1".to_string());
         query.link_cable_core_build_id = Some("android-mgba-link-v1".to_string());
-        query.link_cable_protocol_families = Some("gbSerialV1,gbaMultiV1".to_string());
+        query.link_cable_protocol_families = Some("gbSerialV1,gbaMultiV1,gbaMultiV2".to_string());
 
         let link = lobby_capabilities(&query, crate::auth::ClientKind::Android)
             .expect("capabilities")
@@ -535,6 +536,7 @@ mod tests {
             vec![
                 LobbyLinkProtocolFamily::GbSerialV1,
                 LobbyLinkProtocolFamily::GbaMultiV1,
+                LobbyLinkProtocolFamily::GbaMultiV2,
             ],
         );
     }
